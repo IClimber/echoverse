@@ -37,3 +37,115 @@ test('workerOf: стовпець і його секції — в одного, �
   for (let cx = -10; cx < 10; cx++) for (let cy = -10; cy < 10; cy++) cnt[workerOf({ type: 'col', d: 0, n: 0, cx, cy }, 6)]++;
   for (const k of cnt) assert.ok(k >= 40 && k <= 100, `${cnt}`);
 });
+
+// ================= Щільна вершина, алокатор, еталон мешів =================
+import { hashStr, rng } from '../js/rng.js';
+import { lawsOf } from '../js/universe.js';
+import { genChunk, genCol, genSection, CS, SEC } from '../js/gen/chunk.js';
+import { chunkMesh, objPose } from '../js/gen/mesh.js';
+import { colSummary } from '../js/gen/job.js';
+import { packMesh, unpack, meshHash, meshDigest, regionOf, frameOf, packStats, VB, RS } from '../js/gen/pack.js';
+import { createAlloc } from '../js/arena.js';
+import { SPOTS, MESH_GOLD } from '../js/golden.js';
+import { LEVEL } from '../js/iso.js';
+
+test('щільна вершина: позиції з точністю 1/256, нормаль, колір, матеріал — точно', () => {
+  const L = lawsOf(hashStr('меш'), 0, 4);
+  let cx = 3;
+  while (Math.min(...genChunk(L, cx, 3).h) < 1) cx++;
+  const m = chunkMesh(genChunk(L, cx, 3), L).solid, o0 = packStats.overflow, P = packMesh(m, 16, 32, 8), u = unpack(P.buf), D = [16, 32, 8];
+  assert.equal(P.n, m.count);
+  assert.equal(packStats.overflow, o0);
+  for (let j = 0; j < P.n; j++) {
+    const v = m.idx[j];
+    for (let a = 0; a < 3; a++) {
+      const p = u.pos[j * 3 + a];
+      assert.ok(Math.abs(p - (m.pos[v * 3 + a] + D[a])) <= 1 / 256);
+      assert.ok(p >= P.bb[a] && p <= P.bb[a + 3]);
+      assert.equal(u.nor[j * 3 + a], m.nor[v * 3 + a]);
+      assert.equal(u.col[j * 3 + a], m.col[v * 3 + a]);
+    }
+    assert.equal(u.mat[j], m.mat[v]);
+  }
+});
+
+test('meshHash не залежить від порядку трикутників і повороту вершин', () => {
+  const L = lawsOf(hashStr('меш'), 0, 4), P = packMesh(chunkMesh(genChunk(L, 3, 3), L).solid), nt = P.n / 3;
+  const src = new Uint8Array(P.buf), dst = new Uint8Array(P.buf.byteLength), r = rng(7);
+  const order = [...Array(nt).keys()];
+  for (let i = nt - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
+  order.forEach((t, i) => {
+    const s = Math.floor(r() * 3);
+    for (let k = 0; k < 3; k++) dst.set(src.subarray((t * 3 + (k + s) % 3) * VB, (t * 3 + (k + s) % 3 + 1) * VB), (i * 3 + k) * VB);
+  });
+  assert.deepEqual(meshHash(dst.buffer), meshHash(P.buf));
+});
+
+test('регіони: regionOf, frameOf', () => {
+  assert.deepEqual(regionOf(-1, -1, -1), [-1, -1, -1]);
+  assert.deepEqual(regionOf(8, 15, 7), [1, 1, 0]);
+  assert.deepEqual(frameOf(9, -1, 9), [16, 112, 8]);
+});
+
+test('алокатор: first-fit, злиття, ріст, без перекриттів', () => {
+  const A = createAlloc(100);
+  assert.deepEqual([A.alloc(30), A.alloc(30), A.alloc(30)], [0, 30, 60]);
+  assert.equal(A.alloc(20), -1);
+  A.free(30, 30);
+  assert.equal(A.alloc(20), 30);
+  A.free(0, 30); A.free(30, 20); A.free(60, 30);
+  assert.equal(A.used, 0);
+  assert.equal(A.alloc(100), 0);
+  A.free(0, 100);
+  A.grow(200);
+  assert.equal(A.alloc(150), 0);
+  // випадкові alloc / free проти карти зайнятості
+  const B = createAlloc(4096), busy = new Uint8Array(4096), live = [], r = rng(1);
+  let sum = 0;
+  for (let i = 0; i < 2000; i++) {
+    if (live.length && r() < 0.45) {
+      const [off, n] = live.splice(Math.floor(r() * live.length), 1)[0];
+      B.free(off, n); busy.fill(0, off, off + n); sum -= n;
+    } else {
+      const n = 1 + Math.floor(r() * 64), off = B.alloc(n);
+      if (off < 0) continue;
+      for (let k = off; k < off + n; k++) { assert.equal(busy[k], 0); busy[k] = 1; }
+      live.push([off, n]); sum += n;
+    }
+    assert.equal(B.used, sum);
+  }
+});
+
+// Відбитки мешів поточного chunkMesh у кадрі регіону (MESH_GOLD): твердe, рідина, далекі рослини по секціях,
+// рослини зблизька — сумою на стовпець. Переробки мешів мусять їх зберегти
+export function meshDigests(seedText) {
+  const seed = hashStr(seedText), out = {};
+  SPOTS.forEach(([d, n, cx, cy], i) => {
+    const L = lawsOf(seed, d, n), col = genCol(L, cx, cy);
+    for (const o of col.obj) objPose(col, L, o);
+    const S = colSummary(col, L), [dx, dy] = frameOf(cx, cy, S.czLo), rz0 = Math.floor(S.czLo / RS);
+    let near = 0, nn = 0;
+    const czs = [];
+    for (let cz = S.czLo; cz <= S.czHi; cz++) czs.push(cz);
+    for (const cz of S.isl) if (!czs.includes(cz)) czs.push(cz);
+    for (const cz of czs) {
+      const sec = genSection(L, col, cz);
+      if (sec.empty) continue;
+      const m = chunkMesh({ cx, cy, h: col.h, bm: col.bm, v: col.v, b: sec.b, k0: sec.k0, nk: sec.nk, obj: col.obj, sp: col.sp }, L);
+      const dz = cz * SEC * LEVEL - rz0 * RS * SEC * LEVEL;
+      out[`${i}:${cz}:solid`] = meshDigest(meshHash(packMesh(m.solid, dx, dy, dz).buf));
+      if (m.liquid) out[`${i}:${cz}:liq`] = meshDigest(meshHash(packMesh(m.liquid, dx, dy, dz).buf));
+      if (m.far) out[`${i}:${cz}:far`] = meshDigest(meshHash(packMesh(m.far, dx, dy, dz).buf));
+      if (m.flora) { const h = meshHash(packMesh(m.flora, dx, dy, dz).buf); near = (near + h.sum) >>> 0; nn += h.n; }
+    }
+    out[`${i}:near`] = meshDigest({ n: nn, sum: near });
+  });
+  return out;
+}
+
+test('еталон мешів MESH_GOLD', () => {
+  const o0 = packStats.overflow, got = meshDigests('test');
+  if (!MESH_GOLD) { console.log(JSON.stringify(got)); return; }
+  assert.deepEqual(got, MESH_GOLD);
+  assert.equal(packStats.overflow, o0);
+});
