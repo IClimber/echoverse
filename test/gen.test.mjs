@@ -297,7 +297,7 @@ test('рослини: дерева не впритул (між стовбура�
   const seed = hashStr('ліс');
   let trees = 0, cover = 0;
   for (const n of [0, 20, 77]) for (let cx = 0; cx < 4; cx++) {
-    const L = lawsOf(seed, 0, n), C = genChunk(L, cx, 1), m = solidMask(C), at = new Set();
+    const L = lawsOf(seed, 0, n), C = genChunk(L, cx * 25, cx * 13 + 1), m = solidMask(C), at = new Set();
     for (const o of C.obj) {
       if (o.k === O_TREE) { trees++; at.add(o.x + ',' + o.y); }
       if (o.k === O_COVER) { cover++; assert.equal(m[o.y * CS + o.x], 0); }

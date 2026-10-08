@@ -25,13 +25,16 @@ const clamp01 = (v) => v < 0 ? 0 : v > 1 ? 1 : v;
 export const isWater = (t) => t === T_WATER;
 export const topZ = (h, t) => t === T_ICE ? SURF_Z : h * LEVEL;   // висота твердої поверхні (у водоймі — дна)
 
-// Висота 0…1 у точці (x, y)
+// Висота 0…1 у точці (x, y). fineE — внесок дрібниць в останню висоту (для клімату: сніг не за кожним горбиком)
+let fineE = 0;
 export function elevation(L, x, y) {
   const z = L.n;
   const c = noise3(L.sA, x / 192, y / 192, z * 0.01);         // материки: змінюються за ~100 стрибків
   const h = fbm3(L.sB, x / 48, y / 48, z * 0.025, 3);         // пагорби: за ~40, їх дрібні октави — швидше
   const f = noise3(L.sC, x / 12, y / 12, z * 0.15);           // дрібниці: помітно за кілька стрибків
-  return clamp01(0.5 + L.contrast * (L.wc * c + L.wh * h + L.wd * f) / (L.wc + L.wh + L.wd));
+  const sum = L.wc + L.wh + L.wd;
+  fineE = L.contrast * L.wd * f / sum;
+  return clamp01(0.5 + L.contrast * (L.wc * c + L.wh * h + L.wd * f) / sum);
 }
 
 // Чи r клітинки (x, y) — найменший серед сусідів у радіусі rs (дерева не стоять впритул: між стовбурами завжди прохід;
@@ -158,11 +161,11 @@ const DUNE_DIR = [[1, 0], [0.8, 0.6], [0.6, 0.8], [0, 1], [-0.6, 0.8], [-0.8, 0.
 // ov (варіант 0…65535), os (хеш вибору виду), magma (у жерлі вулкана — розпечена лава)
 export function tile(L, x, y, out = {}) {
   const px = x + 0.5, py = y + 0.5;           // центр клітинки: не на вузлах ґратки шуму
-  const T0 = L.temp + 0.6 * fbm3(L.sT, px / 300, py / 300, L.n * 0.03, 3);   // кілька октав: межі кліматів не прямі
-  const W = L.wet + 0.65 * fbm3(L.sW, px / 220, py / 220, L.n * 0.03, 3);
+  const T0 = L.temp + 0.6 * fbm3(L.sT, px / 800, py / 800, L.n * 0.03, 3);   // кілька октав: межі кліматів не прямі
+  const W = L.wet + 0.65 * fbm3(L.sW, px / 600, py / 600, L.n * 0.03, 3);
   const span = (1 - L.seaE) / L.amp;          // висота e на один блок
   out.o = 0; out.ov = 0; out.os = 0; out.v = 0; out.bm = 0; out.cold = T0 < -0.6; out.magma = false;
-  const e0 = elevation(L, px, py), e = carve(L, px, py, e0, W, span);
+  const e0 = elevation(L, px, py), fine = fineE / span, e = carve(L, px, py, e0, W, span);   // fine — дрібниці в блоках
   const mt = mountain(L, px, py), xb = peaks(L, px, py, out) + mt, ex = e + xb * span;
   if (ex < L.seaE) {
     // Дно: що далі від берега (нижче рівня моря), то глибше; біля берега — мілина (рівень SEA − 1)
@@ -178,7 +181,7 @@ export function tile(L, x, y, out = {}) {
     out.v = Math.min(255, Math.floor((L.seaE - ex) * 1200));
     const k = L.liquid.kind;
     out.t = k === L_DRY ? T_BED : k === L_WATER && out.cold ? T_ICE : T_WATER;
-    out.bed = out.h;
+    out.bed = out.h; out.T = T0;
     if (out.t === T_ICE) out.h = SEA;
     return out;
   }
@@ -186,11 +189,13 @@ export function tile(L, x, y, out = {}) {
   let h = e >= L.seaE ? SEA + 1 + Math.min(L.amp - 1, Math.floor((e - L.seaE) / (1 - L.seaE) * L.amp)) + Math.floor(xb)
     : SEA + 1 + Math.floor((ex - L.seaE) / span);
   if (h > KMAX - 64) h = KMAX - 64;
-  const T = T0 - 0.05 * (h - SEA - 1);        // вище — холодніше
+  // вище — холодніше; висота для клімату — неперервна (не округлена до блоків) і без дрібниць рельєфу, інакше біля
+  // снігової межі кожен горбик у 1–2 блоки — снігова пляма (і так само зі скелею вершин)
+  const hc = (ex - L.seaE) / span - fine, T = out.T = T0 - 0.05 * hc;
   let t;
   if (T < -0.45) t = T_SNOW;
   else if (xb - mt > 2 || out.magma) t = T_ROCK;              // вулкани й шпилі — скеля (гори — за висотою)
-  else if (h - SEA >= Math.max(6, L.amp * 0.72)) t = T_ROCK;
+  else if (hc + 1 >= Math.max(6, L.amp * 0.72)) t = T_ROCK;
   else if (h === SEA + 1 && ex - L.seaE < 0.025) t = T_SAND;
   else if (W < -0.35) t = T > 0.15 ? T_DESERT : T_DRY;
   else if (W < -0.05) t = T_DRY;
@@ -204,7 +209,7 @@ export function tile(L, x, y, out = {}) {
   // Біом: кліматична зона + варіант (окреме поле шуму з дрібнішою домішкою — межі не гладкі)
   const zone = t === T_SNOW ? Z_SNOW : t === T_ROCK ? Z_PEAK : t === T_SAND ? Z_BEACH : t === T_DESERT ? Z_DESERT : t === T_DRY ? Z_DRY
     : W > 0.45 && h - SEA <= 3 ? Z_WET : T < -0.15 ? Z_COLD : T > 0.35 ? Z_HOT : Z_TEMP;
-  const vb = noise2(L.sBv, px / L.bioS, py / L.bioS) + 0.3 * noise2(L.sBv ^ 0x3c6e, px / 40, py / 40);
+  const vb = noise2(L.sBv, px / L.bioS, py / L.bioS) + 0.2 * noise2(L.sBv ^ 0x3c6e, px / 70, py / 70);
   const bm = out.bm = pickBiome(L, zone, clamp01(0.5 + 0.8 * vb)), Bm = BIOMES[bm];
   // Предмети: кандидат — хеш клітинки від зерна глибини (не номера), поріг — густота цього всесвіту й біому.
   // Тож у сусідніх всесвітах ліс той самий, лише рідший чи густіший. Дерево — лише там, де r найменший серед сусідів

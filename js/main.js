@@ -15,7 +15,7 @@ import { debugText, fmtN } from './debug.js';
 import { animate } from './anim.js';
 import { clockStr } from './sky.js';
 import { weatherAt, localWeather } from './weather.js';
-import { T_SNOW, T_ICE, T_DESERT, T_DRY } from './gen/chunk.js';
+import { T_DESERT, T_DRY, tile } from './gen/chunk.js';
 import { createCamera, rotate, wheel, smooth, moveBasis, clipDist, camDist, facing, setYaw, basis, boxInView, ISO, THIRD, HEAD, FAR_R, SEAM } from './camera.js';
 import { FT } from './gen/far.js';
 
@@ -421,10 +421,24 @@ function boot() {
     return (g.rain = { x0, y0, d: g.d, n: g.n, at: now });
   }
 
+  // Сніг чи дощ: за температурою околу (середнє 3×3 точок з кроком COLD_S клітинок — погода не знає про горбики) з
+  // гістерезисом — біля межі опади не перемикаються на кожному кроці
+  const COLD_T = -0.45, COLD_H = 0.04, COLD_S = 12;
+  let coldC = null;
+  function coldAt(L, x, y) {
+    const fx = Math.floor(x), fy = Math.floor(y), c = coldC;
+    if (c && c.L === L && c.x === fx && c.y === fy) return c.cold;
+    let T = 0;
+    for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) T += tile(L, fx + i * COLD_S, fy + j * COLD_S).T / 9;
+    const was = c && c.L === L ? c.cold : T < COLD_T;
+    coldC = { L, x: fx, y: fy, cold: was ? T < COLD_T + COLD_H : T < COLD_T - COLD_H };
+    return coldC.cold;
+  }
+
   function draw(dt, now) {
     const ch = g.dev.charge, me = g.me, L = g.world.laws(g.d, g.n);
     const W = weatherAt(L, g.clock), col = me.placed ? g.world.column(g.d, g.n, Math.floor(me.x), Math.floor(me.y)) : null;
-    const loc = localWeather(L, W, !!col && (col.t === T_SNOW || col.t === T_ICE), !!col && col.t === T_DESERT, !!col && (col.t === T_DESERT || col.t === T_DRY));
+    const loc = localWeather(L, W, me.placed && coldAt(L, me.x, me.y), !!col && col.t === T_DESERT, !!col && (col.t === T_DESERT || col.t === T_DRY));
     const a = ch ? ch.t / CHARGE * (0.35 + 0.35 * Math.sin(now / 45)) : 0;
     const under = me.placed ? support(g.world.probe(g.d, g.n), me.x, me.y, me.z + 0.01) : null;
     const anim = animate(me, dt, now, physOf(L).speed * (me.run ? SPRINT * 0.85 : 1));
