@@ -214,28 +214,33 @@ export const BLOCK_NAMES = ['повітря', 'рідина', 'лід', 'піс�
 export const solidB = (b) => b >= B_ICE;                 // тверде (лід теж); рідина й повітря — ні
 const TOP_BLOCK = [B_BED, B_ICE, B_SAND, B_GRASS, B_DRY, B_DESERT, B_SNOW, B_ROCK, B_MUD];   // за типом поверхні T_*
 const SUB_BLOCK = [B_SOIL, B_SOIL, B_SANDSTONE, B_SOIL, B_SOIL, B_SANDSTONE, B_SOIL, B_STONE, B_SOIL];
-// Індекс блоку (x, y ∈ −1…CS, k ∈ 0…H−1) у масиві чанка: стовпець за стовпцем
-export const bi = (x, y, k) => ((y + 1) * CW + x + 1) * H + k;
-const ISL0 = 44, ISL1 = 84, ISLC = 63;                   // смуга висот ширяючих островів (блоки)
+// Об'єм блоків (секція чи стовпець): x, y ∈ −1…CS (рамка), k ∈ −1…nk (рамка знизу й згори); індекс — стовпець
+// за стовпцем. k — локальний (від k0 об'єму)
+export const bv = (x, y, k, nk) => ((y + 1) * CW + x + 1) * (nk + 2) + k + 1;
+export const bi = (x, y, k) => bv(x, y, k, H);           // стовпець 0…H−1 (тести, відбитки)
+export const SEC = 16;                                    // секція — 16×16×16 блоків
+const ISL0 = 44, ISL1 = 84, ISLC = 63;                    // смуга висот ширяючих островів (блоки)
 
-// Груба ґратка 3D-шуму (крок G блоків) над прямокутником клітинок: чотири поля — два для печер (тунель — там, де
-// обидва близькі до нуля), нависання, острови. Значення між вузлами — трилінійна інтерполяція (точна арифметика)
+// Груба ґратка 3D-шуму (крок G блоків, вузли — на спільній світовій сітці) над прямокутником клітинок і діапазоном
+// висот kA…kB: чотири поля — два для печер (тунель — там, де обидва близькі до нуля), нависання, острови. Значення між
+// вузлами — трилінійна інтерполяція (точна арифметика; від положення ґратки не залежить)
 const G = 4;
-function lattice(L, x0, y0, x1, y1) {
-  const gx0 = Math.floor(x0 / G), gy0 = Math.floor(y0 / G), nx = Math.floor(x1 / G) - gx0 + 2, ny = Math.floor(y1 / G) - gy0 + 2, nk = H / G + 1;
+function lattice(L, x0, y0, x1, y1, kA = 0, kB = H) {
+  const gx0 = Math.floor(x0 / G), gy0 = Math.floor(y0 / G), nx = Math.floor(x1 / G) - gx0 + 2, ny = Math.floor(y1 / G) - gy0 + 2;
+  const q0 = Math.floor(kA / G), nk = Math.floor(kB / G) - q0 + 2;
   const F = new Float64Array(nx * ny * nk * 4), isl = L.islands > 0.02;
   for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) for (let q = 0; q < nk; q++) {
-    const x = (gx0 + i) * G, y = (gy0 + j) * G, k = q * G, o = ((j * nx + i) * nk + q) * 4;
+    const x = (gx0 + i) * G, y = (gy0 + j) * G, k = (q0 + q) * G, o = ((j * nx + i) * nk + q) * 4;
     F[o] = noise3(L.sK, x / 28, y / 28, k / 14);
     F[o + 1] = noise3(L.sK2, x / 28, y / 28, k / 14);
     F[o + 2] = noise3(L.sV, x / 20, y / 20, k / 10);
     F[o + 3] = isl && k >= ISL0 - G && k <= ISL1 + G ? 0.85 * noise3(L.sI, x / 22, y / 22, k / 8) + 0.35 * noise3(L.sI ^ 0x5bd1, x / 9, y / 9, k / 5) : -9;
   }
-  return { F, gx0, gy0, nx, nk };
+  return { F, gx0, gy0, q0, nx, nk };
 }
 function sample(Lt, f, x, y, k) {
-  const gx = x / G - Lt.gx0, gy = y / G - Lt.gy0, gk = k / G;
-  const i = Math.floor(gx), j = Math.floor(gy), q = Math.min(Lt.nk - 2, Math.floor(gk));
+  const gx = x / G - Lt.gx0, gy = y / G - Lt.gy0, gk = k / G - Lt.q0;
+  const i = Math.floor(gx), j = Math.floor(gy), q = Math.floor(gk);
   const u = gx - i, v = gy - j, w = gk - q, nx = Lt.nx, nk = Lt.nk, F = Lt.F;
   const at = (a, b, c) => F[(((j + b) * nx + i + a) * nk + q + c) * 4 + f];
   const l = (a, b, t) => a + (b - a) * t;
@@ -243,86 +248,137 @@ function sample(Lt, f, x, y, k) {
     l(l(at(0, 0, 1), at(1, 0, 1), u), l(at(0, 1, 1), at(1, 1, 1), u), v), w);
 }
 
-// Стовпець (x, y) у масив B з позиції o (H блоків знизу вгору). c — поверхня (tile), Lt — ґратка
-function column(L, Lt, x, y, c, B, o) {
-  const basin = c.t === T_WATER || c.t === T_ICE || c.t === T_BED;
-  const px = x + 0.5, py = y + 0.5, top = c.magma ? B_MAGMA : TOP_BLOCK[c.t], sub = c.magma ? B_MAGMA : SUB_BLOCK[c.t];
-  if (basin) {                                            // водойма: дно, рідина, лід зверху; печер і нависань не чіпаємо
-    for (let k = 0; k < H; k++) B[o + k] = k < c.bed - 2 ? B_STONE : k < c.bed - 1 ? B_SOIL : k < c.bed ? top === B_ICE ? B_BED : top : B_AIR;
-    if (c.t !== T_BED) for (let k = c.bed; k < SEA; k++) B[o + k] = c.t === T_ICE && k === SEA - 1 ? B_ICE : B_LIQ;
-  } else {
-    const ov = L.overhang * 5, cr = L.caveW * (0.5 + L.caves), cr2 = cr * cr;
-    for (let k = 0; k < H; k++) {
-      let s = k < c.h;
-      // нависання й арки: поверхня зсувається 3D-шумом поблизу (тож профіль схилу буває не монотонним)
-      if (ov > 0.2 && k > c.h - 7 && k < c.h + 7) s = k < c.h + sample(Lt, 2, px, py, k) * ov;
-      // печери-тунелі: обидва поля близькі до нуля; не біля самого дна світу
-      if (s && k > 1 && k < c.h + 1) { const a = sample(Lt, 0, px, py, k), b = sample(Lt, 1, px, py, k); if (a * a + b * b < cr2) s = false; }
-      B[o + k] = s ? B_STONE : B_AIR;
-    }
-    // ширяючі острови: краплі щільності в смузі висот
-    if (L.islands > 0.02) {
-      const thr = 0.66 - 0.3 * L.islands;
-      for (let k = ISL0; k <= ISL1; k++) {
-        const dz = (k - ISLC) / 15;
-        if (B[o + k] === B_AIR && sample(Lt, 3, px, py, k) - dz * dz > thr) B[o + k] = B_FLOAT;
-      }
-    }
-    // Матеріали зверху вниз: шар, що починається біля поверхні (чи на острові), — верхній блок поверхні, 2 блоки
-    // підґрунтя, далі камінь; стеля й дно печер — камінь
-    let depth = 0, surf = false, sky = -1;
-    for (let k = H - 1; k >= 0; k--) {
-      if (B[o + k] === B_AIR) { depth = 0; continue; }
-      if (depth === 0) surf = k >= c.h - 7;
-      if (sky < 0 && k < ISL0) sky = k;
-      const deep = B[o + k] === B_FLOAT ? B_FLOAT : B_STONE;   // острів — з левітуючої породи
-      B[o + k] = surf ? (depth === 0 ? top : depth < 3 ? sub : deep) : deep;
-      depth++;
-    }
-    // Нависання біля берега прогризає суходіл нижче рівня моря: відкрита небу западина — під рідиною, як водойма
-    // (дно — глина; холодна вода — лід зверху). Інакше рідина обривалася б стінкою над сухою ямою
-    if (sky < SEA - 1 && L.liquid.kind !== L_DRY) {
-      if (sky >= 0) B[o + sky] = B_BED;
-      for (let k = sky + 1; k < SEA; k++) B[o + k] = c.cold && L.liquid.kind === L_WATER && k === SEA - 1 ? B_ICE : B_LIQ;
-    }
+// Сира щільність суходолу на висоті k: 0 — повітря, 1 — ґрунт, 2 — острів. Нижче світу (k < 0) — камінь
+function raw(L, Lt, c, px, py, k) {
+  if (k < 0) return 1;
+  let s = k < c.h;
+  // нависання й арки: поверхня зсувається 3D-шумом поблизу (тож профіль схилу буває не монотонним)
+  const ov = L.overhang * 5;
+  if (ov > 0.2 && k > c.h - 7 && k < c.h + 7) s = k < c.h + sample(Lt, 2, px, py, k) * ov;
+  // печери-тунелі: обидва поля близькі до нуля; не біля самого дна світу
+  if (s && k > 1 && k < c.h + 1) {
+    const cr = L.caveW * (0.5 + L.caves), a = sample(Lt, 0, px, py, k), b = sample(Lt, 1, px, py, k);
+    if (a * a + b * b < cr * cr) s = false;
   }
+  if (s) return 1;
+  // ширяючі острови: краплі щільності в смузі висот
+  if (L.islands > 0.02 && k >= ISL0 && k <= ISL1) {
+    const dz = (k - ISLC) / 15;
+    if (sample(Lt, 3, px, py, k) - dz * dz > 0.66 - 0.3 * L.islands) return 2;
+  }
+  return 0;
 }
+const isBasin = (c) => c.t === T_WATER || c.t === T_ICE || c.t === T_BED;
 
-// Відкритий небу верхній твердий блок стовпця (для предметів, приземлення); −1 — немає
-export function surfaceK(B, o, below = H) {
-  for (let k = Math.min(H, below) - 1; k >= 0; k--) if (B[o + k] !== B_AIR) return k;
+// «Небо» стовпця суходолу: найвищий ґрунт нижче смуги островів біля поверхні (−1 — немає). Нижче моря й під
+// відкритим небом — западина під рідиною
+function skyOf(L, Lt, c, px, py) {
+  for (let k = Math.min(ISL0 - 1, c.h + 7); k >= 0; k--) if (raw(L, Lt, c, px, py, k) === 1) return k;
   return -1;
 }
 
-// Стовпець окремо (місце появи, перевірки): {c (поверхня), B (H блоків)}
-export function genColumn(L, x, y) {
-  const c = tile(L, x, y), B = new Uint8Array(H);
-  column(L, lattice(L, x, y, x, y), x, y, c, B, 0);
-  return { c, B };
+// Блоки клітинки c на висотах k0…k0+n−1 у масив out (з позиції o, крок 1). sky — skyOf. Матеріали: шар, що
+// починається біля поверхні (чи на острові), — верхній блок поверхні, 2 блоки підґрунтя, далі камінь; стеля й дно
+// печер — камінь; острів — з левітуючої породи; западина нижче моря — під рідиною (дно — глина, холодна вода — лід)
+function fillCell(L, Lt, c, px, py, sky, k0, n, out, o) {
+  const top = c.magma ? B_MAGMA : TOP_BLOCK[c.t], sub = c.magma ? B_MAGMA : SUB_BLOCK[c.t];
+  if (isBasin(c)) {                                       // водойма: дно, рідина, лід зверху; печер і нависань не чіпаємо
+    for (let i = 0; i < n; i++) {
+      const k = k0 + i;
+      out[o + i] = k < c.bed - 2 ? B_STONE : k < c.bed - 1 ? B_SOIL : k < c.bed ? top === B_ICE ? B_BED : top
+        : c.t !== T_BED && k < SEA ? (c.t === T_ICE && k === SEA - 1 ? B_ICE : B_LIQ) : B_AIR;
+    }
+    return;
+  }
+  const r = new Uint8Array(n + 3);
+  for (let i = 0; i < n + 3; i++) r[i] = raw(L, Lt, c, px, py, k0 + i);
+  const pit = sky < SEA - 1 && L.liquid.kind !== L_DRY;
+  for (let i = 0; i < n; i++) {
+    const k = k0 + i;
+    let b = B_AIR;
+    if (r[i]) {
+      const deep = r[i] === 2 ? B_FLOAT : B_STONE;
+      let d = 0;
+      while (d < 3 && r[i + d + 1]) d++;
+      b = d === 3 ? deep : k + d >= c.h - 7 ? (d === 0 ? top : sub) : deep;
+    }
+    if (pit) { if (k === sky) b = B_BED; else if (k > sky && k < SEA) b = c.cold && L.liquid.kind === L_WATER && k === SEA - 1 ? B_ICE : B_LIQ; }
+    out[o + i] = b;
+  }
 }
 
-// Чанк (cx, cy): блоки CW×CW×H з рамкою (індекс — bi), поверхня клітинок h / t / v (індекс — ci; h — рівень
-// поверхні з tile, для мінікарт і клімату), предмети — лише у своїх клітинках і лише на відкритій поверхні
-export function genChunk(L, cx, cy) {
-  const h = new Uint8Array(CW * CW), t = new Uint8Array(CW * CW), v = new Uint8Array(CW * CW), bm = new Uint8Array(CW * CW), b = new Uint8Array(CW * CW * H);
-  const obj = [], sp = [], spi = new Map(), c = {}, x0 = cx * CS, y0 = cy * CS, Lt = lattice(L, x0 - 1, y0 - 1, x0 + CS, y0 + CS);
-  const spIndex = (g) => { let i = spi.get(g.id); if (i === undefined) { i = sp.length; sp.push(g); spi.set(g.id, i); } return i; };
+// Відкритий небу верхній непорожній блок клітинки нижче за below (предмети, приземлення); −1 — немає
+function surfaceAt(L, Lt, c, px, py, sky, below) {
+  const one = new Uint8Array(1);
+  for (let k = below - 1; k >= 0; k--) { fillCell(L, Lt, c, px, py, sky, k, 1, one, 0); if (one[0] !== B_AIR) return k; }
+  return -1;
+}
+
+// Стовпець окремо (місце появи, перевірки): {c (поверхня), at(k) — блок на висоті k, B (блоки 0…H−1)}
+export function genColumn(L, x, y) {
+  const c = tile(L, x, y), px = x + 0.5, py = y + 0.5, Lt = lattice(L, x, y, x, y, -8, Math.max(H, c.h + 16));
+  const sky = isBasin(c) ? -1 : skyOf(L, Lt, c, px, py), B = new Uint8Array(H), one = new Uint8Array(1);
+  fillCell(L, Lt, c, px, py, sky, 0, H, B, 0);
+  return { c, B, at: (k) => { if (k < 0) return B_STONE; fillCell(L, Lt, c, px, py, sky, k, 1, one, 0); return one[0]; } };
+}
+
+// Стовпець чанка (cx, cy): клітинки (tile) з рамкою — поверхня h / t / v / bm (індекс ci; h — рівень поверхні),
+// «небо» кожної клітинки, ґратка шуму, предмети (лише у своїх клітинках і лише на відкритій поверхні: z — блок основи)
+export function genCol(L, cx, cy) {
+  const n = CW * CW, h = new Int16Array(n), t = new Uint8Array(n), v = new Uint8Array(n), bm = new Uint8Array(n), sky = new Int16Array(n);
+  const cells = new Array(n), x0 = cx * CS, y0 = cy * CS;
+  let hmin = Infinity, hmax = -Infinity;
   for (let y = -1; y <= CS; y++) for (let x = -1; x <= CS; x++) {
-    tile(L, x0 + x, y0 + y, c);
-    const i = ci(x, y), o = bi(x, y, 0);
-    h[i] = c.h; t[i] = c.t; v[i] = c.v; bm[i] = c.bm;
-    column(L, Lt, x0 + x, y0 + y, c, b, o);
-    if (c.o && x >= 0 && y >= 0 && x < CS && y < CS) {
-      const k = surfaceK(b, o, c.h + 7);                   // предмет стоїть на верхньому твердому блоці біля поверхні
-      if (k < 0 || !solidB(b[o + k]) || b[o + k + 1] !== B_AIR || (c.o !== O_COVER && b[o + k + 2] !== B_AIR)) continue;
-      // вид: з набору області в цьому біомі (каміння — стиль області)
-      const S = speciesOf(L, regionAt(L, x0 + x, y0 + y), c.bm);
-      const g = c.o === O_TREE ? S.big.length && pickSpecies(S.big, c.os) : c.o === O_COVER ? pickSpecies(S.small, c.os) : S.stone;
-      if (!g) continue;
-      obj.push({ x, y, k: c.o, v: c.ov, s: spIndex(g), z: k + 1, st: c.st });
-    }
+    const c = tile(L, x0 + x, y0 + y), i = ci(x, y);
+    cells[i] = c; h[i] = c.h; t[i] = c.t; v[i] = c.v; bm[i] = c.bm;
+    if (c.h < hmin) hmin = c.h;
+    if (c.h > hmax) hmax = c.h;
   }
-  return { d: L.d, n: L.n, cx, cy, h, t, v, bm, b, obj, sp };
+  const Lt = lattice(L, x0 - 1, y0 - 1, x0 + CS, y0 + CS, Math.min(-8, hmin - 16), Math.max(H, hmax + 16));
+  const obj = [], sp = [], spi = new Map();
+  const spIndex = (g) => { let i = spi.get(g.id); if (i === undefined) { i = sp.length; sp.push(g); spi.set(g.id, i); } return i; };
+  const one = new Uint8Array(3);
+  for (let y = -1; y <= CS; y++) for (let x = -1; x <= CS; x++) {
+    const i = ci(x, y), c = cells[i], px = x0 + x + 0.5, py = y0 + y + 0.5;
+    sky[i] = isBasin(c) ? -1 : skyOf(L, Lt, c, px, py);
+    if (!c.o || x < 0 || y < 0 || x >= CS || y >= CS) continue;
+    const k = surfaceAt(L, Lt, c, px, py, sky[i], c.h + 7);   // предмет стоїть на верхньому твердому блоці біля поверхні
+    if (k < 0) continue;
+    fillCell(L, Lt, c, px, py, sky[i], k, 3, one, 0);
+    if (!solidB(one[0]) || one[1] !== B_AIR || (c.o !== O_COVER && one[2] !== B_AIR)) continue;
+    // вид: з набору області в цьому біомі (каміння — стиль області)
+    const S = speciesOf(L, regionAt(L, x0 + x, y0 + y), c.bm);
+    const g = c.o === O_TREE ? S.big.length && pickSpecies(S.big, c.os) : c.o === O_COVER ? pickSpecies(S.small, c.os) : S.stone;
+    if (!g) continue;
+    obj.push({ x, y, k: c.o, v: c.ov, s: spIndex(g), z: k + 1, st: c.st });
+  }
+  return { d: L.d, n: L.n, cx, cy, h, t, v, bm, sky, cells, Lt, obj, sp, hmin, hmax };
+}
+
+// Блоки стовпця col на висотах k0…k0+nk−1 (з рамкою з усіх боків, індекс bv): {b, k0, nk}
+export function genBlocks(L, col, k0, nk) {
+  const b = new Uint8Array(CW * CW * (nk + 2)), x0 = col.cx * CS, y0 = col.cy * CS;
+  const Lt = k0 - 1 >= col.Lt.q0 * G && k0 + nk + 4 <= (col.Lt.q0 + col.Lt.nk - 1) * G ? col.Lt
+    : lattice(L, x0 - 1, y0 - 1, x0 + CS, y0 + CS, k0 - 1, k0 + nk + 4);
+  for (let y = -1; y <= CS; y++) for (let x = -1; x <= CS; x++) {
+    const i = ci(x, y);
+    fillCell(L, Lt, col.cells[i], x0 + x + 0.5, y0 + y + 0.5, col.sky[i], k0 - 1, nk + 2, b, bv(x, y, -1, nk));
+  }
+  return { b, k0, nk };
+}
+
+// Чанк (cx, cy) стовпцем 0…H−1 (тести, відбитки, стенди): поверхня, блоки (індекс bi), предмети
+export function genChunk(L, cx, cy) {
+  const col = genCol(L, cx, cy), V = genBlocks(L, col, 0, H);
+  return { d: L.d, n: L.n, cx, cy, h: col.h, t: col.t, v: col.v, bm: col.bm, b: V.b, k0: 0, nk: H, obj: col.obj, sp: col.sp };
+}
+
+// Секція (cx, cy, cz) стовпця col: блоки SEC заввишки; порожня (усе повітря) — {empty: true}
+export function genSection(L, col, cz) {
+  const V = genBlocks(L, col, cz * SEC, SEC);
+  let any = false;
+  for (let i = 0; i < V.b.length; i++) if (V.b[i] !== B_AIR) { any = true; break; }
+  return any ? V : { empty: true, k0: V.k0, nk: SEC };
 }
 
 // Клітинки з предметом, що заважає ходити (дерево, камінь на землі)
@@ -332,14 +388,14 @@ export function solidMask(C) {
   return m;
 }
 
-// Відбиток чанка (свої клітинки й предмети) — для тестів і F3: однаковий у всіх рушіях
+// Відбиток чанка (свої клітинки, блоки об'єму й предмети) — для тестів і F3: однаковий у всіх рушіях
 export function digest(C) {
   let a = 0x811c9dc5;
   const add = (x) => { a = Math.imul(a ^ x, 16777619); };
   for (let y = 0; y < CS; y++) for (let x = 0; x < CS; x++) {
-    const i = ci(x, y), o = bi(x, y, 0);
+    const i = ci(x, y);
     add(C.h[i]); add(C.t[i]); add(C.v[i]);
-    for (let k = 0; k < H; k++) add(C.b[o + k]);
+    if (C.b) for (let k = 0; k < C.nk; k++) add(C.b[bv(x, y, k, C.nk)]);
   }
   for (const o of C.obj) { add(o.x | o.y << 4); add(o.k); add(o.v); add(C.sp[o.s].id); add(o.z); add(o.st || 0); }
   return (a >>> 0).toString(16).padStart(8, '0');

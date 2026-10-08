@@ -1,14 +1,15 @@
 // gen/client.js — черга запитів до генератора з пріоритетами. У worker — не більше IN_FLIGHT запитів одночасно,
-// решта чекає в черзі: так новий важливіший запит (чанк під ногами) не стоїть за сотнею далеких.
-// Немає module worker — генерує в головному потоці (по кілька чанків за кадр).
+// решта чекає в черзі: так новий важливіший запит (секція під ногами) не стоїть за сотнею далеких.
+// Запит q = {type: 'col' (зведення стовпця) | 'sec' (секція з мешем), d, n, cx, cy, cz}.
+// Немає module worker — генерує в головному потоці (по кілька робіт за кадр).
 import { lawsOf } from '../universe.js';
-import { genChunk } from './chunk.js';
-import { chunkMesh } from './mesh.js';
+import { runJob } from './job.js';
 
 const IN_FLIGHT = 3;
 
 export function createGen(seed, onDone) {
-  const queue = new Map();          // key → {d, n, cx, cy, pri}
+  const queue = new Map();          // key → {q, pri}
+  const cache = new Map();          // стовпці (без worker)
   const busy = new Map();           // id → [key, запит]
   let worker = null, nextId = 1;
   try {
@@ -16,7 +17,7 @@ export function createGen(seed, onDone) {
     worker.onmessage = (e) => {
       const b = busy.get(e.data.id);
       busy.delete(e.data.id);
-      if (b) onDone(b[0], e.data.c, e.data.m, e.data.ms);
+      if (b) onDone(b[0], b[1].q, e.data.data, e.data.mesh, e.data.ms);
       pump();
     };
     worker.onerror = (e) => {
@@ -35,18 +36,18 @@ export function createGen(seed, onDone) {
       queue.delete(best[0]);
       const id = nextId++, q = best[1];
       busy.set(id, best);
-      worker.postMessage({ id, seed, d: q.d, n: q.n, cx: q.cx, cy: q.cy });
+      worker.postMessage({ id, seed, q: q.q });
     }
   }
   const inBusy = (key) => { for (const b of busy.values()) if (b[0] === key) return true; return false; };
 
   return {
-    // Запит чанка; повторний — лише оновлює пріоритет (менше — раніше)
-    want(key, d, n, cx, cy, pri) {
-      const q = queue.get(key);
-      if (q) { q.pri = pri; return; }
+    // Запит; повторний — лише оновлює пріоритет (менше — раніше)
+    want(key, q, pri) {
+      const e = queue.get(key);
+      if (e) { e.pri = pri; return; }
       if (inBusy(key)) return;
-      queue.set(key, { d, n, cx, cy, pri });
+      queue.set(key, { q, pri });
     },
     // Прибрати з черги все, чого вже не треба
     keepOnly(keys) { for (const k of queue.keys()) if (!keys.has(k)) queue.delete(k); },
@@ -58,8 +59,8 @@ export function createGen(seed, onDone) {
         let best = null;
         for (const [k, q] of queue) if (!best || q.pri < best[1].pri) best = [k, q];
         queue.delete(best[0]);
-        const q = best[1], t1 = performance.now(), L = lawsOf(seed, q.d, q.n), c = genChunk(L, q.cx, q.cy);
-        onDone(best[0], c, chunkMesh(c, L), performance.now() - t1);
+        const q = best[1].q, t1 = performance.now(), r = runJob(lawsOf(seed, q.d, q.n), q, cache);
+        onDone(best[0], q, r.data, r.mesh || null, performance.now() - t1);
       }
     },
     get pending() { return queue.size + busy.size; },

@@ -20,14 +20,14 @@ export function debugText(g, perf, meshCount, cam) {
   const { world, rec, me } = g, L = world.laws(g.d, g.n);
   const tx = Math.floor(me.x), ty = Math.floor(me.y), c = world.column(g.d, g.n, tx, ty);
   const kf = Math.floor((me.z ?? 0) / LEVEL + 1e-4), under = world.block(g.d, g.n, tx, ty, kf - 1);
-  const cx = Math.floor(tx / CS), cy = Math.floor(ty / CS), C = world.chunk(g.d, g.n, cx, cy), st = world.stats(), ph = physOf(L);
+  const cx = Math.floor(tx / CS), cy = Math.floor(ty / CS), C = world.col(g.d, g.n, cx, cy), st = world.stats(), ph = physOf(L);
   return [
     `зерно      «${rec.seedText}» (${rec.seed})  генератор v${rec.gen}`,
     `адреса     глибина ${g.d}, всесвіт ${fmtN(g.n)}`,
     `позиція    ${me.x.toFixed(2)}, ${me.y.toFixed(2)}  z ${me.z.toFixed(2)}${me.air ? '  у повітрі' : ''}`,
     `гравітація ${L.grav.toFixed(2)} g: стрибок ${(jumpHeight(L.grav) / LEVEL).toFixed(1)} рівня, крок угору ${ph.up}, хода ×${ph.speed.toFixed(2)}`,
     `клітинка   ${c ? `поверхня ${c.h}, ${TYPE_NAMES[c.t]}; під ногами — ${under >= 0 ? BLOCK_NAMES[under] : '—'} (блок ${kf - 1})${me.ground ? '' : me.swim ? ', пливе' : ', у повітрі'}` : '—'}`,
-    `чанк       ${cx}, ${cy}  відбиток ${C ? digest(C) : '—'}`,
+    `чанк       ${cx}, ${cy}, секція ${Math.floor(kf / 16)}  відбиток стовпця ${C ? digest(C) : '—'}`,
     `закони     море ${L.seaE.toFixed(2)}, рельєф ${L.amp}, t ${L.temp.toFixed(2)}, вологість ${L.wet.toFixed(2)}`,
     `рідина     ${L.liquid.name}, ${L.liquid.tC} °C, густина ${L.liquid.density}${L.liquid.swim ? ', тримає' : ', не тримає'}${L.liquid.danger ? ' — небезпечна: ' + L.liquid.danger : ''}${me.swim ? '  (пливе)' : ''}`,
     `біом       ${c ? BIOMES[c.bm].name : '—'}  (у всесвіті: ${L.biomes.flat().map(([id]) => BIOMES[id].name).filter((v, i, a) => a.indexOf(v) === i).length} біомів)`,
@@ -42,6 +42,6 @@ export function debugText(g, perf, meshCount, cam) {
     `погода     ${WEATHER_NAMES[weatherAt(L, g.clock || 0).kind]} (зміна раз на ${L.air.segMin.toFixed(1)} хв; ${Object.entries(L.air.w).filter(([, v]) => v > 0.05).map(([k, v]) => k + ' ' + v.toFixed(1)).join(', ')})`,
     `камера     ${cam.mode === 'iso' ? `згори, масштаб ${cam.zoom.toFixed(2)}` : `третя особа, відстань ${cam.dist.toFixed(1)}`}, азимут ${Math.round(cam.yaw * 180 / Math.PI) % 360}°, видно чанків ${g.view ? g.view.chunks.length : 0}`,
     `кадр       ${perf.fps.toFixed(0)} к/с, CPU ${perf.cpu.toFixed(2)} мс`,
-    `генерація  ${st.genMs.toFixed(2)} мс/чанк, у пам'яті ${st.chunks}, мешів ${meshCount}, у черзі ${st.pending}`,
+    `генерація  ${st.genMs.toFixed(2)} мс/робота, стовпців ${st.cols}, секцій ${st.secs}, мешів ${meshCount}, у черзі ${st.pending}`,
   ].join('\n');
 }

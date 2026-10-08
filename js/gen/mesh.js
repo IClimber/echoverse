@@ -2,7 +2,7 @@
 // позиції (float32 ×3), нормалі (int8 ×3), кольори (uint8 ×3), матеріали (uint8 — шар текстури), індекси.
 // Світло, туман і текстуру (за матеріалом, координати — проєкцією на площину грані) додає шейдер.
 // Земля — з блоків: грань лише між твердим і порожнім.
-import { CS, ci, bi, H, O_TREE, O_FLOAT, O_COVER, solidB, B_AIR, B_LIQ, B_ICE, B_SAND, B_GRASS, B_DRY, B_DESERT, B_SNOW, B_ROCK, B_BED, B_MUD, B_SOIL, B_STONE, B_SANDSTONE, B_MAGMA, B_FLOAT } from './chunk.js';
+import { CS, ci, bv, H, O_TREE, O_FLOAT, O_COVER, solidB, B_AIR, B_LIQ, B_ICE, B_SAND, B_GRASS, B_DRY, B_DESERT, B_SNOW, B_ROCK, B_BED, B_MUD, B_SOIL, B_STONE, B_SANDSTONE, B_MAGMA, B_FLOAT } from './chunk.js';
 import { L_LAVA, SEA, gravityAt } from '../universe.js';
 import { LEVEL } from '../iso.js';
 import { template, place, footprint } from './plants.js';
@@ -72,6 +72,8 @@ export class Mesh {
 const DIRS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
 export function chunkMesh(C, L) {
   const M = new Mesh(), W = new Mesh(), P = L.pal, B = C.b;
+  // об'єм: висоти K0…K0+NK−1 (локальні k від 0), рамка — k = −1 і k = NK
+  const NK = C.nk ?? H, K0 = C.k0 ?? 0, bi = (x, y, k) => bv(x, y, k, NK);
   const COL = [], TOPM = [], SIDEM = [];
   COL[B_ICE] = P.ice; COL[B_SAND] = P.sand; COL[B_GRASS] = P.lush; COL[B_DRY] = P.dry; COL[B_DESERT] = P.desert; COL[B_SNOW] = P.snow;
   COL[B_ROCK] = P.rock; COL[B_BED] = P.bed; COL[B_MUD] = shade(P.bed, 1.15); COL[B_SOIL] = P.soil; COL[B_STONE] = shade(P.rock, 0.82);
@@ -102,9 +104,9 @@ export function chunkMesh(C, L) {
   };
   // Вигляд грані: [матеріал, колір]; глибоко під поверхнею клітинки (печери) — темніше, сходинками
   const look = (b, d, x, y, k) => {
-    const hc = C.h[ci(x, y)], dark = k < hc - 3 ? Math.max(0.45, 1 - 0.12 * Math.floor((hc - 3 - k) / 3 + 1)) : 1;
+    const hc = C.h[ci(x, y)] - K0, dark = k < hc - 3 ? Math.max(0.45, 1 - 0.12 * Math.floor((hc - 3 - k) / 3 + 1)) : 1;
     let m, c;
-    if (d === 4) { m = TOPM[b]; c = b === B_BED ? shade(COL[b], 0.62 + 0.38 * k / SEA) : colOf(b, x, y); }
+    if (d === 4) { m = TOPM[b]; c = b === B_BED ? shade(COL[b], 0.62 + 0.38 * Math.max(0, Math.min(1, (k + K0) / SEA))) : colOf(b, x, y); }
     else if (d === 5) { m = SIDEM[b]; c = shade(COL[b === B_GRASS || b === B_DRY ? B_SOIL : b], 0.8); }
     else if (LIP.has(b) && !solidB(B[bi(x, y, k + 1)])) { m = b === B_SNOW ? M_SNOW : M_LIP; c = shade(colOf(b, x, y), 0.86); }
     else { m = SIDEM[b]; c = shade(b === B_DESERT ? colOf(b, x, y) : COL[b === B_GRASS || b === B_DRY ? B_SOIL : b], k & 1 ? 1 : 0.92); }
@@ -112,9 +114,9 @@ export function chunkMesh(C, L) {
   };
   const key = (lk) => lk[0] * 16777216 + (lk[1][0] << 16 | lk[1][1] << 8 | lk[1][2]);
   const mask = new Float64Array(CS * CS), looks = new Array(CS * CS);
-  // Подвійна ґратка: вершина куба з нижнім кутом у центрі блоку (x, y, k), x, y ∈ −1…CS−1, k ∈ −1…H−1 (кеш)
-  const solidAt = (x, y, k) => k < 0 ? true : k >= H ? false : solidB(B[bi(x, y, k)]);
-  const NX = CS + 1, VC = new Float32Array(NX * NX * (H + 1) * 3).fill(NaN);
+  // Подвійна ґратка: вершина куба з нижнім кутом у центрі блоку (x, y, k), x, y ∈ −1…CS−1, k ∈ −1…NK−1 (кеш)
+  const solidAt = (x, y, k) => solidB(B[bi(x, y, k)]);
+  const NX = CS + 1, VC = new Float32Array(NX * NX * (NK + 1) * 3).fill(NaN);
   const EDGES = [[0, 1], [2, 3], [4, 5], [6, 7], [0, 2], [1, 3], [4, 6], [5, 7], [0, 4], [1, 5], [2, 6], [3, 7]];
   const cornerSolid = new Array(8);
   const dualV = (x, y, k) => {
@@ -163,7 +165,7 @@ export function chunkMesh(C, L) {
       const flip = nx * ex + ny * ey + nz * ez < 0;
       nx /= flip ? -l : l; ny /= flip ? -l : l; nz /= flip ? -l : l;
       let lk;
-      if (nz > 0.42) { let kt = k; while (kt + 1 < H && solidB(B[bi(x, y, kt + 1)])) kt++; lk = look(B[bi(x, y, kt)], 4, x, y, kt); }
+      if (nz > 0.42) { let kt = k; while (kt + 1 <= NK && solidB(B[bi(x, y, kt + 1)])) kt++; lk = look(B[bi(x, y, kt)], 4, x, y, kt); }
       else if (nz < -0.42) lk = look(b, 5, x, y, k);
       else lk = look(b, d, x, y, k);
       const N = [nx * 127 | 0, ny * 127 | 0, nz * 127 | 0], i = M.n, pts = flip ? [a, c, bb] : [a, bb, c];
@@ -178,14 +180,14 @@ export function chunkMesh(C, L) {
     smoothFace(x, y, k, d, q, b);
     return false;
   };
-  for (let k = 0; k < H; k++) {
+  for (let k = 0; k < NK; k++) {
     // Верх (d = 4) і низ (d = 5): маска шару 16×16, жадібне злиття прямокутників
     for (const d of [4, 5]) {
       const dk = d === 4 ? 1 : -1;
       let any = false;
       for (let y = 0; y < CS; y++) for (let x = 0; x < CS; x++) {
         const b = B[bi(x, y, k)], i = y * CS + x, nk = k + dk;
-        const nb = nk < 0 ? B_STONE : nk >= H ? B_AIR : B[bi(x, y, nk)];
+        const nb = B[bi(x, y, nk)];
         if (solidB(b) && !solidB(nb) && flatFace(x, y, k, d, b)) { const lk = look(b, d, x, y, k); mask[i] = key(lk) + 1; looks[i] = lk; any = true; } else mask[i] = 0;
       }
       if (!any) continue;
@@ -229,7 +231,7 @@ export function chunkMesh(C, L) {
   // Поверхня рідини: верхній блок рідини під повітрям (трохи нижче за край блоку)
   // і бічні грані там, де рідина межує з повітрям (печера біля водойми): об'єм рідини завжди замкнений
   const LM = lavaish ? M_LAVA : M_WATER;
-  for (let y = 0; y < CS; y++) for (let x = 0; x < CS; x++) for (let k = 0; k < H; k++) {
+  for (let y = 0; y < CS; y++) for (let x = 0; x < CS; x++) for (let k = 0; k < NK; k++) {
     if (B[bi(x, y, k)] !== B_LIQ) continue;
     const open = B[bi(x, y, k + 1)] === B_AIR, top = (k + 1) * LEVEL - (open ? 0.15 : 0), z0 = k * LEVEL;
     const c = mixc(P.liquid, P.liquidDeep, Math.min(1, C.v[ci(x, y)] / 160));
@@ -247,24 +249,44 @@ export function chunkMesh(C, L) {
   // дерево — основа стовбура з корінням; камінь — уся брила, лише вищий за пів блоку (нижчий — переступаєш)
   const F = new Mesh(), Ff = new Mesh();
   for (const o of C.obj) {
-    const z = o.z * LEVEL, v = o.v, g = C.sp[o.s];
-    const cx = o.x + 0.5 + ((v & 15) / 15 - 0.5) * 0.24, cy = o.y + 0.5 + ((v >> 4 & 15) / 15 - 0.5) * 0.24;
-    const rot = (v >> 8 & 255) / 256 * Math.PI * 2, age = (v >> 12 & 15) / 15, k = 0.92 + 0.16 * ((v >> 3 & 7) / 7);
-    const cj = [k * (0.97 + 0.06 * (v >> 6 & 3) / 3), k, k * (0.97 + 0.06 * (v >> 1 & 3) / 3)];
-    o.cx = cx; o.cy = cy; o.r = 0; o.top = 0;
-    // у плямі аномалії гравітації рослини вищі (слабша) чи нижчі (сильніша)
-    const ga = gravityAt(L, C.cx * CS + cx, C.cy * CS + cy).k, gs = ga === 1 ? 1 : Math.min(2.2, Math.max(0.5, Math.pow(ga, -0.6)));
+    if (o.z < K0 || o.z >= K0 + NK) continue;                 // предмет — у секції своєї основи
+    const z = (o.z - K0) * LEVEL, v = o.v, g = C.sp[o.s], q = objPose(C, L, o);
+    const { cx, cy, rot, s, cj } = q;
     if (o.k === O_TREE) {
-      const s = (0.6 + 0.8 * age) * gs, tl = ((v >> 2 & 7) / 7) * 0.1, T = template(g, v % 3, 0), fp = footprint(T);
-    } else if (o.k === O_COVER) place(F, template(g, v & 1, 0), cx, cy, z, rot, (0.6 + 0.8 * age) * Math.sqrt(gs), 0, cj);
+      const tl = ((v >> 2 & 7) / 7) * 0.1;
+      place(F, template(g, v % 3, 0), cx, cy, z, rot, s, tl, cj);
+      place(Ff, template(g, 0, 1), cx, cy, z, rot, s, tl, cj);
+    } else if (o.k === O_COVER) place(F, template(g, v & 1, 0), cx, cy, z, rot, s, 0, cj);
     else if (o.k === O_FLOAT) continue;                       // ширяюче каміння — тіла (bodies.js), малюються окремо
-    else {
-      const T = template(o.st ? stoneGenome(L, g, o.st) : g, v & 3, 0, styleOf(g, v)), s = 0.8 + 0.4 * age, fp = footprint(T);
-      place(F, T, cx, cy, z, rot, s, 0, cj); place(Ff, T, cx, cy, z, rot, s, 0, cj);
-      if (fp.top * s > LEVEL / 2) { o.r = Math.min(0.5, fp.r * s * 0.8); o.top = fp.top * s; }
-    }
+    else { const T = template(o.st ? stoneGenome(L, g, o.st) : g, v & 3, 0, styleOf(g, v)); place(F, T, cx, cy, z, rot, s, 0, cj); place(Ff, T, cx, cy, z, rot, s, 0, cj); }
   }
   return { solid: M.finish(), liquid: W.n ? W.finish() : null, flora: F.n ? F.finish() : null, far: Ff.n ? Ff.finish() : null };
+}
+
+// Положення, поворот, масштаб і колір предмета o стовпця C; перешкода для зіткнень — у самі дані предмета
+// (o.cx, o.cy — центр у чанку, o.r — півширина, o.top — висота над основою): дерево — основа стовбура з корінням;
+// камінь — уся брила, лише вищий за пів блоку (нижчий — переступаєш). У плямі аномалії гравітації рослини вищі (слабша)
+// чи нижчі (сильніша)
+export function objPose(C, L, o) {
+  if (o.pose) return o.pose;
+  const v = o.v, g = C.sp[o.s];
+  const cx = o.x + 0.5 + ((v & 15) / 15 - 0.5) * 0.24, cy = o.y + 0.5 + ((v >> 4 & 15) / 15 - 0.5) * 0.24;
+  const rot = (v >> 8 & 255) / 256 * Math.PI * 2, age = (v >> 12 & 15) / 15, k = 0.92 + 0.16 * ((v >> 3 & 7) / 7);
+  const cj = [k * (0.97 + 0.06 * (v >> 6 & 3) / 3), k, k * (0.97 + 0.06 * (v >> 1 & 3) / 3)];
+  const ga = gravityAt(L, C.cx * CS + cx, C.cy * CS + cy).k, gs = ga === 1 ? 1 : Math.min(2.2, Math.max(0.5, Math.pow(ga, -0.6)));
+  o.cx = cx; o.cy = cy; o.r = 0; o.top = 0;
+  let s = 1;
+  if (o.k === O_TREE) {
+    s = (0.6 + 0.8 * age) * gs;
+    const fp = footprint(template(g, v % 3, 0));
+    o.r = Math.min(3.5, Math.max(0.12, fp.r * s * 0.8)); o.top = Math.max(2, fp.top * s);
+  } else if (o.k === O_COVER) s = (0.6 + 0.8 * age) * Math.sqrt(gs);
+  else if (o.k !== O_FLOAT) {
+    s = 0.8 + 0.4 * age;
+    const fp = footprint(template(o.st ? stoneGenome(L, g, o.st) : g, v & 3, 0, styleOf(g, v)));
+    if (fp.top * s > LEVEL / 2) { o.r = Math.min(0.5, fp.r * s * 0.8); o.top = fp.top * s; }
+  }
+  return (o.pose = { cx, cy, rot, s, cj });
 }
 
 // Стиль каміння клітинки — з ваг стилів області

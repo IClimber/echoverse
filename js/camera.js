@@ -112,21 +112,25 @@ export function project(m, p, W, H) {
 export function chunksInView(m, target, R, zr) {
   const out = [], c0x = Math.floor((target[0] - R) / CS), c1x = Math.floor((target[0] + R) / CS);
   const c0y = Math.floor((target[1] - R) / CS), c1y = Math.floor((target[1] + R) / CS);
-  const z0 = zr[0] - target[2], z1 = zr[1] - target[2];
   for (let cy = c0y; cy <= c1y; cy++) for (let cx = c0x; cx <= c1x; cx++) {
     const ax = cx * CS - target[0], ay = cy * CS - target[1], mx = ax + CS / 2, my = ay + CS / 2;
     const d2 = mx * mx + my * my;
     if (d2 > (R + CS * 0.71) * (R + CS * 0.71)) continue;
-    let l = 0, rr = 0, b = 0, t = 0, back = 0;
-    for (let k = 0; k < 8; k++) {
-      const x = ax + (k & 1 ? CS : 0), y = ay + (k & 2 ? CS : 0), z = k & 4 ? z1 : z0;
-      const X = m[0] * x + m[4] * y + m[8] * z + m[12], Y = m[1] * x + m[5] * y + m[9] * z + m[13], Wc = m[3] * x + m[7] * y + m[11] * z + m[15];
-      if (X < -Wc) l++; if (X > Wc) rr++; if (Y < -Wc) b++; if (Y > Wc) t++; if (Wc <= 0) back++;
-    }
-    if (l === 8 || rr === 8 || b === 8 || t === 8 || back === 8) continue;
+    if (!boxInView(m, ax, ay, zr[0] - target[2], zr[1] - target[2])) continue;
     out.push({ cx, cy, dist2: d2 });
   }
   return out.sort((a, b2) => a.dist2 - b2.dist2);
+}
+
+// Чи потрапляє в піраміду видимості коробка CS×CS клітинок з кутом (ax, ay) і висотами z0…z1 (відносно цілі)
+export function boxInView(m, ax, ay, z0, z1) {
+  let l = 0, rr = 0, b = 0, t = 0, back = 0;
+  for (let k = 0; k < 8; k++) {
+    const x = ax + (k & 1 ? CS : 0), y = ay + (k & 2 ? CS : 0), z = k & 4 ? z1 : z0;
+    const X = m[0] * x + m[4] * y + m[8] * z + m[12], Y = m[1] * x + m[5] * y + m[9] * z + m[13], Wc = m[3] * x + m[7] * y + m[11] * z + m[15];
+    if (X < -Wc) l++; if (X > Wc) rr++; if (Y < -Wc) b++; if (Y > Wc) t++; if (Wc <= 0) back++;
+  }
+  return !(l === 8 || rr === 8 || b === 8 || t === 8 || back === 8);
 }
 
 // Ізометрія: радіус, що покриває екран (кути екрана на найнижчій і найвищій площині)

@@ -1,10 +1,9 @@
-// gen/worker.js — генерація чанків і їхньої геометрії у Web Worker (module), щоб не смикати кадри.
-// Запит {id, seed, d, n, cx, cy} → {id, c (дані чанка), m (меш), ms}; масиви передаються без копіювання.
+// gen/worker.js — генерація у Web Worker (module), щоб не смикати кадри: зведення стовпців і секції з мешами (job.js).
+// Запит {id, seed, q} → {id, data, mesh, ms}; масиви секцій і мешів передаються без копіювання.
 import { lawsOf } from '../universe.js';
-import { genChunk } from './chunk.js';
-import { chunkMesh } from './mesh.js';
+import { runJob } from './job.js';
 
-const laws = new Map();
+const laws = new Map(), cols = new Map();
 function lawsFor(seed, d, n) {
   const k = `${seed}:${d}:${n}`;
   let L = laws.get(k);
@@ -13,10 +12,8 @@ function lawsFor(seed, d, n) {
 }
 
 onmessage = (e) => {
-  const { id, seed, d, n, cx, cy } = e.data;
+  const { id, seed, q } = e.data;
   const t0 = performance.now();
-  const L = lawsFor(seed, d, n), c = genChunk(L, cx, cy), m = chunkMesh(c, L);
-  const bufs = [c.h.buffer, c.t.buffer, c.v.buffer, c.bm.buffer];
-  for (const x of [m.solid, m.liquid, m.flora, m.far]) if (x) bufs.push(x.pos.buffer, x.nor.buffer, x.col.buffer, x.mat.buffer, x.idx.buffer);
-  postMessage({ id, c, m, ms: performance.now() - t0 }, bufs);
+  const r = runJob(lawsFor(seed, q.d, q.n), q, cols);
+  postMessage({ id, data: r.data, mesh: r.mesh || null, ms: performance.now() - t0 }, r.bufs);
 };

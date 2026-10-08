@@ -3,7 +3,7 @@
 // Камера — camera.js (ізометрія чи третя особа); координати в шейдері — відносно цілі камери (target).
 import { createGL } from './gl.js';
 import { LEVEL, S } from './iso.js';
-import { CS } from './gen/chunk.js';
+import { CS, SEC } from './gen/chunk.js';
 import { WORLD_H, SEA, MAX_AMP } from './universe.js';
 import { figureParts, Mesh } from './gen/mesh.js';
 import { poseMatrices } from './anim.js';
@@ -13,7 +13,7 @@ import { ISO, VIEW_R, viewProj, chunksInView, isoRadius, project, basis } from '
 import { texturesOf, TEX } from './textures.js';
 import { LAYERS } from './gen/materials.js';
 
-const MAX_MESH = 700;                          // чанків з мешами в GPU; третя особа бачить далеко
+const MAX_MESH = 4000;                         // секцій з мешами в GPU; третя особа бачить далеко
 const ZR = [0, WORLD_H * LEVEL + 40];          // висоти світу: від дна до верху островів і крон велетнів (піраміда видимості)
 const ZR_ISO = [0, (SEA + MAX_AMP) * LEVEL + 6]; // згори радіус — по рельєфу з деревами (інакше чанків набагато більше)
 // Частинки за типом опадів: шейдерний тип, коробка (півширина, висота), падіння (од/с), довжина риски, розмір,
@@ -107,11 +107,12 @@ export function createRenderer(canvas) {
       // місцевий час (плин часу всесвіту) — для плину води, гойдання, частинок
       const lt = (st.clock || 0) * (laws.phys ? laws.phys.time : 1) % 3000;
       R.begin({ fogCol: sk.fog, light: [lx, ly, lz], amb, lightCol, fog: fogR, fogAxes: view.fogAxes, view: view.m, cut, time: lt, sky: { inv: invert(view.m), st: sk }, wind, curve: laws.phys ? 0.5 / laws.phys.planetR : 0 });
+      const zOf = (v) => v.cz * SEC * LEVEL - t[2];        // секція: зсув по висоті
       for (const v of st.keys) {
         const e = meshes.get(v.key);
         if (!e) continue;
         e.used = frame;
-        R.drawAt(e.mesh, v.cx * CS - t[0], v.cy * CS - t[1], -t[2]);
+        R.drawAt(e.mesh, v.cx * CS - t[0], v.cy * CS - t[1], zOf(v));
       }
       // Рослини: зблизька — повні, далі — спрощені; у третій особі біля камери розчиняються (камера в кроні не сліпне)
       R.setCut(cutFlora);
@@ -121,7 +122,7 @@ export function createRenderer(canvas) {
         if (!e) continue;
         const ox = v.cx * CS - t[0], oy = v.cy * CS - t[1];
         const fl = (ox + CS / 2) ** 2 + (oy + CS / 2) ** 2 < NEAR * NEAR ? e.flora : e.far;
-        if (fl) R.drawAt(fl, ox, oy, -t[2]);
+        if (fl) R.drawAt(fl, ox, oy, zOf(v));
       }
       // Тіла (ширяюче каміння): шаблон з поворотом, нахилом і масштабом; низ коробки — основа шаблону
       if (st.bodies) for (const b of st.bodies) {
@@ -131,7 +132,7 @@ export function createRenderer(canvas) {
       // Поверхні рідин — після всього твердого, напівпрозоро (лава — непрозора)
       R.setCut(null);                               // поверхню рідини не вирізаємо (гравець у воді — під нею)
       R.beginAlpha(laws.liquid.alpha);
-      for (const v of st.keys) { const e = meshes.get(v.key); if (e && e.liq) R.drawAt(e.liq, v.cx * CS - t[0], v.cy * CS - t[1], -t[2]); }
+      for (const v of st.keys) { const e = meshes.get(v.key); if (e && e.liq) R.drawAt(e.liq, v.cx * CS - t[0], v.cy * CS - t[1], zOf(v)); }
       R.endAlpha();
       if (me) {
         R.setCut(null);                             // власні грані гравця не вирізаємо

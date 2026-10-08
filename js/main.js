@@ -1,7 +1,7 @@
 // main.js — запуск: меню світів, ігровий цикл (рух, стрибки, камера, підвантаження чанків), HUD, автозбереження.
 // ?strip — замість гри стенд «смуга всесвітів» (js/strip.js), ?flora — галерея видів рослин (js/flora-stand.js).
 import { createRenderer } from './render.js';
-import { createWorld, findSpawn, ckey } from './world.js';
+import { createWorld, findSpawn, ckey, skey } from './world.js';
 import { createDevice, landing, landingChunks, CHARGE } from './device.js';
 import { step, support, SPRINT, GRAVITY, FOOT } from './player.js';
 import { stepBody, push, rayBody, PLAYER_MASS, HIT_IMPULSE } from './bodies.js';
@@ -9,14 +9,14 @@ import { initInput, moveAxis, turnAxis, sprintHeld, vertAxis, takeActions, takeW
 import { listWorlds, putWorld, deleteWorld, serialize, deserialize, newId } from './save.js';
 import { hashStr } from './rng.js';
 import { GEN, physOf, physAt } from './universe.js';
-import { CS, solidB, B_LIQ, B_MAGMA } from './gen/chunk.js';
+import { CS, SEC, solidB, B_LIQ, B_MAGMA } from './gen/chunk.js';
 import { LEVEL } from './iso.js';
 import { debugText, fmtN } from './debug.js';
 import { animate } from './anim.js';
 import { clockStr } from './sky.js';
 import { weatherAt, localWeather } from './weather.js';
 import { T_SNOW, T_ICE, T_DESERT, T_DRY } from './gen/chunk.js';
-import { createCamera, rotate, wheel, smooth, moveBasis, clipDist, facing, setYaw, basis, ISO, THIRD, HEAD } from './camera.js';
+import { createCamera, rotate, wheel, smooth, moveBasis, clipDist, facing, setYaw, basis, boxInView, ISO, THIRD, HEAD } from './camera.js';
 
 const $ = (id) => document.getElementById(id);
 const SAVE_MS = 10000;                     // автозбереження
@@ -154,12 +154,21 @@ function boot() {
   document.addEventListener('visibilitychange', () => { if (document.hidden) save(); });
 
   // Усі чанки кола приземлення (d, n) навколо (x, y) згенеровано?
-  const ready = (d, n, x, y) => landingChunks(x, y, CS).every(([cx, cy]) => g.world.has(ckey(d, n, cx, cy)));
+  // Стовпці кола приземлення й секції біля висоти ніг (z) у (d, n) згенеровано?
+  const ready = (d, n, x, y, z) => {
+    const czMe = Math.floor(Math.floor((z ?? 0) / LEVEL) / SEC);
+    return landingChunks(x, y, CS).every(([cx, cy]) => {
+      const C = g.world.col(d, n, cx, cy);
+      if (!C) return false;
+      for (let cz = Math.min(czMe - 1, C.czLo); cz <= Math.max(czMe + 1, C.czHi); cz++) if (!g.world.hasSec(skey(d, n, cx, cy, cz))) return false;
+      return true;
+    });
+  };
 
   // Поставити гравця у всесвіті (d, n) біля ніг (x, y, z): там, де стоїть, найближче місце, де можна стояти, або
   // вільне місце в тому самому стовпці (z невідомий — від поверхні клітинки). [x, y, z]; undefined — чанки ще генеруються
   function placeIn(d, n, x, y, z) {
-    if (!ready(d, n, x, y)) return undefined;
+    if (!ready(d, n, x, y, z)) return undefined;
     const P = g.world.probe(d, n), ph = physOf(g.world.laws(d, n));
     if (z === undefined) { const c = g.world.column(d, n, Math.floor(x), Math.floor(y)); z = (c ? c.h : 8) * LEVEL; }
     return landing(P, x, y, z, ph);
@@ -308,26 +317,51 @@ function boot() {
 
   // Підвантаження: видимі чанки поточного всесвіту; коло приземлення в обох сусідніх (стрибок — без чекання);
   // під час заряджання — усе видиме у всесвіті, куди стрибаємо
+  // Підвантаження: стовпці (зведення) у видимості, у них — секції з поверхнею й островами, що потрапляють у піраміду
+  // видимості; біля гравця — ще й секції навколо його висоти (печери, глибина). Для стрибка — те саме у всесвітах,
+  // куди можна стрибнути. g.vis — видимі секції з мешами, g.visCols — видимі стовпці (тіла)
   function stream() {
-    const keys = new Set(), W = g.world;
-    const want = (d, n, cx, cy, pri) => {
-      const key = ckey(d, n, cx, cy);
-      keys.add(key);
-      if (!renderer.has(key) || !W.has(key)) W.want(d, n, cx, cy, pri);
+    const keys = new Set(), W = g.world, me = g.me, t = g.cam, m = g.view.m;
+    const kMe = Math.floor((me.z ?? 0) / LEVEL), czMe = Math.floor(kMe / SEC);
+    const col = (d, n, cx, cy, pri) => {
+      const C = W.col(d, n, cx, cy);
+      if (!C) keys.add(W.wantCol(d, n, cx, cy, pri));
+      else keys.add('c' + ckey(d, n, cx, cy));
+      return C;
     };
-    const vis = g.view.chunks, ch = g.dev.charge;
-    g.vis = vis.map((v) => ({ key: ckey(g.d, g.n, v.cx, v.cy), cx: v.cx, cy: v.cy }));
-    for (const v of vis) want(g.d, g.n, v.cx, v.cy, v.dist2);
-    for (const [cx, cy] of landingChunks(g.me.x, g.me.y, CS)) want(g.d, g.n, cx, cy, -3e6);   // під ногами — завжди першими
-    for (const dir of [-1, 1]) {
-      const hot = ch && ch.to[0] === g.d && ch.to[1] === g.n + dir;
-      for (const [cx, cy] of landingChunks(g.me.x, g.me.y, CS)) want(g.d, g.n + dir, cx, cy, hot ? -2e6 : 1e5);
-      if (hot) for (const v of vis) want(g.d, g.n + dir, v.cx, v.cy, -1e6 + v.dist2);
-    }
-    if (ch && (ch.to[0] !== g.d || Math.abs(ch.to[1] - g.n) !== 1)) {          // далекий стрибок (R)
-      for (const [cx, cy] of landingChunks(g.me.x, g.me.y, CS)) want(ch.to[0], ch.to[1], cx, cy, -2e6);
-      for (const v of vis) want(ch.to[0], ch.to[1], v.cx, v.cy, -1e6 + v.dist2);
-    }
+    const sec = (d, n, cx, cy, cz, pri) => {
+      const key = skey(d, n, cx, cy, cz);
+      keys.add(key);
+      const S = W.sec(key);                                    // меш могли звільнити з GPU — тоді наново
+      if (!S || (!S.empty && !renderer.has(key))) W.wantSec(d, n, cx, cy, cz, pri);
+      else S.used = performance.now();
+      return key;
+    };
+    // секції стовпця, що видно: поверхня й острови в піраміді; поруч з гравцем — ±2 секції від його висоти
+    const visSecs = (d, n, C, pri, near, out) => {
+      const list = [];
+      for (let cz = C.czLo; cz <= C.czHi; cz++) list.push(cz);
+      for (const cz of C.isl) if (cz < C.czLo || cz > C.czHi) list.push(cz);
+      if (near) for (let cz = czMe - 2; cz <= czMe + 2; cz++) if (!list.includes(cz)) list.push(cz);
+      for (const cz of list) {
+        const z0 = cz * SEC * LEVEL - t[2], ax = C.cx * CS - t[0], ay = C.cy * CS - t[1];
+        if (!near && !boxInView(m, ax, ay, z0, z0 + SEC * LEVEL + 12)) continue;
+        const key = sec(d, n, C.cx, C.cy, cz, pri + Math.abs(cz - czMe) * 40);
+        if (out) out.push({ key, cx: C.cx, cy: C.cy, cz });
+      }
+    };
+    const vis = g.view.chunks, ch = g.dev.charge, out = [];
+    const nearCols = landingChunks(me.x, me.y, CS);
+    for (const [cx, cy] of nearCols) { const C = col(g.d, g.n, cx, cy, -3e6); if (C) visSecs(g.d, g.n, C, -3e6, true, null); }   // під ногами — першими
+    for (const v of vis) { const C = col(g.d, g.n, v.cx, v.cy, v.dist2 - 1e5); if (C) visSecs(g.d, g.n, C, v.dist2, Math.abs(v.cx * CS + 8 - me.x) < 24 && Math.abs(v.cy * CS + 8 - me.y) < 24, out); }
+    g.vis = out;
+    g.visCols = vis.map((v) => ckey(g.d, g.n, v.cx, v.cy));
+    const other = (d, n, hot) => {
+      for (const [cx, cy] of nearCols) { const C = col(d, n, cx, cy, hot ? -2e6 : 1e5); if (C) visSecs(d, n, C, hot ? -2e6 : 1e5, true, null); }
+      if (hot) for (const v of vis) { const C = col(d, n, v.cx, v.cy, -1e6 + v.dist2); if (C) visSecs(d, n, C, -1e6 + v.dist2, false, null); }
+    };
+    for (const dir of [-1, 1]) other(g.d, g.n + dir, ch && ch.to[0] === g.d && ch.to[1] === g.n + dir);
+    if (ch && (ch.to[0] !== g.d || Math.abs(ch.to[1] - g.n) !== 1)) other(ch.to[0], ch.to[1], true);   // далекий стрибок (R)
     W.gen.keepOnly(keys);
     W.gen.tick();
   }
@@ -352,7 +386,7 @@ function boot() {
     const anim = animate(me, dt, now, physOf(L).speed * (me.run ? SPRINT * 0.85 : 1));
     if (!g.view) return;
     const sk = renderer.draw({
-      camera, target: g.cam, view: g.view, laws: L, keys: g.vis, clock: g.clock, bodies: g.world.bodiesIn(g.vis.map((v) => v.key)), weather: { W: loc.W, loc }, rain: me.placed && loc.type ? rainMap(now) : null,
+      camera, target: g.cam, view: g.view, laws: L, keys: g.vis, clock: g.clock, bodies: g.world.bodiesIn(g.visCols || []), weather: { W: loc.W, loc }, rain: me.placed && loc.type ? rainMap(now) : null,
       me: me.placed ? { x: me.x, y: me.y, z: me.vis ?? me.z, gz: under ? under.z : me.z, yaw: me.yaw, swim: me.swim, fly: me.fly, tint: [1 + a * 0.4, 1 + a, 1 + a * 1.3], anim } : null,
     });
     setText('addr', `Глибина ${g.d} · всесвіт ${fmtN(g.n)} · ${clockStr(sk.phase)}${L.sky.lock ? ' (вічно)' : ''}`);
