@@ -4,7 +4,7 @@ import { createRenderer, BODY_R, budgetFor } from './render.js';
 import { createWorld, findSpawn, keepFor } from './world.js';
 import { createDevice, landing, landingChunks, CHARGE } from './device.js';
 import { step, support, windShelter, SPRINT, GRAVITY, FOOT } from './player.js';
-import { stepBody, windMoves, push, rayBody, PLAYER_MASS, HIT_IMPULSE } from './bodies.js';
+import { stepBody, windMoves, push, rayBody, collideBodies, PLAYER_MASS, HIT_IMPULSE } from './bodies.js';
 import { initInput, moveAxis, turnAxis, sprintHeld, vertAxis, takeActions, takeWheel, takeDrag, clearInput, lockPointer, unlockPointer, locked } from './input.js';
 import { listWorlds, putWorld, deleteWorld, serialize, deserialize, newId } from './save.js';
 import { hashStr } from './rng.js';
@@ -278,6 +278,7 @@ function boot() {
       env.wind = [W.wind[0] * lee, W.wind[1] * lee];
       stepBody(b, dt, P, env);
     }
+    collideBodies(near, P, { bounce: L.phys.bounce, friction: L.phys.friction });   // між собою (сплячі — перешкоди)
     if (ob) { me.x += ob.x - ox; me.y += ob.y - oy; me.z = ob.z + ob.hz; }
   }
   // Удар: промінь з грудей уперед (у третій особі — куди дивиться камера, згори — куди обернений гравець)

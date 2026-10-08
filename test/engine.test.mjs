@@ -200,3 +200,34 @@ test('такт: 240 к/с → 120 Гц, alpha у [0, 1), довгий кадр �
   assert.ok(Math.abs(n - 500) <= 1, `${n}`);
   assert.equal(createTicker(1 / 120).advance(0.25), 8);
 });
+
+// ================= Зіткнення тіл =================
+import { makeBody, stepBody, collideBodies } from '../js/bodies.js';
+
+const AIR = { block: () => 0 }, FLOOR = { block: (x, y, k) => k < 0 ? 8 : 0 };
+const box = (x, y, z, h, o = {}) => { const b = makeBody({ x, y, z, hx: h, hy: h, hz: h, ...o }); b.sleep = false; return b; };
+const move = (L, dt) => { for (const b of L) { b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt; } };
+
+test('тіла: назустріч — не проходять одне крізь одне, імпульс зберігається', () => {
+  const A = box(0, 0, 5, 0.5), B = box(3, 0.2, 5, 0.5), L = [A, B];
+  A.vx = 4; B.vx = -4;
+  const p0 = A.mass * A.vx + B.mass * B.vx;
+  for (let i = 0; i < 120; i++) { move(L, 1 / 120); collideBodies(L, AIR, { bounce: 0, friction: 1 }); }
+  assert.ok(B.x - A.x >= 1 - 1e-6, `${A.x} ${B.x}`);
+  assert.ok(Math.abs(A.mass * A.vx + B.mass * B.vx - p0) <= 1e-6);
+});
+
+test('тіла: легке у важке — важке ледь зрушить', () => {
+  const A = box(0, 0, 5, 0.25), B = box(1.2, 0, 5, 0.25 * Math.cbrt(100)), L = [A, B];
+  A.vx = 5;
+  for (let i = 0; i < 60; i++) { move(L, 1 / 120); collideBodies(L, AIR, { bounce: 0, friction: 1 }); }
+  assert.ok(B.vx > 0 && B.vx <= 5 / 50, `${B.vx}`);
+});
+
+test('тіла: камінь на камені під тяжінням — не провалюється', () => {
+  const lo = box(0, 0, 0, 0.5), hi = box(0.1, 0, 1.6, 0.4), L = [lo, hi], env = { g: 1, vT: 50, bounce: 0, friction: 1, wind: [0, 0] };
+  for (let i = 0; i < 240; i++) { for (const b of L) stepBody(b, 1 / 120, FLOOR, env); collideBodies(L, FLOOR, env); }
+  const top = lo.z + lo.hz;
+  assert.ok(hi.z - hi.hz >= top - 0.02, `${hi.z - hi.hz} ${top}`);
+  assert.ok(Math.abs(lo.z - lo.hz) < 0.05);
+});

@@ -121,3 +121,60 @@ export function rayBody(list, ox, oy, oz, d, maxT) {
   }
   return best ? { b: best, t: bt } : null;
 }
+
+// Зіткнення тіл між собою (після кроку тіл): сітка сусідства 4×4 од. → пари; перекриття коробок → вісь найменшого
+// проникнення; розсунути за оберненими масами (у блоки не штовхаємо: що впирається — стоїть, рухається інше), імпульс
+// уздовж нормалі з відскоком і тертям (дотичний, не більше 0,5 · тертя · нормальний). Сплячі — як нерухомі перешкоди;
+// сильний удар їх будить (левітуюче — зриває з місця). env — {bounce, friction}
+const CELL = 4;
+export function collideBodies(list, P, env) {
+  if (list.length < 2) return;
+  const grid = new Map(), seen = new Set(), e = Math.max(0.15, env.bounce || 0), fr = env.friction ?? 1;
+  list.forEach((b, i) => {
+    for (let gy = Math.floor((b.y - b.hy) / CELL); gy <= Math.floor((b.y + b.hy) / CELL); gy++) for (let gx = Math.floor((b.x - b.hx) / CELL); gx <= Math.floor((b.x + b.hx) / CELL); gx++) {
+      const k = gx * 65536 + gy;
+      let c = grid.get(k);
+      if (!c) grid.set(k, (c = []));
+      c.push(i);
+    }
+  });
+  for (const c of grid.values()) for (let p = 0; p < c.length; p++) for (let q = p + 1; q < c.length; q++) {
+    const i = Math.min(c[p], c[q]), j = Math.max(c[p], c[q]), pk = i * list.length + j;
+    if (seen.has(pk)) continue;
+    seen.add(pk);
+    const A = list[i], B = list[j];
+    if (A.sleep && B.sleep) continue;
+    const dx = B.x - A.x, dy = B.y - A.y, dz = B.z - A.z;
+    const ox = A.hx + B.hx - Math.abs(dx), oy = A.hy + B.hy - Math.abs(dy), oz = A.hz + B.hz - Math.abs(dz);
+    if (ox <= 0 || oy <= 0 || oz <= 0) continue;
+    // нормаль від A до B уздовж осі найменшого проникнення
+    let nx = 0, ny = 0, nz = 0, pen;
+    if (ox <= oy && ox <= oz) { nx = dx < 0 ? -1 : 1; pen = ox; } else if (oy <= oz) { ny = dy < 0 ? -1 : 1; pen = oy; } else { nz = dz < 0 ? -1 : 1; pen = oz; }
+    let ia = A.sleep ? 0 : 1 / A.mass, ib = B.sleep ? 0 : 1 / B.mass;
+    if (!ia && !ib) continue;
+    // розсунути: частки за оберненими масами; хто впреться в блоки — стоїть, усе — іншому
+    let sa = ia / (ia + ib), sb = ib / (ia + ib);
+    if (sa && boxHits(P, A, A.x - nx * pen * sa, A.y - ny * pen * sa, A.z - nz * pen * sa)) { sa = 0; sb = 1; ia = 0; }
+    else if (sb && boxHits(P, B, B.x + nx * pen * sb, B.y + ny * pen * sb, B.z + nz * pen * sb)) { sb = 0; sa = 1; ib = 0; }
+    if (!ia && !ib) continue;
+    A.x -= nx * pen * sa; A.y -= ny * pen * sa; A.z -= nz * pen * sa;
+    B.x += nx * pen * sb; B.y += ny * pen * sb; B.z += nz * pen * sb;
+    const rvx = B.vx - A.vx, rvy = B.vy - A.vy, rvz = B.vz - A.vz, vrel = rvx * nx + rvy * ny + rvz * nz;
+    if (vrel >= 0) continue;
+    const jn = -(1 + e) * vrel / (ia + ib);
+    A.vx -= jn * ia * nx; A.vy -= jn * ia * ny; A.vz -= jn * ia * nz;
+    B.vx += jn * ib * nx; B.vy += jn * ib * ny; B.vz += jn * ib * nz;
+    // тертя: дотична відносна швидкість гаситься, не більше 0,5 · тертя · jn
+    const tx = rvx - vrel * nx, ty = rvy - vrel * ny, tz = rvz - vrel * nz, tl = Math.hypot(tx, ty, tz);
+    if (tl > 1e-9) {
+      const jt = Math.min(tl / (ia + ib), 0.5 * fr * jn), ux = tx / tl, uy = ty / tl, uz = tz / tl;
+      A.vx += jt * ia * ux; A.vy += jt * ia * uy; A.vz += jt * ia * uz;
+      B.vx -= jt * ib * ux; B.vy -= jt * ib * uy; B.vz -= jt * ib * uz;
+    }
+    // сильний удар будить обидва; левітуюче з помітною зміною швидкості — зриває з місця
+    if (-vrel > SLEEP_V) for (const [X, inv] of [[A, ia], [B, ib]]) {
+      if (X.sleep) { X.sleep = false; X.calm = 0; }
+      if (X.ax !== undefined && (inv ? jn * inv : -vrel) > 0.3) X.ax = null;
+    }
+  }
+}
