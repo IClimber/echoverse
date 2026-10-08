@@ -12,10 +12,10 @@ import { makeBody } from './bodies.js';
 
 export const ckey = (d, n, cx, cy) => `${d}:${n}:${cx}:${cy}`;
 export const skey = (d, n, cx, cy, cz) => `${d}:${n}:${cx}:${cy}:${cz}`;
-const KEEP_COLS = 1500, KEEP_SECS = 5000;     // скільки тримати в пам'яті (секція ~6 КБ)
+const KEEP_COLS = 1500, KEEP_SECS = 5000, KEEP_FARS = 1200;   // скільки тримати в пам'яті (секція ~6 КБ)
 
 export function createWorld(seed, onMesh) {
-  const lawsMap = new Map(), cols = new Map(), secs = new Map();
+  const lawsMap = new Map(), cols = new Map(), secs = new Map(), fars = new Map();
   let genMs = 0, genN = 0, objR = 0.5;      // objR — найбільша півширина перешкоди серед завантажених
   const evict = (map, keep) => {
     if (map.size <= keep) return;
@@ -52,6 +52,7 @@ export function createWorld(seed, onMesh) {
   const gen = createGen(seed, (key, q, data, mesh, ms) => {
     genMs += ms; genN++;
     if (q.type === 'col') { addCol(ckey(q.d, q.n, q.cx, q.cy), data); return; }
+    if (q.type === 'far') { data.used = performance.now(); fars.set(key, data); onMesh(key, data, mesh); evict(fars, KEEP_FARS); return; }
     data.used = performance.now();
     const was = secs.get(key);
     if (was) was.dead = true;
@@ -139,6 +140,9 @@ export function createWorld(seed, onMesh) {
       };
     },
     wantCol(d, n, cx, cy, pri) { gen.want('c' + ckey(d, n, cx, cy), { type: 'col', d, n, cx, cy }, pri); return 'c' + ckey(d, n, cx, cy); },
+    // Плитка далечі (крок s): запит (готова — far(key): zmin, zmax; меш — у рендері), ключ
+    wantFar(d, n, tx, ty, s, pri) { const key = `f${d}:${n}:${tx}:${ty}:${s}`; gen.want(key, { type: 'far', d, n, tx, ty, s }, pri); return key; },
+    far: (key) => { const F = fars.get(key); if (F) F.used = performance.now(); return F; },
     wantSec(d, n, cx, cy, cz, pri) { const key = skey(d, n, cx, cy, cz); gen.want(key, { type: 'sec', d, n, cx, cy, cz }, pri); return key; },
     stats: () => ({ cols: cols.size, secs: secs.size, genMs: genN ? genMs / genN : 0, pending: gen.pending }),
     stop() { gen.stop(); },

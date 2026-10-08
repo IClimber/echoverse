@@ -16,11 +16,13 @@ import { animate } from './anim.js';
 import { clockStr } from './sky.js';
 import { weatherAt, localWeather } from './weather.js';
 import { T_SNOW, T_ICE, T_DESERT, T_DRY } from './gen/chunk.js';
-import { createCamera, rotate, wheel, smooth, moveBasis, clipDist, facing, setYaw, basis, boxInView, ISO, THIRD, HEAD } from './camera.js';
+import { createCamera, rotate, wheel, smooth, moveBasis, clipDist, facing, setYaw, basis, boxInView, ISO, THIRD, HEAD, FAR_R, SEAM } from './camera.js';
+import { FT } from './gen/far.js';
 
 const $ = (id) => document.getElementById(id);
 const SAVE_MS = 10000;                     // автозбереження
 const CAM_KEY = 'echoverse-camera';         // вибраний вигляд (на браузер)
+const ZR_FAR = [-200, 2050];                 // висоти (од.) для піраміди видимості ще не згенерованої плитки далечі
 
 const QS = new URLSearchParams(location.search);
 if (QS.has('strip')) import('./strip.js').then((m) => m.runStrip());
@@ -363,10 +365,34 @@ function boot() {
       for (const [cx, cy] of nearCols) { const C = col(d, n, cx, cy, hot ? -2e6 : 1e5); if (C) visSecs(d, n, C, hot ? -2e6 : 1e5, true, null); }
       if (hot) for (const v of vis) { const C = col(d, n, v.cx, v.cy, -1e6 + v.dist2); if (C) visSecs(d, n, C, -1e6 + v.dist2, false, null); }
     };
+    g.far = camera.mode === ISO ? null : farTiles(keys, t, m);
     for (const dir of [-1, 1]) other(g.d, g.n + dir, ch && ch.to[0] === g.d && ch.to[1] === g.n + dir);
     if (ch && (ch.to[0] !== g.d || Math.abs(ch.to[1] - g.n) !== 1)) other(ch.to[0], ch.to[1], true);   // далекий стрибок (R)
     W.gen.keepOnly(keys);
     W.gen.tick();
+  }
+
+  // Далечінь (третя особа): плитки поверхні FT×FT клітинок у радіусі FAR_R, що виходять за шов і потрапляють у
+  // піраміду видимості; крок — від відстані (2, 4, 8 клітинок). Поки потрібного кроку немає — показуємо інший готовий
+  // крок тієї самої плитки (без дір під час перемикання). Запити — після секцій поточного всесвіту
+  function farTiles(keys, t, m) {
+    const W = g.world, out = [], tx0 = Math.floor((t[0] - FAR_R) / FT), tx1 = Math.floor((t[0] + FAR_R) / FT);
+    const ty0 = Math.floor((t[1] - FAR_R) / FT), ty1 = Math.floor((t[1] + FAR_R) / FT);
+    for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) {
+      const ax = tx * FT - t[0], ay = ty * FT - t[1], qx = Math.max(ax, Math.min(0, ax + FT)), qy = Math.max(ay, Math.min(0, ay + FT));
+      const near = Math.hypot(qx, qy), far = Math.hypot(Math.max(-ax, ax + FT), Math.max(-ay, ay + FT));
+      if (near > FAR_R || far < SEAM) continue;
+      const s = near < 300 ? 2 : near < 700 ? 4 : 8;
+      let F = null;
+      for (const ss of [s, s * 2, s / 2, s * 4]) { if (ss < 2 || ss > 8) continue; const k = `f${g.d}:${g.n}:${tx}:${ty}:${ss}`; if (renderer.has(k)) { F = { k, d: W.far(k) }; break; } }
+      const z0 = F && F.d ? F.d.zmin - t[2] : ZR_FAR[0] - t[2], z1 = F && F.d ? F.d.zmax + 40 - t[2] : ZR_FAR[1] - t[2];
+      if (!boxInView(m, ax, ay, z0, z1, FT)) continue;
+      const key = `f${g.d}:${g.n}:${tx}:${ty}:${s}`;
+      keys.add(key);
+      if (!renderer.has(key)) W.wantFar(g.d, g.n, tx, ty, s, 2e5 + near);
+      if (F) { keys.add(F.k); out.push({ key: F.k, x0: tx * FT, y0: ty * FT }); }
+    }
+    return out;
   }
 
   // Карта укриттів від опадів (64×64 навколо гравця): висота верху стовпця; перебудова — коли гравець перейшов
@@ -389,7 +415,7 @@ function boot() {
     const anim = animate(me, dt, now, physOf(L).speed * (me.run ? SPRINT * 0.85 : 1));
     if (!g.view) return;
     const sk = renderer.draw({
-      camera, target: g.cam, view: g.view, laws: L, keys: g.vis, clock: g.clock, bodies: g.world.bodiesIn(g.visCols || []), weather: { W: loc.W, loc }, rain: me.placed && loc.type ? rainMap(now) : null,
+      camera, target: g.cam, view: g.view, laws: L, keys: g.vis, far: g.far, clock: g.clock, bodies: g.world.bodiesIn(g.visCols || []), weather: { W: loc.W, loc }, rain: me.placed && loc.type ? rainMap(now) : null,
       me: me.placed ? { x: me.x, y: me.y, z: me.vis ?? me.z, gz: under ? under.z : me.z, yaw: me.yaw, swim: me.swim, fly: me.fly, tint: [1 + a * 0.4, 1 + a, 1 + a * 1.3], anim } : null,
     });
     setText('addr', `Глибина ${g.d} · всесвіт ${fmtN(g.n)} · ${clockStr(sk.phase)}${L.sky.lock ? ' (вічно)' : ''}`);

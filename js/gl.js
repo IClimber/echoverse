@@ -51,6 +51,7 @@ uniform float uCutD;      // глибина гравця (як gl_FragCoord.z): 
 uniform float uAlpha;     // прозорість (лише тінь; решта — 1)
 uniform vec3 uEye;        // око (відносно цілі) — для розчинення рослин біля камери
 uniform vec2 uFade;       // рослини: ближче за x до ока — зникли, від x до y — розчиняються (дизеринг); y = 0 — вимкнено
+uniform vec2 uRing;       // шов далечі (по горизонталі від цілі): малюємо лише від x до y (y = 0 — усе)
 out vec4 o;
 // Поріг упорядкованого дизерингу 4×4 (0…1)
 float bayer(vec2 p) {
@@ -59,6 +60,7 @@ float bayer(vec2 p) {
   return (float(b[i]) + 0.5) / 16.0;
 }
 void main() {
+  if (uRing.y > 0.0) { float r = length(vW.xy); if (r < uRing.x || r > uRing.y) discard; }
   if (uFade.y > 0.0) { float t = (distance(vW, uEye) - uFade.x) / (uFade.y - uFade.x); if (t < bayer(gl_FragCoord.xy)) discard; }
   if (uCut.z > 0.0 && gl_FragCoord.z < uCutD && vW.z > uCut.w && distance(gl_FragCoord.xy, uCut.xy) < uCut.z
       && mod(floor(gl_FragCoord.x) + floor(gl_FragCoord.y), 2.0) < 1.0) discard;
@@ -282,7 +284,7 @@ export function createGL(canvas) {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   gl.activeTexture(gl.TEXTURE0);
   const U = {};
-  for (const k of ['uModel', 'uView', 'uLight', 'uLightCol', 'uTint', 'uAmb', 'uFogCol', 'uFog', 'uCut', 'uCutD', 'uAlpha', 'uTex', 'uTime', 'uFR', 'uFU', 'uEye', 'uFade', 'uWind', 'uCurve']) U[k] = gl.getUniformLocation(prog, k);
+  for (const k of ['uModel', 'uView', 'uLight', 'uLightCol', 'uTint', 'uAmb', 'uFogCol', 'uFog', 'uCut', 'uCutD', 'uAlpha', 'uTex', 'uTime', 'uFR', 'uFU', 'uEye', 'uFade', 'uRing', 'uWind', 'uCurve']) U[k] = gl.getUniformLocation(prog, k);
   gl.useProgram(prog);
   gl.enable(gl.DEPTH_TEST);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -356,6 +358,7 @@ export function createGL(canvas) {
       gl.uniform3f(U.uFogCol, fogCol[0] / 255, fogCol[1] / 255, fogCol[2] / 255);
       gl.uniform2f(U.uFog, fog[0], fog[1]);
       R.setCut(cut);
+      R.setRing(null);
     },
     // Небо на весь екран (до всього іншого, без глибини): sky — {inv (обернена матриця камери), st (sky.js skyState)}
     drawSky({ inv, st }) {
@@ -405,6 +408,8 @@ export function createGL(canvas) {
       gl.useProgram(prog);
     },
     // Розчинення біля ока (рослини в третій особі): fade — [зникли, видно] у світових одиницях або null
+    // Шов далечі: малювати лише між r0 і r1 від цілі по горизонталі; null — усе
+    setRing(r) { gl.uniform2f(U.uRing, r ? r[0] : 0, r ? r[1] : 0); },
     setFade(fade, eye) {
       if (fade) { gl.uniform2f(U.uFade, fade[0], fade[1]); gl.uniform3f(U.uEye, eye[0], eye[1], eye[2]); }
       else gl.uniform2f(U.uFade, 0, 0);

@@ -3,6 +3,7 @@
 // його звідти. Зведення стовпця — поверхня, укриття від опадів, межі секцій із поверхнею, предмети.
 import { genCol, genSection, CW, SEC, T_WATER, T_ICE, T_BED } from './chunk.js';
 import { chunkMesh, objPose } from './mesh.js';
+import { farMesh } from './far.js';
 import { L_DRY, SEA } from '../universe.js';
 
 const ISL_CZ = [2, 3, 4, 5];                  // секції смуги ширяючих островів (блоки 44…84)
@@ -37,8 +38,12 @@ export function colSummary(col, L) {
   };
 }
 
-// Робота q = {type: 'col' | 'sec', d, n, cx, cy, cz}: {data, mesh?, bufs — що можна передати без копіювання}
+// Робота q = {type: 'col' | 'sec' | 'far' (плитка далечі tx, ty з кроком s), d, n, cx, cy, cz}: {data, mesh?, bufs — що можна передати без копіювання}
 export function runJob(L, q, cache) {
+  if (q.type === 'far') {                      // плитка далечі: висотне поле поверхні з кроком q.s
+    const f = farMesh(L, q.tx, q.ty, q.s), m = f.mesh;
+    return { data: { zmin: f.zmin, zmax: f.zmax }, mesh: { solid: m }, bufs: [m.pos.buffer, m.nor.buffer, m.col.buffer, m.mat.buffer, m.idx.buffer] };
+  }
   const col = colFor(L, q, cache);
   if (q.type === 'col') return { data: colSummary(col, L), bufs: [] };
   const sec = genSection(L, col, q.cz);

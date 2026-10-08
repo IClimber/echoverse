@@ -343,3 +343,21 @@ test('форми рельєфу: річки (вузькі смуги рідин�
   // закони: біля старту кратери, вулкани й шпилі — рідко
   for (let n = -5; n <= 5; n++) { const R = lawsOf(seed, 0, n).relief; assert.ok(R.craters <= 0.15 && R.volcano <= 0.25 && R.spires <= 0.2); }
 });
+
+test('далечінь: плитка — узгоджений меш, висоти вершин — поверхня tile', async () => {
+  const { farMesh, FT } = await import('../js/gen/far.js');
+  const { LEVEL } = await import('../js/iso.js');
+  const { T_ICE } = await import('../js/gen/chunk.js');
+  const L = lawsOf(hashStr('далечінь'), 0, 7);
+  for (const s of [2, 4, 8]) {
+    const { mesh: m, zmin, zmax } = farMesh(L, -1, 2, s), n = FT / s + 1, nv = m.pos.length / 3;
+    assert.equal(m.nor.length, nv * 3); assert.equal(m.col.length, nv * 3); assert.equal(m.mat.length, nv);
+    assert.equal(m.count % 3, 0);
+    for (const i of m.idx) assert.ok(i < nv);
+    assert.ok(zmin <= zmax);
+    for (const [i, j] of [[0, 0], [n - 1, 3], [5, n - 1]]) {
+      const c = tile(L, -FT + i * s, 2 * FT + j * s), z = m.pos[(j * n + i) * 3 + 2];
+      if (c.t !== T_WATER && c.t !== T_ICE) assert.ok(Math.abs(z - (c.h + 1) * LEVEL) < 1e-6, `${z} / ${c.h}`);
+    }
+  }
+});

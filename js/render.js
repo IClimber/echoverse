@@ -9,7 +9,7 @@ import { figureParts, Mesh } from './gen/mesh.js';
 import { poseMatrices } from './anim.js';
 import { chain, translate, scale, invert, rotZ, rotX } from './mat.js';
 import { skyState, applyWeather } from './sky.js';
-import { ISO, VIEW_R, viewProj, chunksInView, isoRadius, project, basis } from './camera.js';
+import { ISO, VIEW_R, FAR_R, SEAM, viewProj, chunksInView, isoRadius, project, basis } from './camera.js';
 import { texturesOf, TEX } from './textures.js';
 import { LAYERS } from './gen/materials.js';
 
@@ -75,11 +75,12 @@ export function createRenderer(canvas) {
       const rad = iso ? isoRadius(camera, R.width, R.height, ZR_ISO, target[2]) : VIEW_R;
       // туман: згори — за відстанню на екрані (кути екрана злегка в тумані, висота не вибілює), у третій особі — по горизонталі
       const b = basis(camera), rs = Math.hypot(R.width, R.height) / 2 / (S * camera.zoom);
-      return { ...v, rad, fog: iso ? [0.8 * rs, 1.15 * rs] : [0.55 * VIEW_R, 0.95 * VIEW_R], fogAxes: iso ? [b.r, b.up] : null, chunks: chunksInView(v.m, target, rad, ZR) };
+      return { ...v, rad, fog: iso ? [0.8 * rs, 1.15 * rs] : [0.3 * FAR_R, 0.97 * FAR_R], fogAxes: iso ? [b.r, b.up] : null, chunks: chunksInView(v.m, target, rad, ZR) };
     },
 
     // st: {camera, target [x,y,z], view (з view()), laws, clock (с, годинник світу), weather ({W — weather.js weatherAt,
-    // loc — localWeather}), rain ({x0, y0} — кут карти укриттів), keys (видимі чанки [{key, cx, cy}]),
+    // loc — localWeather}), rain ({x0, y0} — кут карти укриттів), keys (видимі секції [{key, cx, cy, cz}]),
+    // far (плитки далечі [{key, x0, y0}] — у третій особі; ближче за SEAM їх не видно, далі — не видно секцій),
     // me {x, y, z, gz, yaw, tint, anim}}. Повертає стан неба (sky.js) — для HUD
     draw(st) {
       frame++;
@@ -108,11 +109,19 @@ export function createRenderer(canvas) {
       const lt = (st.clock || 0) * (laws.phys ? laws.phys.time : 1) % 3000;
       R.begin({ fogCol: sk.fog, light: [lx, ly, lz], amb, lightCol, fog: fogR, fogAxes: view.fogAxes, view: view.m, cut, time: lt, sky: { inv: invert(view.m), st: sk }, wind, curve: laws.phys ? 0.5 / laws.phys.planetR : 0 });
       const zOf = (v) => v.cz * SEC * LEVEL - t[2];        // секція: зсув по висоті
+      const ring = st.far && st.far.length ? [0, SEAM] : null;
+      R.setRing(ring);
       for (const v of st.keys) {
         const e = meshes.get(v.key);
         if (!e) continue;
         e.used = frame;
         R.drawAt(e.mesh, v.cx * CS - t[0], v.cy * CS - t[1], zOf(v));
+      }
+      // Далечінь: плитки поверхні — лише за швом (ближче — повні секції)
+      if (ring) {
+        R.setRing([SEAM, 1e9]);
+        for (const f of st.far) { const e = meshes.get(f.key); if (e) { e.used = frame; R.drawAt(e.mesh, f.x0 - t[0], f.y0 - t[1], -t[2]); } }
+        R.setRing(ring);
       }
       // Рослини: зблизька — повні, далі — спрощені; у третій особі біля камери розчиняються (камера в кроні не сліпне)
       R.setCut(cutFlora);
@@ -134,6 +143,7 @@ export function createRenderer(canvas) {
       R.beginAlpha(laws.liquid.alpha);
       for (const v of st.keys) { const e = meshes.get(v.key); if (e && e.liq) R.drawAt(e.liq, v.cx * CS - t[0], v.cy * CS - t[1], zOf(v)); }
       R.endAlpha();
+      R.setRing(null);
       if (me) {
         R.setCut(null);                             // власні грані гравця не вирізаємо
         const ox = me.x - t[0], oy = me.y - t[1], pose = poseMatrices(me.anim, ox, oy, me.z - t[2], me.yaw);

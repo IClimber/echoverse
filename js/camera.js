@@ -13,7 +13,9 @@ export const LIMITS = {
   third: { pitch: [-70 * D2R, 80 * D2R], dist: [2.5, 16] },   // від'ємний нахил — погляд угору (eyeDir)
 };
 export const FOV = 55 * D2R;
-export const VIEW_R = 112;           // третя особа: далечінь (клітинок), далі — туман і небо
+export const VIEW_R = 112;           // третя особа: повні секції (клітинок)
+export const FAR_R = 1400;           // третя особа: далечінь (плитки поверхні, gen/far.js), далі — туман і небо
+export const SEAM = VIEW_R - 8;      // шов: ближче — повні секції, далі — плитки далечі
 export const HEAD = 1.0;             // третя особа: камера дивиться на висоту голови
 // Третя особа: куди дивиться камера (по горизонталі) — туди обернений гравець, спиною до камери
 export const facing = (c) => c.yaw + Math.PI;
@@ -82,7 +84,7 @@ export function viewProj(c, W, H, dist = c.dist) {
     };
   }
   const e = eyeDir(c), eye = [e[0] * dist, e[1] * dist, e[2] * dist];
-  const f = 1 / Math.tan(FOV / 2), near = 0.08, far = VIEW_R * 2, A = (far + near) / (near - far), B = 2 * far * near / (near - far);
+  const f = 1 / Math.tan(FOV / 2), near = 0.1, far = FAR_R * 1.6, A = (far + near) / (near - far), B = 2 * far * near / (near - far);
   const fx = f * H / W;
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
   const tr = -dot(r, eye), tu = -dot(up, eye), tz = -dot(u, eye);
@@ -122,11 +124,11 @@ export function chunksInView(m, target, R, zr) {
   return out.sort((a, b2) => a.dist2 - b2.dist2);
 }
 
-// Чи потрапляє в піраміду видимості коробка CS×CS клітинок з кутом (ax, ay) і висотами z0…z1 (відносно цілі)
-export function boxInView(m, ax, ay, z0, z1) {
+// Чи потрапляє в піраміду видимості коробка size×size клітинок (за замовчуванням — чанк) з кутом (ax, ay) і висотами z0…z1 (відносно цілі)
+export function boxInView(m, ax, ay, z0, z1, size = CS) {
   let l = 0, rr = 0, b = 0, t = 0, back = 0;
   for (let k = 0; k < 8; k++) {
-    const x = ax + (k & 1 ? CS : 0), y = ay + (k & 2 ? CS : 0), z = k & 4 ? z1 : z0;
+    const x = ax + (k & 1 ? size : 0), y = ay + (k & 2 ? size : 0), z = k & 4 ? z1 : z0;
     const X = m[0] * x + m[4] * y + m[8] * z + m[12], Y = m[1] * x + m[5] * y + m[9] * z + m[13], Wc = m[3] * x + m[7] * y + m[11] * z + m[15];
     if (X < -Wc) l++; if (X > Wc) rr++; if (Y < -Wc) b++; if (Y > Wc) t++; if (Wc <= 0) back++;
   }
