@@ -6,6 +6,7 @@ import { regionAt, speciesOf, pickSpecies, groundTint } from './gen/flora.js';
 import { GOLD, SPOTS } from './golden.js';
 import { hashStr } from './rng.js';
 import { fmtN } from './debug.js';
+import { skyState } from './sky.js';
 
 const SIZE = 96, PX = 2;                       // клітинок на бік, px на клітинку
 
@@ -44,6 +45,22 @@ function minimap(L, x0, y0) {
   return { cv, biomes: bset.size, species: sset.size };
 }
 
+// Смужка неба всесвіту: полудень (зеніт → обрій), захід, північ; крапки — сонця (кольором), місяці, кільця
+function skyBar(L) {
+  const cv = document.createElement('canvas');
+  cv.width = SIZE * PX; cv.height = 14;
+  const ctx = cv.getContext('2d'), w = cv.width / 3, day = L.sky.dayMin * 60, css = (c) => `rgb(${c.map((v) => v | 0).join(',')})`;
+  [0.5, 0.75, 0].forEach((ph, i) => {
+    const st = skyState(L, ((ph - L.sky.off + 1) % 1) * day), gr = ctx.createLinearGradient(0, 0, 0, 14);
+    gr.addColorStop(0, css(st.zenith)); gr.addColorStop(1, css(st.horizon));
+    ctx.fillStyle = gr; ctx.fillRect(i * w, 0, w, 14);
+  });
+  L.sky.suns.forEach((s, i) => { ctx.fillStyle = css(s.col); ctx.beginPath(); ctx.arc(8 + i * 10, 7, 2 + s.size * 40, 0, 7); ctx.fill(); });
+  L.sky.moons.forEach((m, i) => { ctx.fillStyle = css(m.col); ctx.beginPath(); ctx.arc(2 * w + 8 + i * 10, 7, 2 + m.size * 40, 0, 7); ctx.fill(); });
+  if (L.sky.rings) { ctx.strokeStyle = css(L.sky.rings.col); ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(w * 1.5, 12, w * 0.4, 4, 0, Math.PI, 0); ctx.stroke(); }
+  return cv;
+}
+
 export function runStrip() {
   const q = new URLSearchParams(location.search);
   const seedText = q.get('seed') || 'test', seed = hashStr(seedText);
@@ -68,8 +85,9 @@ export function runStrip() {
       Object.assign(fig.style, { margin: 0, width: SIZE * PX + 'px', fontSize: '11px', color: '#96a2bb' });
       const cap = document.createElement('figcaption');
       const mm = minimap(L, x0, y0);
-      cap.textContent = `${d}:${fmtN(n)} · ${L.grav.toFixed(2)} g · ${L.liquid.name}${L.liquid.kind === 0 ? ' ' + L.liquid.tC + '°' : ''} · море ${L.seaE.toFixed(2)} · рельєф ${L.amp} · t ${L.temp.toFixed(2)} · вол ${L.wet.toFixed(2)} · біомів ${mm.biomes}, видів ${mm.species}`;
-      fig.append(mm.cv, cap);
+      const S = L.sky;
+      cap.textContent = `${d}:${fmtN(n)} · доба ${S.lock ? 'вічна' : S.dayMin.toFixed(0) + ' хв'} · сонць ${S.suns.length}, місяців ${S.moons.length}${S.rings ? ', кільця' : ''} · ${L.grav.toFixed(2)} g · ${L.liquid.name}${L.liquid.kind === 0 ? ' ' + L.liquid.tC + '°' : ''} · море ${L.seaE.toFixed(2)} · рельєф ${L.amp} · t ${L.temp.toFixed(2)} · вол ${L.wet.toFixed(2)} · біомів ${mm.biomes}, видів ${mm.species}`;
+      fig.append(skyBar(L), mm.cv, cap);
       wrap.append(fig);
     }
     root.append(wrap);

@@ -280,3 +280,28 @@ test('біг і політ: Shift — швидше; у польоті без г�
   for (let i = 0; i < 60; i++) step(q, 1, 0, false, 1 / 60, W, PH1, [[1, 0], [0, 1]]);
   assert.ok(q.x > 1.5 && q.x < 2 - 0.24 + 1e-6, `влетів у стіну: x ${q.x}`);
 });
+
+test('небо й час: біля старту — одне сонце, місяць, доба ~20 хв; далі — кілька сонць, кільця, вічний день; полудень світліший', async () => {
+  const { lawsOf } = await import('../js/universe.js');
+  const { skyState, dayPhase, clockStr } = await import('../js/sky.js');
+  const { hashStr } = await import('../js/rng.js');
+  const seed = hashStr('небо');
+  let multi = 0, rings = 0, lock = 0, noMoon = 0;
+  for (let n = -1500; n <= 1500; n++) {
+    const S = lawsOf(seed, 0, n).sky;
+    assert.ok(S.suns.length >= 1 && S.suns.length <= 3 && S.moons.length <= 3 && S.dayMin >= 6 && S.dayMin <= 40 && S.night > 0.1);
+    if (Math.abs(n) <= 8) assert.ok(S.suns.length === 1 && S.moons.length === 1 && !S.lock && !S.rings && S.dayMin >= 16 && S.dayMin <= 24, `біля старту ${n}`);
+    multi += S.suns.length > 1; rings += !!S.rings; lock += S.lock; noMoon += !S.moons.length;
+  }
+  assert.ok(multi > 100 && rings > 100 && lock > 10 && noMoon > 50, `сонць ${multi}, кілець ${rings}, вічних ${lock}, без місяця ${noMoon}`);
+  const L = lawsOf(seed, 0, 0), day = L.sky.dayMin * 60, at = (ph) => ((ph - L.sky.off + 1) % 1) * day;
+  assert.ok(Math.abs(dayPhase(L, at(0.5)) - 0.5) < 1e-9 && clockStr(0.5) === '12:00' && clockStr(0.25) === '06:00');
+  const noon = skyState(L, at(0.5)), night = skyState(L, at(0));
+  assert.ok(noon.day > 0.95 && night.day < 0.05 && noon.lightK[1] > night.lightK[1] * 2 && night.lightK[1] > 0.05, 'ніч не темрява, день світліший');
+  assert.ok(noon.suns[0].dir[2] > 0.3 && night.suns[0].dir[2] < -0.3 && noon.light[2] >= 0.25 && night.light[2] >= 0.25);
+  assert.ok(night.stars > noon.stars && noon.horizon[2] > night.horizon[2]);
+  assert.ok(skyState(L, at(0.25)).dusk > 0.5, 'на світанку — захід (світіння обрію)');
+  // збереження годинника
+  const w = { id: 'a', name: 'x', seedText: 'x', seed: 1, gen: 6, created: 1, played: 1, player: { d: 0, n: 0, x: 0, y: 0 }, history: [], clock: 1234.5 };
+  assert.equal(deserialize(serialize(w)).world.clock, 1234.5);
+});

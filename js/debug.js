@@ -4,6 +4,7 @@ import { physOf } from './universe.js';
 import { BIOMES } from './gen/biomes.js';
 import { regionAt, speciesOf, FORMS } from './gen/flora.js';
 import { jumpHeight } from './player.js';
+import { dayPhase, clockStr } from './sky.js';
 import { LEVEL } from './iso.js';
 
 // Види області під ногами в цьому біомі: «область 3fa2c1: хвойне, кущ, трава»
@@ -31,6 +32,7 @@ export function debugText(g, perf, meshCount, cam) {
     `біом       ${c ? BIOMES[c.bm].name : '—'}  (у всесвіті: ${L.biomes.flat().map(([id]) => BIOMES[id].name).filter((v, i, a) => a.indexOf(v) === i).length} біомів)`,
     `види       ${c && c.bm ? speciesLine(L, tx, ty, c.bm) : '—'}`,
     `рослини    густота ${(L.flora * 100).toFixed(1)} %, розмір ×${L.treeH.toFixed(2)}, каміння ${(L.rocks * 100).toFixed(1)} %`,
+    `небо       доба ${L.sky.lock ? 'вічна (припливне захоплення)' : L.sky.dayMin.toFixed(1) + ' хв'}, ${clockStr(dayPhase(L, g.clock || 0))}, сонць ${L.sky.suns.length}, місяців ${L.sky.moons.length}${L.sky.rings ? ', кільця' : ''}, широта ${(L.sky.lat * 69).toFixed(0)}°`,
     `камера     ${cam.mode === 'iso' ? `згори, масштаб ${cam.zoom.toFixed(2)}` : `третя особа, відстань ${cam.dist.toFixed(1)}`}, азимут ${Math.round(cam.yaw * 180 / Math.PI) % 360}°, видно чанків ${g.view ? g.view.chunks.length : 0}`,
     `кадр       ${perf.fps.toFixed(0)} к/с, CPU ${perf.cpu.toFixed(2)} мс`,
     `генерація  ${st.genMs.toFixed(2)} мс/чанк, у пам'яті ${st.chunks}, мешів ${meshCount}, у черзі ${st.pending}`,

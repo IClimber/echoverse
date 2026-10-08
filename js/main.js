@@ -12,6 +12,7 @@ import { CS, solidB, B_LIQ } from './gen/chunk.js';
 import { LEVEL } from './iso.js';
 import { debugText, fmtN } from './debug.js';
 import { animate } from './anim.js';
+import { clockStr } from './sky.js';
 import { createCamera, rotate, wheel, smooth, moveBasis, clipDist, facing, setYaw, ISO, THIRD, HEAD } from './camera.js';
 
 const $ = (id) => document.getElementById(id);
@@ -121,7 +122,7 @@ function boot() {
     g = {
       rec, world: createWorld(rec.seed, (key, c, m) => renderer.add(key, m)), dev: createDevice(rec.history),
       d: p.d, n: p.n, me: { x: p.x, y: p.y, z: p.z, vz: 0, air: false, ground: true, yaw: Math.PI * 0.75, moving: false, placed: false },
-      cam: [p.x, p.y, p.z || 0], lastSave: performance.now(), vis: [], view: null,
+      cam: [p.x, p.y, p.z || 0], lastSave: performance.now(), vis: [], view: null, clock: rec.clock || 0,
     };
     if (camera.mode === THIRD) setYaw(camera, g.me.yaw + Math.PI);
     putWorld(snapshot());
@@ -141,6 +142,7 @@ function boot() {
     const r = g.rec;
     r.player = { d: g.d, n: g.n, x: g.me.x, y: g.me.y, z: g.me.z };
     r.history = g.dev.history.slice();
+    r.clock = g.clock;
     r.played = Date.now();
     return r;
   }
@@ -223,6 +225,7 @@ function boot() {
       }
     }
     if (!$('menu').hidden) return;                              // меню — пауза
+    g.clock += dt;                                              // годинник світу (доба кожного всесвіту — своя)
     const w = takeWheel(), [mx, my] = takeDrag(), turn = turnAxis();
     if (w) wheel(camera, w);
     if (mx || my || turn) rotate(camera, mx + turn * dt * 260, my);
@@ -288,11 +291,11 @@ function boot() {
     const under = me.placed ? support(g.world.probe(g.d, g.n), me.x, me.y, me.z + 0.01) : null;
     const anim = animate(me, dt, now, physOf(L).speed * (me.run ? SPRINT * 0.85 : 1));
     if (!g.view) return;
-    renderer.draw({
-      camera, target: g.cam, view: g.view, laws: L, keys: g.vis,
+    const sk = renderer.draw({
+      camera, target: g.cam, view: g.view, laws: L, keys: g.vis, clock: g.clock,
       me: me.placed ? { x: me.x, y: me.y, z: me.vis ?? me.z, gz: under ? under.z : me.z, yaw: me.yaw, swim: me.swim, fly: me.fly, tint: [1 + a * 0.4, 1 + a, 1 + a * 1.3], anim } : null,
     });
-    setText('addr', `Глибина ${g.d} · всесвіт ${fmtN(g.n)}`);
+    setText('addr', `Глибина ${g.d} · всесвіт ${fmtN(g.n)} · ${clockStr(sk.phase)}${L.sky.lock ? ' (вічно)' : ''}`);
     setText('coords', `x ${Math.floor(me.x)} · y ${Math.floor(me.y)} · гравітація ${gStr(L)}${me.wet ? ` · у рідині: ${liqStr(L.liquid)}${L.liquid.danger ? ' — небезпечно' : ''}` : ''}`);
     $('charge').hidden = !ch;
     if (ch) {

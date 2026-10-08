@@ -61,6 +61,92 @@ void main() {
   o = vec4(mix(c, uFogCol, smoothstep(uFog.x, uFog.y, vFog)), uAlpha);
 }`;
 
+// Небо: трикутник на весь екран; напрям погляду — з оберненої матриці камери. Градієнт зеніт — обрій, світіння
+// заходу біля головного сонця, диски сонць з ореолом, місяці з фазою (освітлені головним сонцем), зорі (сітка на
+// кубі небесної сфери, обертаються з небом), кільця планети (у площині екватора: перетин променя з площиною)
+const SKY_VS = `#version 300 es
+out vec2 vN;
+void main() {
+  vec2 p = vec2(gl_VertexID == 1 ? 3.0 : -1.0, gl_VertexID == 2 ? 3.0 : -1.0);
+  vN = p;
+  gl_Position = vec4(p, 0.0, 1.0);
+}`;
+const SKY_FS = `#version 300 es
+precision highp float;
+in vec2 vN;
+uniform mat4 uInv;
+uniform vec3 uZen, uHor, uMain;
+uniform vec4 uDusk;          // rgb, сила
+uniform vec4 uSun[3], uSunCol[3];   // напрям, кутовий радіус; колір, яскравість
+uniform vec4 uMoon[3];       // напрям, кутовий радіус
+uniform vec3 uMoonCol[3];
+uniform int uNSun, uNMoon;
+uniform float uDay;
+uniform vec2 uStars;         // яскравість, відтінок
+uniform mat3 uCel;
+uniform vec4 uRing;          // r0, r1, непрозорість (0 — немає), смуг
+uniform vec3 uRingCol, uPole;
+out vec4 o;
+float hash(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 45.164))) * 43758.5453); }
+void main() {
+  vec4 a = uInv * vec4(vN, -1.0, 1.0), b = uInv * vec4(vN, 1.0, 1.0);
+  vec3 d = normalize(b.xyz / b.w - a.xyz / a.w);
+  float up = d.z, above = smoothstep(-0.02, 0.01, up);
+  vec3 c = up < 0.0 ? uHor * (1.0 + up * 0.35) : mix(uHor, uZen, smoothstep(0.0, 0.55, up));
+  float g = max(dot(d, uMain), 0.0);
+  c += uDusk.rgb * uDusk.a * (pow(g, 5.0) * 0.6 + pow(g, 40.0) * 0.4) * smoothstep(-0.25, 0.05, up);
+  if (uStars.x > 0.01 && up > -0.05) {
+    vec3 q = d * uCel, aq = abs(q);
+    vec2 uv; float f;
+    if (aq.x >= aq.y && aq.x >= aq.z) { uv = q.yz / aq.x; f = sign(q.x); }
+    else if (aq.y >= aq.z) { uv = q.xz / aq.y; f = 2.0 + sign(q.y); }
+    else { uv = q.xy / aq.z; f = 4.0 + sign(q.z); }
+    uv *= 90.0;
+    vec2 cell = floor(uv);
+    if (hash(vec3(cell, f)) > 1.0 - 0.07 * uStars.x) {
+      vec2 ctr = cell + 0.25 + 0.5 * vec2(hash(vec3(cell, f + 7.0)), hash(vec3(cell, f + 13.0)));
+      float br = smoothstep(0.34, 0.0, length(uv - ctr)) * (0.35 + 0.65 * hash(vec3(cell, f + 3.0)));
+      vec3 sc = mix(vec3(1.0), 0.55 + 0.45 * cos(6.2831 * (uStars.y + hash(vec3(cell, f + 5.0)) * 0.3 + vec3(0.0, 0.33, 0.67))), 0.5);
+      c += sc * br * uStars.x * smoothstep(-0.05, 0.12, up);
+    }
+  }
+  if (uRing.z > 0.0) {
+    float dp = dot(d, uPole);
+    if (abs(dp) > 1e-4) {
+      float t = -uPole.z / dp;
+      if (t > 0.0) {
+        float r = length(vec3(0.0, 0.0, 1.0) + t * d);
+        if (r > uRing.x && r < uRing.y) {
+          float u = (r - uRing.x) / (uRing.y - uRing.x);
+          float band = 0.5 + 0.5 * sin(u * uRing.w * 6.2831 + 1.3) * (0.6 + 0.4 * sin(u * uRing.w * 2.3));
+          float al = uRing.z * band * smoothstep(0.0, 0.06, u) * smoothstep(1.0, 0.94, u) * smoothstep(-0.03, 0.04, up);
+          c = mix(c, uRingCol * (0.3 + 0.7 * uDay) + uDusk.rgb * uDusk.a * 0.2, al);
+        }
+      }
+    }
+  }
+  for (int i = 0; i < 3; i++) {
+    if (i >= uNMoon) break;
+    float cs = dot(d, uMoon[i].xyz), s = uMoon[i].w;
+    if (cs > cos(s)) {
+      vec3 v = (d - uMoon[i].xyz * cs) / sin(s);
+      float l2 = dot(v, v);
+      vec3 n = normalize(v - uMoon[i].xyz * sqrt(max(0.0, 1.0 - l2)));
+      float lit = smoothstep(-0.05, 0.15, dot(n, uMain));
+      c = mix(c, uMoonCol[i] * (0.14 + 0.86 * lit), smoothstep(1.0, 0.9, l2) * above * (1.0 - 0.45 * uDay));
+    }
+  }
+  for (int i = 0; i < 3; i++) {
+    if (i >= uNSun) break;
+    float cs = dot(d, uSun[i].xyz), s = uSun[i].w, th2 = max(0.0, 2.0 * (1.0 - cs));
+    float disk = smoothstep(s * s * 1.1, s * s * 0.85, th2);
+    vec3 sc = uSunCol[i].rgb;
+    c = mix(c, min(vec3(1.0), sc * 1.3 + 0.15), disk * above);
+    c += sc * uSunCol[i].a * (exp(-th2 / (s * s * 9.0)) * 0.45 + exp(-th2 / (s * s * 90.0)) * 0.12) * above;
+  }
+  o = vec4(c, 1.0);
+}`;
+
 function compile(gl, type, src) {
   const s = gl.createShader(type);
   gl.shaderSource(s, src); gl.compileShader(s);
@@ -76,6 +162,14 @@ export function createGL(canvas) {
   gl.attachShader(prog, compile(gl, gl.FRAGMENT_SHADER, FS));
   gl.linkProgram(prog);
   if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+  const sky = gl.createProgram();
+  gl.attachShader(sky, compile(gl, gl.VERTEX_SHADER, SKY_VS));
+  gl.attachShader(sky, compile(gl, gl.FRAGMENT_SHADER, SKY_FS));
+  gl.linkProgram(sky);
+  if (!gl.getProgramParameter(sky, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(sky));
+  const SU = {};
+  for (const k of ['uInv', 'uZen', 'uHor', 'uMain', 'uDusk', 'uSun', 'uSunCol', 'uMoon', 'uMoonCol', 'uNSun', 'uNMoon', 'uDay', 'uStars', 'uCel', 'uRing', 'uRingCol', 'uPole']) SU[k] = gl.getUniformLocation(sky, k);
+  const skyVao = gl.createVertexArray();
   const U = {};
   for (const k of ['uModel', 'uView', 'uLight', 'uLightCol', 'uTint', 'uAmb', 'uFogCol', 'uFog', 'uCut', 'uCutD', 'uAlpha', 'uTex', 'uTime', 'uFR', 'uFU', 'uEye', 'uFade']) U[k] = gl.getUniformLocation(prog, k);
   gl.useProgram(prog);
@@ -134,19 +228,43 @@ export function createGL(canvas) {
       for (const b of mesh.bufs) gl.deleteBuffer(b);
     },
     // Кадр: небо, світло, туман, камера (view — матриця з camera.viewProj); cut — «вікно» до гравця або null
-    begin({ sky, light, amb, lightCol, fog, fogAxes = null, view, cut, time = 0 }) {
+    begin({ fogCol, light, amb, lightCol, fog, fogAxes = null, view, cut, time = 0, sky = null }) {
+      gl.clearColor(fogCol[0] / 255, fogCol[1] / 255, fogCol[2] / 255, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      if (sky) R.drawSky(sky);
+      gl.useProgram(prog);
       gl.uniform1f(U.uTime, time);
       const [fr, fu] = fogAxes || [[0, 0, 0], [0, 0, 0]];
       gl.uniform3f(U.uFR, fr[0], fr[1], fr[2]); gl.uniform3f(U.uFU, fu[0], fu[1], fu[2]);
-      gl.clearColor(sky[0] / 255, sky[1] / 255, sky[2] / 255, 1);
-      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       gl.uniformMatrix4fv(U.uView, false, view);
       gl.uniform3f(U.uLight, light[0], light[1], light[2]);
       gl.uniform3f(U.uLightCol, lightCol[0], lightCol[1], lightCol[2]);
       gl.uniform1f(U.uAmb, amb);
-      gl.uniform3f(U.uFogCol, sky[0] / 255, sky[1] / 255, sky[2] / 255);
+      gl.uniform3f(U.uFogCol, fogCol[0] / 255, fogCol[1] / 255, fogCol[2] / 255);
       gl.uniform2f(U.uFog, fog[0], fog[1]);
       R.setCut(cut);
+    },
+    // Небо на весь екран (до всього іншого, без глибини): sky — {inv (обернена матриця камери), st (sky.js skyState)}
+    drawSky({ inv, st }) {
+      const c = (v) => [v[0] / 255, v[1] / 255, v[2] / 255];
+      gl.useProgram(sky);
+      gl.disable(gl.DEPTH_TEST); gl.depthMask(false);
+      gl.uniformMatrix4fv(SU.uInv, false, inv);
+      gl.uniform3fv(SU.uZen, c(st.zenith)); gl.uniform3fv(SU.uHor, c(st.horizon)); gl.uniform3fv(SU.uMain, st.suns[0].dir);
+      gl.uniform4f(SU.uDusk, ...c(st.duskCol), st.dusk);
+      const sun = new Float32Array(12), sunC = new Float32Array(12), moon = new Float32Array(12), moonC = new Float32Array(9);
+      st.suns.forEach((s, i) => { sun.set([...s.dir, s.size], i * 4); sunC.set([...c(s.col), s.bright], i * 4); });
+      st.moons.forEach((m, i) => { moon.set([...m.dir, m.size], i * 4); moonC.set(c(m.col), i * 3); });
+      gl.uniform4fv(SU.uSun, sun); gl.uniform4fv(SU.uSunCol, sunC); gl.uniform4fv(SU.uMoon, moon); gl.uniform3fv(SU.uMoonCol, moonC);
+      gl.uniform1i(SU.uNSun, st.suns.length); gl.uniform1i(SU.uNMoon, st.moons.length);
+      gl.uniform1f(SU.uDay, st.day); gl.uniform2f(SU.uStars, st.stars, st.starHue);
+      gl.uniformMatrix3fv(SU.uCel, false, st.cel);              // рядки → у шейдері d * uCel
+      const rg = st.rings;
+      gl.uniform4f(SU.uRing, rg ? rg.r0 : 0, rg ? rg.r0 + rg.w : 0, rg ? rg.alpha : 0, rg ? rg.bands : 0);
+      gl.uniform3fv(SU.uRingCol, rg ? c(rg.col) : [0, 0, 0]); gl.uniform3fv(SU.uPole, st.pole);
+      gl.bindVertexArray(skyVao);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.enable(gl.DEPTH_TEST); gl.depthMask(true);
     },
     // Розчинення біля ока (рослини в третій особі): fade — [зникли, видно] у світових одиницях або null
     setFade(fade, eye) {

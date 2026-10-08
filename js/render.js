@@ -7,7 +7,8 @@ import { CS } from './gen/chunk.js';
 import { WORLD_H, SEA, MAX_AMP } from './universe.js';
 import { figureParts, Mesh } from './gen/mesh.js';
 import { poseMatrices } from './anim.js';
-import { chain, translate, scale } from './mat.js';
+import { chain, translate, scale, invert } from './mat.js';
+import { skyState } from './sky.js';
 import { ISO, VIEW_R, viewProj, chunksInView, isoRadius, project, basis } from './camera.js';
 import { texturesOf, TEX } from './textures.js';
 import { LAYERS } from './gen/materials.js';
@@ -16,7 +17,7 @@ const MAX_MESH = 700;                          // чанків з мешами �
 const ZR = [0, WORLD_H * LEVEL + 40];          // висоти світу: від дна до верху островів і крон велетнів (піраміда видимості)
 const ZR_ISO = [0, (SEA + MAX_AMP) * LEVEL + 6]; // згори радіус — по рельєфу з деревами (інакше чанків набагато більше)
 const NEAR = 44;                               // ближче (від цілі до центру чанка) — повні рослини, трава й квіти; далі — спрощені
-const BASE_LIGHT = [0.32, 0.55, 0.77];          // напрям світла (до сонця); азимут зсуває всесвіт
+const REF_Z = 0.77;                            // при сонці на цій висоті верхня грань — рівно колір палітри
 
 export function createRenderer(canvas) {
   const R = createGL(canvas);
@@ -56,14 +57,13 @@ export function createRenderer(canvas) {
       return { ...v, rad, fog: iso ? [0.8 * rs, 1.15 * rs] : [0.55 * VIEW_R, 0.95 * VIEW_R], fogAxes: iso ? [b.r, b.up] : null, chunks: chunksInView(v.m, target, rad, ZR) };
     },
 
-    // st: {camera, target [x,y,z], view (з view()), laws, keys (видимі чанки [{key, cx, cy}]), me {x, y, z, gz, yaw, tint, anim}}
+    // st: {camera, target [x,y,z], view (з view()), laws, clock (с, годинник світу), keys (видимі чанки [{key, cx, cy}]),
+    // me {x, y, z, gz, yaw, tint, anim}}. Повертає стан неба (sky.js) — для HUD
     draw(st) {
       frame++;
-      const { target: t, view, laws } = st, L = laws.light;
-      const c = Math.cos(L.az), s = Math.sin(L.az);
-      const lx = BASE_LIGHT[0] * c - BASE_LIGHT[1] * s, ly = BASE_LIGHT[0] * s + BASE_LIGHT[1] * c, lz = BASE_LIGHT[2];
-      const k = 1 / (L.amb + (1 - L.amb) * lz);  // верхня грань — рівно колір палітри
-      const lightCol = [L.col[0] / 255 * k, L.col[1] / 255 * k, L.col[2] / 255 * k];
+      const { target: t, view, laws } = st, sk = skyState(laws, st.clock || 0), [lx, ly, lz] = sk.light, amb = sk.amb;
+      const k = 1 / (amb + (1 - amb) * REF_Z);
+      const lightCol = [sk.lightK[0] * k, sk.lightK[1] * k, sk.lightK[2] * k];
       const me = st.me;
       let cut = null, cutFlora = null;
       if (me) {
@@ -78,7 +78,7 @@ export function createRenderer(canvas) {
       }
       const tk = `${laws.d}:${laws.n}:${laws.ds}`;
       if (texFor !== tk) { texFor = tk; R.setTextures(texturesOf(laws), TEX, LAYERS); }
-      R.begin({ sky: laws.pal.sky, light: [lx, ly, lz], amb: L.amb, lightCol, fog: view.fog, fogAxes: view.fogAxes, view: view.m, cut, time: performance.now() / 1000 % 1000 });
+      R.begin({ fogCol: sk.fog, light: [lx, ly, lz], amb, lightCol, fog: view.fog, fogAxes: view.fogAxes, view: view.m, cut, time: performance.now() / 1000 % 1000, sky: { inv: invert(view.m), st: sk } });
       for (const v of st.keys) {
         const e = meshes.get(v.key);
         if (!e) continue;
@@ -106,8 +106,9 @@ export function createRenderer(canvas) {
         const ox = me.x - t[0], oy = me.y - t[1], pose = poseMatrices(me.anim, ox, oy, me.z - t[2], me.yaw);
         for (const p in fig) R.draw(fig[p], pose[p], me.tint);
         const up = me.z - me.gz, sz = Math.max(0.45, 1 - up * 0.25);  // тінь: що вище в повітрі, то менша й блідіша; у воді — немає
-        if (!me.swim) R.drawAlpha(shadow, chain(translate(ox, oy, me.gz - t[2]), scale(sz, sz, 1)), 0.3 / (1 + up * 0.6));
+        if (!me.swim) R.drawAlpha(shadow, chain(translate(ox, oy, me.gz - t[2]), scale(sz, sz, 1)), 0.3 * (0.4 + 0.6 * sk.day) / (1 + up * 0.6));
       }
+      return sk;
     },
   };
 }

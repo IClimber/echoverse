@@ -66,6 +66,7 @@ export function deserialize(text) {
       id: typeof w.id === 'string' ? w.id : newId(), name: String(w.name || w.seedText), seedText: w.seedText, seed: w.seed,
       gen: isInt(w.gen) ? w.gen : 1, created: Number(w.created) || Date.now(), played: Number(w.played) || Date.now(),
       player: { d: p.d, n: p.n, x: p.x, y: p.y, ...(Number.isFinite(p.z) ? { z: p.z } : {}) }, history,
+      ...(Number.isFinite(w.clock) && w.clock >= 0 ? { clock: w.clock } : {}),
     },
     chunks: Array.isArray(o.chunks) ? o.chunks : [],
   };
