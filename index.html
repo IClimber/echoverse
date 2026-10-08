@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Відлуння</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath d='M50 10 90 32 50 54 10 32Z' fill='%2388d6b4'/%3E%3Cpath d='M10 32 50 54 50 92 10 70Z' fill='%234f9c84'/%3E%3Cpath d='M90 32 50 54 50 92 90 70Z' fill='%23356e60'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #10141c;
+    --panel: #171d29ee;
+    --panel2: #222a3a;
+    --line: #34405a;
+    --ink: #eef2f8;
+    --muted: #96a2bb;
+    --accent: #7ee0c3;
+    --bad: #ff6b5e;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: system-ui, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: var(--bg);
+    overflow: hidden; user-select: none; -webkit-user-select: none;
+  }
+  #gl { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+  button, input { font: inherit; color: inherit; }
+  button {
+    background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button.main { background: var(--accent); color: #0d1a16; border-color: var(--accent); font-weight: 600; }
+  input[type=text] {
+    background: #0e121a; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; min-width: 0;
+  }
+  input[type=text]:focus { outline: none; border-color: var(--accent); }
+
+  /* HUD */
+  .chip { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
+  #hud { position: fixed; inset: 0; pointer-events: none; }
+  #where { position: absolute; left: 14px; top: 14px; }
+  #addr { font-weight: 600; letter-spacing: .02em; }
+  #coords { color: var(--muted); font-size: 13px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  #help { position: absolute; left: 14px; bottom: 14px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+  #help b { color: var(--ink); font-weight: 600; }
+  #charge { position: absolute; left: 50%; bottom: 46px; transform: translateX(-50%); text-align: center; min-width: 220px; }
+  #charge .bar { height: 6px; border-radius: 3px; background: #0006; overflow: hidden; margin-top: 6px; }
+  #charge .bar i { display: block; height: 100%; width: 0; background: var(--accent); }
+  #mouseHint { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); color: var(--muted); font-size: 13px; }
+  #toast { position: absolute; left: 50%; top: 18px; transform: translateX(-50%); transition: opacity .3s; }
+  #debug {
+    position: fixed; right: 12px; top: 12px; margin: 0; font: 12px/1.45 ui-monospace, Menlo, Consolas, monospace;
+    background: #000a; padding: 8px 10px; border-radius: 6px; pointer-events: none; white-space: pre;
+  }
+  #flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; transition: opacity .45s ease-out; }
+  #flash.on { opacity: .85; transition: none; }
+  #loading { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+
+  /* Меню */
+  #menu { position: fixed; inset: 0; display: grid; place-items: center; background: #0b0f16b0; padding: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 24px; width: min(560px, 100%); max-height: 100%; overflow: auto; }
+  h1 { margin: 0; font-size: 34px; letter-spacing: .12em; }
+  .sub { color: var(--muted); margin: 2px 0 20px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 20px 0 8px; }
+  .row { display: flex; gap: 8px; }
+  .row input { flex: 1; }
+  #worlds { display: grid; gap: 8px; }
+  .world { display: flex; align-items: center; gap: 8px; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  .world .info { flex: 1; min-width: 0; }
+  .world .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .world .meta { color: var(--muted); font-size: 12px; }
+  .world button { padding: 6px 10px; }
+  .empty { color: var(--muted); font-size: 14px; }
+  .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 18px; color: var(--muted); font-size: 12px; }
+  #err { color: var(--bad); margin-top: 10px; }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<div id="hud" hidden>
+  <div id="where" class="chip"><div id="addr"></div><div id="coords"></div></div>
+  <div id="help" class="chip">
+    <b>WASD</b> — рух · <b>Shift</b> — біг · <b>пробіл</b> — стрибок, двічі — політ (пробіл / Shift — угору / униз) · <b>Q</b> / <b>E</b> — у сусідній всесвіт<br>
+    <b>V</b> — камера (третя особа / згори) · <b>права кнопка миші</b> чи <b>Z</b> / <b>C</b> — обертати · <b>коліщатко</b> — масштаб<br>
+    <b>Esc</b> — меню · <b>F3</b> — налагодження · <b>H</b> — сховати підказку
+  </div>
+  <div id="charge" class="chip" hidden><span id="chargeTxt"></span><div class="bar"><i id="chargeBar"></i></div></div>
+  <div id="toast" class="chip" hidden></div>
+  <div id="mouseHint" class="chip" hidden>Клацни по світу — і мишею керуй камерою (Esc — відпустити)</div>
+</div>
+<pre id="debug" hidden></pre>
+<div id="flash"></div>
+<div id="loading" class="chip" hidden>Генеруємо світ…</div>
+
+<div id="menu">
+  <div class="card">
+    <h1>ВІДЛУННЯ</h1>
+    <div class="sub">Echoverse — подорож мультивсесвітом</div>
+    <button id="resume" class="main" hidden>Продовжити</button>
+    <h2>Новий світ</h2>
+    <div class="row">
+      <input id="seed" type="text" maxlength="64" placeholder="Зерно (порожнє — випадкове)" spellcheck="false" autocomplete="off">
+      <button id="create" class="main">Створити</button>
+    </div>
+    <h2>Світи</h2>
+    <div id="worlds"></div>
+    <div id="err" hidden></div>
+    <div class="foot">
+      <span>Зберігається в цьому браузері</span>
+      <span><button id="import">Імпорт з файлу</button><input id="file" type="file" accept=".json,application/json" hidden></span>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

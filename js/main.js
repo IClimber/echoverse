@@ -1,0 +1,324 @@
+// main.js — запуск: меню світів, ігровий цикл (рух, стрибки, камера, підвантаження чанків), HUD, автозбереження.
+// ?strip — замість гри стенд «смуга всесвітів» (js/strip.js), ?flora — галерея видів рослин (js/flora-stand.js).
+import { createRenderer } from './render.js';
+import { createWorld, findSpawn, ckey } from './world.js';
+import { createDevice, landing, landingChunks, CHARGE } from './device.js';
+import { step, standable, support, SPRINT } from './player.js';
+import { initInput, moveAxis, turnAxis, sprintHeld, vertAxis, takeActions, takeWheel, takeDrag, clearInput, lockPointer, unlockPointer, locked } from './input.js';
+import { listWorlds, putWorld, deleteWorld, serialize, deserialize, newId } from './save.js';
+import { hashStr } from './rng.js';
+import { GEN, physOf } from './universe.js';
+import { CS, solidB, B_LIQ } from './gen/chunk.js';
+import { LEVEL } from './iso.js';
+import { debugText, fmtN } from './debug.js';
+import { animate } from './anim.js';
+import { createCamera, rotate, wheel, smooth, moveBasis, clipDist, facing, setYaw, ISO, THIRD, HEAD } from './camera.js';
+
+const $ = (id) => document.getElementById(id);
+const SAVE_MS = 10000;                     // автозбереження
+const CAM_KEY = 'echoverse-camera';         // вибраний вигляд (на браузер)
+
+const QS = new URLSearchParams(location.search);
+if (QS.has('strip')) import('./strip.js').then((m) => m.runStrip());
+else if (QS.has('flora')) import('./flora-stand.js').then((m) => m.runFlora());
+else boot();
+
+function boot() {
+  let renderer;
+  try { renderer = createRenderer($('gl')); }
+  catch (e) {
+    showErr('Браузер не підтримує WebGL2 — гра не запуститься. ' + e.message);
+    $('create').disabled = true;
+    return;
+  }
+  addEventListener('resize', () => renderer.resize());
+  initInput();
+
+  let g = null;                              // поточна гра
+  const camera = createCamera(load(CAM_KEY) === ISO ? ISO : THIRD);
+  let showDebug = false, showHelp = true, toastUntil = 0;
+  const perf = { fps: 60, cpu: 0 };
+  const hudCache = {};
+  const setText = (id, s) => { if (hudCache[id] !== s) { hudCache[id] = s; $(id).textContent = s; } };
+  if (QS.has('dev')) window.eco = { get g() { return g; }, camera, renderer };   // для автоматичних перевірок у браузері
+
+  // ================= Меню =================
+  function showMenu() { unlockPointer(); $('menu').hidden = false; $('resume').hidden = !g; renderWorlds(); }
+  // Третя особа: клацання по світу захоплює мишу; браузер відпустив (Esc) — меню, як і на Esc без захоплення
+  $('gl').addEventListener('mousedown', (e) => { if (e.button === 0 && g && g.me.placed && camera.mode === THIRD && $('menu').hidden) lockPointer($('gl')); });
+  let unlockQuiet = false, unlockedAt = 0;
+  document.addEventListener('pointerlockchange', () => {
+    if (!locked() && !unlockQuiet && g && $('menu').hidden) { save(); showMenu(); unlockedAt = performance.now(); }
+    unlockQuiet = false;
+    $('mouseHint').hidden = !(g && camera.mode === THIRD && !locked());
+  });
+  function hideMenu() { $('menu').hidden = true; clearInput(); document.activeElement?.blur(); }   // інакше Enter у грі тиснув би кнопку меню
+  const btn = (text, fn, cls) => { const b = document.createElement('button'); b.textContent = text; b.onclick = fn; if (cls) b.className = cls; return b; };
+
+  async function renderWorlds() {
+    const list = await listWorlds(), box = $('worlds');
+    box.textContent = '';
+    if (!list.length) { const e = document.createElement('div'); e.className = 'empty'; e.textContent = 'Збережених світів ще немає.'; box.append(e); return; }
+    for (const w of list) {
+      const el = document.createElement('div'), info = document.createElement('div'), nm = document.createElement('div'), meta = document.createElement('div');
+      el.className = 'world'; info.className = 'info'; nm.className = 'name'; meta.className = 'meta';
+      nm.textContent = w.name;
+      meta.textContent = `зерно «${w.seedText}» · глибина ${w.player.d}, всесвіт ${fmtN(w.player.n)} · ${new Date(w.played).toLocaleString('uk-UA')}`;
+      info.append(nm, meta);
+      const del = btn('✕', async () => {
+        if (!confirm(`Видалити світ «${w.name}»? Це не можна скасувати.`)) return;
+        if (g && g.rec.id === w.id) await quitGame(false);
+        await deleteWorld(w.id);
+        showMenu();
+      });
+      del.title = 'Видалити';
+      const exp = btn('Файл', () => exportWorld(w));
+      exp.title = 'Зберегти у файл';
+      el.append(info, btn(g && g.rec.id === w.id ? 'Продовжити' : 'Грати', () => startWorld(w), 'main'), exp, del);
+      box.append(el);
+    }
+  }
+  $('resume').onclick = hideMenu;
+  $('create').onclick = () => {
+    const text = $('seed').value.trim() || randomSeed(), now = Date.now();
+    $('seed').value = '';
+    startWorld({ id: newId(), name: `Світ «${text}»`, seedText: text, seed: hashStr(text), gen: GEN, created: now, played: now, player: null, history: [] });
+  };
+  $('seed').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('create').click(); });
+  $('import').onclick = () => $('file').click();
+  $('file').onchange = async () => {
+    const f = $('file').files[0];
+    $('file').value = '';
+    if (!f) return;
+    try {
+      const { world } = deserialize(await f.text());
+      world.id = newId(); world.played = Date.now();         // імпорт — завжди окремий світ, наявний не перезаписуємо
+      await putWorld(world);
+      showErr('');
+      renderWorlds();
+    } catch (e) { showErr('Не вдалося імпортувати: ' + e.message); }
+  };
+
+  function exportWorld(w) {
+    const rec = g && g.rec.id === w.id ? snapshot() : w;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([serialize(rec)], { type: 'application/json' }));
+    a.download = `echoverse-${rec.seedText.replace(/[^\p{L}\p{N}_-]+/gu, '_').slice(0, 40) || 'world'}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }
+
+  // ================= Гра =================
+  async function startWorld(rec) {
+    if (g && g.rec.id === rec.id) { hideMenu(); return; }
+    if (g) await quitGame(true);
+    if (!rec.player) {
+      const sp = findSpawn(rec.seed) || [0.5, 0.5];
+      rec.player = { d: 0, n: 0, x: sp[0], y: sp[1], z: sp[2] };
+    }
+    const p = rec.player;
+    renderer.clear();
+    g = {
+      rec, world: createWorld(rec.seed, (key, c, m) => renderer.add(key, m)), dev: createDevice(rec.history),
+      d: p.d, n: p.n, me: { x: p.x, y: p.y, z: p.z, vz: 0, air: false, ground: true, yaw: Math.PI * 0.75, moving: false, placed: false },
+      cam: [p.x, p.y, p.z || 0], lastSave: performance.now(), vis: [], view: null,
+    };
+    if (camera.mode === THIRD) setYaw(camera, g.me.yaw + Math.PI);
+    putWorld(snapshot());
+    hideMenu();
+    $('hud').hidden = false; $('loading').hidden = false; $('debug').hidden = !showDebug;
+    if (rec.gen !== GEN) toast('Світ створено іншою версією генератора: незмінені місця можуть виглядати інакше');
+  }
+  async function quitGame(save) {
+    if (!g) return;
+    if (save) await putWorld(snapshot());
+    g.world.stop(); g = null;
+    $('mouseHint').hidden = true;
+    renderer.clear();
+    $('hud').hidden = true; $('debug').hidden = true; $('loading').hidden = true;
+  }
+  function snapshot() {
+    const r = g.rec;
+    r.player = { d: g.d, n: g.n, x: g.me.x, y: g.me.y, z: g.me.z };
+    r.history = g.dev.history.slice();
+    r.played = Date.now();
+    return r;
+  }
+  const save = () => { if (g) putWorld(snapshot()); };
+  addEventListener('pagehide', save);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) save(); });
+
+  // Усі чанки кола приземлення (d, n) навколо (x, y) згенеровано?
+  const ready = (d, n, x, y) => landingChunks(x, y, CS).every(([cx, cy]) => g.world.has(ckey(d, n, cx, cy)));
+
+  // Поставити гравця у всесвіті (d, n) біля ніг (x, y, z): там, де стоїть, або на найближчому місці, де можна стояти
+  // (z невідомий — від поверхні клітинки). [x, y, z] — куди; null — ніде стати; undefined — чанки ще генеруються
+  function placeIn(d, n, x, y, z) {
+    if (!ready(d, n, x, y)) return undefined;
+    const P = g.world.probe(d, n), ph = physOf(g.world.laws(d, n));
+    if (z === undefined) { const c = g.world.column(d, n, Math.floor(x), Math.floor(y)); z = (c ? c.h : 8) * LEVEL; }
+    if (standable(P, x, y, z)) return [x, y, z];
+    return landing(P, x, y, z, ph);
+  }
+  const gStr = (L) => L.grav.toFixed(2).replace('.', ',') + ' g';
+
+  // Іде в рідину, куди не можна (кислота, лава, гаряча вода, метан…), — пояснити чому (не частіше ніж раз на 3 с)
+  let warnedAt = 0;
+  function warnLiquid(ix, iy, now) {
+    if ((!ix && !iy) || now - warnedAt < 3000) return;
+    const [r, d] = moveBasis(camera), me = g.me;
+    const vx = ix * r[0] + iy * d[0], vy = ix * r[1] + iy * d[1], l = Math.hypot(vx, vy);
+    if (me.why) { warnedAt = now; toast(`Сюди не можна: ${me.why}`); }
+  }
+
+  function tryJump() {
+    const dir = g.dev.charge.dir, n = g.n + dir, at = placeIn(g.d, n, g.me.x, g.me.y, g.me.z);
+    if (at === undefined) return;                               // ще генерується — стрибок трохи зачекає
+    if (!at) { g.dev.charge = null; toast(`Всесвіт ${fmtN(n)}: тут ніде стати — стрибок не вдався`); return; }
+    const P = g.world.laws(g.d, g.n), was = P.grav, L = g.world.laws(g.d, n);
+    g.dev.done([g.d, g.n]);
+    g.n = n; g.me.x = at[0]; g.me.y = at[1]; g.me.z = at[2]; g.me.vz = 0; g.me.ground = true; g.me.stepOff = 0;
+    const msg = [];
+    if (Math.abs(L.grav - was) >= 0.12) msg.push(`гравітація ${gStr(L)} — ${L.grav < was ? 'легше' : 'важче'}`);
+    const lq = L.liquid;
+    if (lq.kind !== P.liquid.kind || lq.swim !== P.liquid.swim) msg.push(`у водоймах — ${lq.kind === 0 && !lq.swim ? lq.why : lq.name}`);
+    if (msg.length) toast(msg.join(' · ').replace(/^./, (c) => c.toUpperCase()));
+    $('flash').classList.add('on');
+    requestAnimationFrame(() => requestAnimationFrame(() => $('flash').classList.remove('on')));
+  }
+
+  let spaceAt = 0;                           // коли востаннє натиснули пробіл: двічі поспіль — політ
+  function update(dt, now) {
+    const menuOpen = !$('menu').hidden;
+    let jump = false;
+    for (const a of takeActions()) {
+      if (a === 'menu') {
+        if (performance.now() - unlockedAt < 400) continue;            // той самий Esc, що відпустив мишу, — меню вже відкрите
+        if (menuOpen) hideMenu(); else { save(); showMenu(); }
+      }
+      else if (menuOpen || !g.me.placed) continue;
+      else if (a === 'debug') { showDebug = !showDebug; $('debug').hidden = !showDebug; }
+      else if (a === 'help') { showHelp = !showHelp; $('help').hidden = !showHelp; }
+      else if (a === 'jump') {
+        if (now - spaceAt < 300) {
+          g.me.fly = !g.me.fly; g.me.vz = 0; spaceAt = 0;
+          toast(g.me.fly ? 'Політ: пробіл / Shift — угору / униз, пробіл двічі — вимкнути' : 'Політ вимкнено');
+        } else { jump = true; spaceAt = now; }
+      }
+      else if (a === 'camera') {
+        camera.mode = camera.mode === ISO ? THIRD : ISO;
+        if (camera.mode === THIRD) setYaw(camera, g.me.yaw + Math.PI);        // за спину
+        else if (locked()) { unlockQuiet = true; unlockPointer(); }
+        store(CAM_KEY, camera.mode);
+        toast(camera.mode === ISO ? 'Камера: згори' : 'Камера: третя особа');
+        $('mouseHint').hidden = !(camera.mode === THIRD && !locked());
+      }
+      else if (a === 'jumpPrev' || a === 'jumpNext') { if (g.dev.start(a === 'jumpNext' ? 1 : -1) === 'cancel') toast('Стрибок скасовано'); }
+    }
+    if (!$('menu').hidden) return;                              // меню — пауза
+    const w = takeWheel(), [mx, my] = takeDrag(), turn = turnAxis();
+    if (w) wheel(camera, w);
+    if (mx || my || turn) rotate(camera, mx + turn * dt * 260, my);
+    smooth(camera, dt);
+    const me = g.me;
+    if (!me.placed) {
+      const at = placeIn(g.d, g.n, me.x, me.y, me.z);
+      if (at !== undefined) {
+        if (at) { me.x = at[0]; me.y = at[1]; me.z = at[2]; }
+        else { toast('Тут ніде стати — спробуй стрибнути в сусідній всесвіт'); if (me.z === undefined) me.z = 20; }
+        me.ground = true; me.stepOff = 0; me.vis = me.z;
+        g.cam = [me.x, me.y, me.z]; me.placed = true;
+        $('loading').hidden = true;
+        $('mouseHint').hidden = camera.mode !== THIRD || locked();
+      }
+    } else {
+      const [ix, iy] = moveAxis();
+      const sprint = sprintHeld();
+      step(me, ix, iy, jump, dt, g.world.probe(g.d, g.n), physOf(g.world.laws(g.d, g.n)), moveBasis(camera), { sprint, vert: vertAxis() });
+      me.run = sprint && me.moving && !me.fly;
+      if (camera.mode === THIRD) me.yaw = facing(camera);                 // спиною до камери; S — задкує
+      warnLiquid(ix, iy, now);
+      if (g.dev.update(dt)) tryJump();
+    }
+    // Ціль камери: гравець (у третій особі — його голова); плавно, по висоті — повільніше (стрибок не трусить камеру)
+    const k = Math.min(1, dt * (camera.mode === ISO ? 8 : 14)), kz = Math.min(1, dt * 5);
+    const tz = (me.vis ?? me.z ?? 0) + (camera.mode === THIRD ? HEAD : 0);
+    g.cam[0] += (me.x - g.cam[0]) * k; g.cam[1] += (me.y - g.cam[1]) * k; g.cam[2] += (tz - g.cam[2]) * kz;
+    const dist = camera.mode === THIRD ? clipDist(camera, g.cam, (x, y, z) => { const b = g.world.block(g.d, g.n, x, y, Math.floor(z / LEVEL)); return b === B_LIQ || solidB(b); }) : camera.dist;
+    g.view = renderer.view(camera, g.cam, dist);
+    stream();
+    if (now - g.lastSave > SAVE_MS) { g.lastSave = now; save(); }
+  }
+
+  // Підвантаження: видимі чанки поточного всесвіту; коло приземлення в обох сусідніх (стрибок — без чекання);
+  // під час заряджання — усе видиме у всесвіті, куди стрибаємо
+  function stream() {
+    const keys = new Set(), W = g.world;
+    const want = (d, n, cx, cy, pri) => {
+      const key = ckey(d, n, cx, cy);
+      keys.add(key);
+      if (!renderer.has(key) || !W.has(key)) W.want(d, n, cx, cy, pri);
+    };
+    const vis = g.view.chunks, ch = g.dev.charge;
+    g.vis = vis.map((v) => ({ key: ckey(g.d, g.n, v.cx, v.cy), cx: v.cx, cy: v.cy }));
+    for (const v of vis) want(g.d, g.n, v.cx, v.cy, v.dist2);
+    for (const [cx, cy] of landingChunks(g.me.x, g.me.y, CS)) want(g.d, g.n, cx, cy, -3e6);   // під ногами — завжди першими
+    for (const dir of [-1, 1]) {
+      const hot = ch && ch.dir === dir;
+      for (const [cx, cy] of landingChunks(g.me.x, g.me.y, CS)) want(g.d, g.n + dir, cx, cy, hot ? -2e6 : 1e5);
+      if (hot) for (const v of vis) want(g.d, g.n + dir, v.cx, v.cy, -1e6 + v.dist2);
+    }
+    W.gen.keepOnly(keys);
+    W.gen.tick();
+  }
+
+  function draw(dt, now) {
+    const ch = g.dev.charge, me = g.me, L = g.world.laws(g.d, g.n);
+    const a = ch ? ch.t / CHARGE * (0.35 + 0.35 * Math.sin(now / 45)) : 0;
+    const under = me.placed ? support(g.world.probe(g.d, g.n), me.x, me.y, me.z + 0.01) : null;
+    const anim = animate(me, dt, now, physOf(L).speed * (me.run ? SPRINT * 0.85 : 1));
+    if (!g.view) return;
+    renderer.draw({
+      camera, target: g.cam, view: g.view, laws: L, keys: g.vis,
+      me: me.placed ? { x: me.x, y: me.y, z: me.vis ?? me.z, gz: under ? under.z : me.z, yaw: me.yaw, swim: me.swim, fly: me.fly, tint: [1 + a * 0.4, 1 + a, 1 + a * 1.3], anim } : null,
+    });
+    setText('addr', `Глибина ${g.d} · всесвіт ${fmtN(g.n)}`);
+    setText('coords', `x ${Math.floor(me.x)} · y ${Math.floor(me.y)} · гравітація ${gStr(L)}`);
+    $('charge').hidden = !ch;
+    if (ch) {
+      setText('chargeTxt', ch.t < CHARGE ? `Стрибок → всесвіт ${fmtN(g.n + ch.dir)}` : 'Стабілізація…');
+      $('chargeBar').style.width = (ch.t / CHARGE * 100).toFixed(1) + '%';
+    }
+    if (toastUntil && now > toastUntil) { $('toast').hidden = true; toastUntil = 0; }
+    if (showDebug && now - (hudCache.dbgT || 0) > 250) { hudCache.dbgT = now; $('debug').textContent = debugText(g, perf, renderer.meshCount, camera); }
+  }
+
+  function toast(s) { $('toast').textContent = s; $('toast').hidden = false; toastUntil = performance.now() + 2800; }
+
+  // ================= Цикл =================
+  let last = performance.now(), fpsT = last, fpsN = 0;
+  function frame(now) {
+    const dt = Math.min(0.1, (now - last) / 1000);
+    last = now;
+    if (g) {
+      const t0 = performance.now();
+      update(dt, now);
+      if (g) draw(dt, now);
+      perf.cpu = perf.cpu * 0.95 + (performance.now() - t0) * 0.05;
+    }
+    fpsN++;
+    if (now - fpsT > 500) { perf.fps = fpsN * 1000 / (now - fpsT); fpsN = 0; fpsT = now; }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+  showMenu();
+}
+
+function showErr(s) { $('err').textContent = s; $('err').hidden = !s; }
+function load(k) { try { return localStorage.getItem(k); } catch { return null; } }
+function store(k, v) { try { localStorage.setItem(k, v); } catch { /* приватне вікно: не пам'ятаємо */ } }
+function randomSeed() {
+  const a = new Uint32Array(1);
+  crypto.getRandomValues(a);
+  return a[0].toString(36);
+}
