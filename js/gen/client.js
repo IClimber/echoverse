@@ -1,72 +1,101 @@
-// gen/client.js — черга запитів до генератора з пріоритетами. У worker — не більше IN_FLIGHT запитів одночасно,
+// gen/client.js — пул воркерів генератора з чергою пріоритетів (queue.js). Стовпець і його секції — завжди в того самого
+// воркера (там кеш стовпця), плитки далечі — будь-якому вільному. У воркера не більше IN_FLIGHT робіт одночасно,
 // решта чекає в черзі: так новий важливіший запит (секція під ногами) не стоїть за сотнею далеких.
-// Запит q = {type: 'col' (зведення стовпця) | 'sec' (секція з мешем), d, n, cx, cy, cz}.
-// Немає module worker — генерує в головному потоці (по кілька робіт за кадр).
+// Запит q = {type: 'col' (зведення стовпця) | 'sec' (секція з мешем) | 'far' (плитка далечі), d, n, cx, cy, cz}.
+// Немає module worker (чи всі впали) — генерує в головному потоці (по кілька робіт за кадр).
 import { lawsOf } from '../universe.js';
 import { runJob } from './job.js';
+import { createQueue, workerOf } from './queue.js';
 
-const IN_FLIGHT = 3;
+const IN_FLIGHT = 2;
+export const POOL = Math.max(1, Math.min(8, ((typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 4) - 2));
 
 export function createGen(seed, onDone) {
-  const queue = new Map();          // key → {q, pri}
   const cache = new Map();          // стовпці (без worker)
-  const busy = new Map();           // id → [key, запит]
-  let worker = null, nextId = 1;
+  const busy = new Map();           // id → {key, q, w}
+  const inWork = new Map();         // key → id
   const done = { col: 0, sec: 0, far: 0 };
-  try {
-    worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
-    worker.onmessage = (e) => {
-      const b = busy.get(e.data.id);
-      busy.delete(e.data.id);
-      if (b) { done[b[1].q.type] = (done[b[1].q.type] || 0) + 1; onDone(b[0], b[1].q, e.data.data, e.data.mesh, e.data.ms); }
-      pump();
-    };
-    worker.onerror = (e) => {
-      console.warn('генератор: worker недоступний, генеруємо в головному потоці', e.message);
-      worker.terminate(); worker = null;
-      for (const [key, q] of busy.values()) queue.set(key, q);   // незавершені — знову в чергу
-      busy.clear();
-    };
-  } catch { worker = null; }
+  let nextId = 1, ws = [], queue;
 
+  const finish = (b, data, mesh, ms) => { done[b.q.type] = (done[b.q.type] || 0) + 1; onDone(b.key, b.q, data, mesh, ms); };
+  const alive = () => ws.filter((x) => x.ok);
+
+  try {
+    if (typeof Worker === 'undefined') throw 0;
+    for (let w = 0; w < POOL; w++) {
+      const worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' }), W = { w, worker, ok: true, n: 0 };
+      worker.onmessage = (e) => {
+        const b = busy.get(e.data.id);
+        if (b) { busy.delete(e.data.id); inWork.delete(b.key); W.n--; finish(b, e.data.data, e.data.mesh, e.data.ms); }
+        pump();
+      };
+      worker.onerror = (e) => fail(W, e);
+      ws.push(W);
+    }
+  } catch { ws = []; }
+  queue = createQueue(Math.max(1, ws.length));
+
+  // Воркер упав: його роботи — наступному живому; живих немає — головний потік (одна купа)
+  function fail(W, e) {
+    if (!W.ok) return;
+    console.warn(`генератор: воркер ${W.w} недоступний`, e && e.message);
+    W.ok = false; W.worker.terminate();
+    const live = alive(), back = [];
+    for (const [id, b] of busy) if (b.w === W.w) { busy.delete(id); inWork.delete(b.key); back.push(b); }
+    if (!live.length) {
+      console.warn('генератор: воркерів немає, генеруємо в головному потоці');
+      for (const b of busy.values()) back.push(b);
+      busy.clear(); inWork.clear(); ws = [];
+      queue = createQueue(1);
+      for (const b of back) queue.want(b.key, b.q, 0, 0);
+      return;
+    }
+    // роботи, прив'язані до мертвого, переадресувати: черга сама не знає про мертвих — беремо їх його номером
+    for (const b of back) queue.want(b.key, b.q, 0, b.w);
+    pump();
+  }
+
+  // Кожному живому воркеру — до IN_FLIGHT робіт: з його черги, вільних і черг мертвих сусідів
   function pump() {
-    if (!worker) return;
-    while (busy.size < IN_FLIGHT && queue.size) {
-      let best = null;
-      for (const [k, q] of queue) if (!best || q.pri < best[1].pri) best = [k, q];
-      queue.delete(best[0]);
-      const id = nextId++, q = best[1];
-      busy.set(id, best);
-      worker.postMessage({ id, seed, q: q.q });
+    for (const W of ws) {
+      if (!W.ok) continue;
+      while (W.n < IN_FLIGHT) {
+        let t = queue.take(W.w);
+        // роботи мертвих воркерів — бере найближчий наступний живий
+        for (let k = 1; !t && k < ws.length; k++) {
+          const v = ws[(W.w + k) % ws.length];
+          if (v.ok) break;
+          t = queue.take(v.w);
+        }
+        if (!t) break;
+        const [key, q] = t, id = nextId++;
+        busy.set(id, { key, q, w: W.w }); inWork.set(key, id); W.n++;
+        W.worker.postMessage({ id, seed, q });
+      }
     }
   }
-  const inBusy = (key) => { for (const b of busy.values()) if (b[0] === key) return true; return false; };
 
   return {
     // Запит; повторний — лише оновлює пріоритет (менше — раніше)
     want(key, q, pri) {
-      const e = queue.get(key);
-      if (e) { e.pri = pri; return; }
-      if (inBusy(key)) return;
-      queue.set(key, { q, pri });
+      if (inWork.has(key)) return;
+      queue.want(key, q, pri, ws.length ? workerOf(q, ws.length) : 0);
     },
     // Прибрати з черги все, чого вже не треба
-    keepOnly(keys) { for (const k of queue.keys()) if (!keys.has(k)) queue.delete(k); },
-    // Щокадру: у worker — дослати; без worker — згенерувати кілька найважливіших тут
+    keepOnly(keys) { queue.keepOnly(keys); queue.compact(); },
+    // Щокадру: воркерам — дослати; без них — згенерувати кілька найважливіших тут
     tick(budgetMs = 6) {
-      if (worker) return pump();
+      if (ws.length) return pump();
       const t0 = performance.now();
       while (queue.size && performance.now() - t0 < budgetMs) {
-        let best = null;
-        for (const [k, q] of queue) if (!best || q.pri < best[1].pri) best = [k, q];
-        queue.delete(best[0]);
-        const q = best[1].q, t1 = performance.now(), r = runJob(lawsOf(seed, q.d, q.n), q, cache);
-        done[q.type] = (done[q.type] || 0) + 1;
-        onDone(best[0], q, r.data, r.mesh || null, performance.now() - t1);
+        const t = queue.take(0);
+        if (!t) break;
+        const [key, q] = t, t1 = performance.now(), r = runJob(lawsOf(seed, q.d, q.n), q, cache);
+        finish({ key, q }, r.data, r.mesh || null, performance.now() - t1);
       }
     },
     get pending() { return queue.size + busy.size; },
-    stats: () => ({ workers: worker ? 1 : 0, inflight: busy.size, queued: queue.size, done }),
-    stop() { if (worker) worker.terminate(); worker = null; queue.clear(); busy.clear(); },
+    stats: () => ({ workers: alive().length, inflight: busy.size, queued: queue.size, done }),
+    stop() { for (const W of ws) W.worker.terminate(); ws = []; queue = createQueue(1); busy.clear(); inWork.clear(); },
   };
 }

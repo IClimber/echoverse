@@ -502,11 +502,11 @@ const cache = new Map();
 export function template(g, variant, lod, style) {
   const key = `${g.key}:${style || ''}:${variant}:${lod}`;
   let T = cache.get(key);
-  if (T) return T;
+  if (T) { cache.delete(key); cache.set(key, T); return T; }   // LRU: порядок Map — давність
   const G = new Geo(rng((g.id ^ Math.imul(variant + 1, 0x9e3779b9) ^ (lod ? 0x51ed : 0)) >>> 0), lod);
   if (style) STONE[style](G, g); else FORM[g.form](G, g);
   T = G.finish();
-  if (cache.size > 4000) cache.clear();
+  if (cache.size >= 1500) cache.delete(cache.keys().next().value);
   cache.set(key, T);
   return T;
 }
