@@ -11,11 +11,13 @@ const smooth = (a, b, v) => { const t = clamp01((v - a) / (b - a)); return t * t
 const mix = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 const norm = (v) => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
 
+// Місцевий час всесвіту (с): годинник світу × плин часу (закон «інша фізика»)
+export const localTime = (L, clock) => clock * (L.phys ? L.phys.time : 1);
 // Фаза доби (0…1) всесвіту L у мить clock (с)
 export function dayPhase(L, clock) {
   const S = L.sky;
   if (S.lock) return S.off;
-  const p = clock / (S.dayMin * 60) + S.off;
+  const p = localTime(L, clock) / (S.dayMin * 60) + S.off;
   return p - Math.floor(p);
 }
 // Місцевий час «гг:хх»
@@ -44,7 +46,7 @@ function bodyDir(A, h, dec) {
 export function skyState(L, clock) {
   const S = L.sky, P = L.pal, A = axes(L), phase = dayPhase(L, clock), h0 = TAU * (phase - 0.5);
   const suns = S.suns.map((s) => ({ dir: bodyDir(A, h0 + TAU * s.off, s.dec), col: s.col, size: s.size, bright: s.bright }));
-  const days = clock / (S.dayMin * 60);
+  const days = localTime(L, clock) / (S.dayMin * 60);
   const moons = S.moons.map((m) => {
     const lag = (S.lock ? 0 : days / m.period) + m.off;
     return { dir: bodyDir(A, h0 - TAU * (lag - Math.floor(lag)), m.dec), col: m.col, size: m.size };

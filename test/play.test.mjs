@@ -335,3 +335,42 @@ test('атмосфера й погода: біля старту — придат
   assert.ok(sv.zenith[2] < st.zenith[2] * 0.4 && sv.stars > 0.5 && !sv.cloud, 'без повітря');
   assert.ok(W_STORM === 3);
 });
+
+test('інша фізика: ковзкий ґрунт — інерція; опір повітря — межа падіння й ширяння; пружний ґрунт — відскок', async () => {
+  const { lawsOf, physOf } = await import('../js/universe.js');
+  const { hashStr } = await import('../js/rng.js');
+  const P = world(Array(40).fill('4'.repeat(40)));
+  // ковзко: розганяєшся повільно і після відпускання ще їдеш
+  const slip = { ...PH1, friction: 0.15 }, a = man(P, 5.5, 20.5), b = man(P, 5.5, 20.5);
+  step(a, 1, 0, false, 1 / 60, P, PH1, [[1, 0], [0, 1]]); step(b, 1, 0, false, 1 / 60, P, slip, [[1, 0], [0, 1]]);
+  assert.ok(b.x - 5.5 < (a.x - 5.5) * 0.3, 'на ковзкому розгін не повільніший');
+  for (let i = 0; i < 60; i++) step(b, 1, 0, false, 1 / 60, P, slip, [[1, 0], [0, 1]]);
+  const x1 = b.x;
+  for (let i = 0; i < 30; i++) step(b, 0, 0, false, 1 / 60, P, slip, [[1, 0], [0, 1]]);
+  assert.ok(b.x - x1 > 0.4, `не ковзає після відпускання: ${b.x - x1}`);
+  const c = man(P, 5.5, 25.5);
+  for (let i = 0; i < 30; i++) step(c, 1, 0, false, 1 / 60, P, PH1, [[1, 0], [0, 1]]);
+  const x2 = c.x; step(c, 0, 0, false, 1 / 60, P, PH1, [[1, 0], [0, 1]]);
+  assert.equal(c.x, x2);                                    // звичайний ґрунт — зупинка одразу
+  // межа падіння: з висоти швидкість не більша за vT; пробіл — ширяння (повільніше)
+  const fall = (vert) => { const p = { x: 5.5, y: 5.5, z: 30, vz: 0, ground: false }; for (let i = 0; i < 120; i++) step(p, 0, 0, false, 1 / 60, P, { ...PH1, vT: 8 }, undefined, { vert }); return p; };
+  const f0 = fall(0), f1 = fall(1);
+  assert.ok(f0.vz >= -8.5 && f0.vz < -7, `vT: ${f0.vz}`);
+  assert.ok(f1.z > f0.z + 2 && f1.glide, `ширяння: ${f1.z} ${f0.z}`);
+  // відскок
+  const q = { x: 5.5, y: 5.5, z: 8, vz: 0, ground: false };
+  let up = false;
+  for (let i = 0; i < 200; i++) { step(q, 0, 0, false, 1 / 60, P, { ...PH1, bounce: 0.6 }); if (q.vz > 3) up = true; }
+  assert.ok(up && q.bounced, 'не відскочив');
+  // закони: біля старту — звичайна фізика; трапляються ковзкі, пружні, інший плин часу, малі планети; густе повітря — повільніше падіння
+  const seed = hashStr('фізика');
+  let s = 0, bo = 0, tm = 0, small = 0;
+  for (let n = -1000; n <= 1000; n++) {
+    const L = lawsOf(seed, 0, n), F = L.phys;
+    if (Math.abs(n) <= 8) assert.ok(F.friction === 1 && F.bounce === 0 && F.time === 1, `біля старту ${n}`);
+    s += F.friction < 1; bo += F.bounce > 0; tm += Math.abs(F.time - 1) > 0.3; small += F.planetR < 800;
+  }
+  assert.ok(s > 20 && bo > 20 && tm > 100 && small > 50, `ковзких ${s}, пружних ${bo}, з іншим часом ${tm}, малих ${small}`);
+  const L0 = lawsOf(seed, 0, 0);
+  assert.ok(physOf({ ...L0, air: { ...L0.air, pressure: 2.5 } }).vT < physOf({ ...L0, air: { ...L0.air, pressure: 0.3 } }).vT);
+});

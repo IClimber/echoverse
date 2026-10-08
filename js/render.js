@@ -91,7 +91,9 @@ export function createRenderer(canvas) {
       }
       const tk = `${laws.d}:${laws.n}:${laws.ds}`;
       if (texFor !== tk) { texFor = tk; R.setTextures(texturesOf(laws), TEX, LAYERS); }
-      R.begin({ fogCol: sk.fog, light: [lx, ly, lz], amb, lightCol, fog: fogR, fogAxes: view.fogAxes, view: view.m, cut, time: performance.now() / 1000 % 1000, sky: { inv: invert(view.m), st: sk }, wind });
+      // місцевий час (плин часу всесвіту) — для плину води, гойдання, частинок
+      const lt = (st.clock || 0) * (laws.phys ? laws.phys.time : 1) % 3000;
+      R.begin({ fogCol: sk.fog, light: [lx, ly, lz], amb, lightCol, fog: fogR, fogAxes: view.fogAxes, view: view.m, cut, time: lt, sky: { inv: invert(view.m), st: sk }, wind, curve: laws.phys ? 0.5 / laws.phys.planetR : 0 });
       for (const v of st.keys) {
         const e = meshes.get(v.key);
         if (!e) continue;
@@ -127,7 +129,7 @@ export function createRenderer(canvas) {
         const P = PART[loc.type], b = basis(st.camera), B2 = P.box[0] * 2, md = (v) => ((v % B2) + B2) % B2;
         const col = loc.type === 'dust' ? [...laws.pal.desert.map((v) => v / 255 * (0.35 + 0.65 * Math.min(1, sk.lightK[1]))), 0.55] : P.col.map((v, i) => i < 3 ? v * (0.3 + 0.7 * Math.min(1, sk.lightK[1])) : v);
         R.drawParticles({
-          view: view.m, box: P.box, t: [md(t[0]), md(t[1])], z: t[2], move: [wt.W.wind[0], wt.W.wind[1], P.fall, performance.now() / 1000 % 10000],
+          view: view.m, box: P.box, t: [md(t[0]), md(t[1])], z: t[2], move: [wt.W.wind[0], wt.W.wind[1], P.fall, lt],
           r: b.r, u: b.up, kind: [P.kind, loc.k * P.dens, P.len, P.size], mapO: [st.rain.x0 - t[0], st.rain.y0 - t[1]], col,
         });
       }

@@ -200,6 +200,15 @@ export function lawsOf(seed, d, n) {
     acid: gas === 3 || kind === L_ACID,
     segMin: 2 + 6 * U(172, 30),                       // скільки триває погода, хв
   };
+  // Інша фізика (смуги 180…; генерацію не змінює): тертя ґрунту (рідко — ковзкий: розганяєшся й гальмуєш повільно),
+  // пружність (рідко — відскакуєш після падіння), плин часу (множник доби, погоди, плину води й частинок; гравець —
+  // як завжди), радіус планети (мала — помітна кривизна обрію). Опір повітря — від тиску (physOf: межа швидкості падіння)
+  const phys = {
+    friction: mild < 0.6 ? 1 : U(180, 40) > 0.85 - 0.25 * weird && U(186, 30) > 0.6 - 0.3 * weird ? 0.12 + 0.5 * U(181, 30) : 1,
+    bounce: mild < 0.6 ? 0 : U(182, 40) > 0.88 - 0.25 * weird && U(187, 30) > 0.5 - 0.3 * weird ? 0.3 + 0.4 * U(183, 30) : 0,
+    time: mild < 0.6 ? 1 : Math.max(0.3, 1 + 0.9 * L(184, 40)),
+    planetR: mild < 0.6 ? 6000 : 250 + 12000 * U(185, 50) * U(185, 50),
+  };
   // Візерунки текстур (лише вигляд, textures.js): стиль трави, квіти, хвилі піску й води, пласти скель, тріщини, плями
   const tex = {
     grass: cat(U(35, 30), 4), grassC: 0.6 + 0.8 * U(36, 25), flowers: 0.04 * U(37, 20) * U(37, 20) * 4, flowerHue: U(38, 15),
@@ -211,7 +220,7 @@ export function lawsOf(seed, d, n) {
     d, n, seed: hash3(seed, d, n), ds, weird, exotic: exotic > 0, grav,
     seaE, amp, wc, wh, wd, contrast, temp, wet,
     flora, treeH, rocks, biomes, bioS, regS, pal,
-    hue: { g: hG, s: hS, w: hW, r: hR, sat, gl: 0.42 + 0.08 * U(22, 20) }, light, sky, air, tex, liquid, caves, caveW, overhang, islands,
+    hue: { g: hG, s: hS, w: hW, r: hR, sat, gl: 0.42 + 0.08 * U(22, 20) }, light, sky, air, phys, tex, liquid, caves, caveW, overhang, islands,
     // зерна шумів (спільні для глибини: так рельєф сусідніх номерів зв'язаний)
     sA: hash2(ds, 1), sB: hash2(ds, 2), sC: hash2(ds, 3), sT: hash2(ds, 4), sW: hash2(ds, 5),
     sF: hash2(ds, 6), sM: hash2(ds, 7), sO: hash2(ds, 8), sK: hash2(ds, 9), sK2: hash2(ds, 10), sV: hash2(ds, 11), sI: hash2(ds, 12),
@@ -219,14 +228,18 @@ export function lawsOf(seed, d, n) {
   };
 }
 
-// Рух у всесвіті від гравітації: на скільки рівнів можна піднятися кроком (up), множник швидкості ходи, як швидко ноги
-// наздоганяють нову висоту (легка гравітація — «пливе»). Зійти пішки можна з будь-якої висоти (шкоди від падіння ще немає)
+// Рух у всесвіті: на скільки рівнів можна піднятися кроком (up), множник швидкості ходи, як швидко ноги наздоганяють
+// нову висоту (легка гравітація — «пливе»), межа швидкості падіння vT (опір повітря: густе й легка гравітація —
+// повільне падіння, без повітря — майже без межі), тертя ґрунту (1 — звичайне, менше — ковзко), пружність.
+// Зійти пішки можна з будь-якої висоти (шкоди від падіння ще немає)
 export function physOf(L) {
-  const g = L.grav;
+  const g = L.grav, pr = L.air ? L.air.pressure : 1, P = L.phys || { friction: 1, bounce: 0 };
   return {
     up: g < FLOAT_G ? 2 : 1,
     speed: g > 1 ? 1 - 0.18 * (g - 1) : 1 + 0.1 * (1 - g),
     settle: Math.min(20, Math.max(5, 14 * g)),
+    vT: Math.min(80, Math.max(4, 18 * Math.sqrt(g / (pr + 0.05)))),
+    friction: P.friction, bounce: P.bounce,
     g,
   };
 }

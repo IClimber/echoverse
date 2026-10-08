@@ -14,6 +14,7 @@ uniform vec3 uLight, uLightCol, uTint;
 uniform float uAmb;
 uniform vec3 uFR, uFU;       // туман згори: осі екрана (відстань — на екрані); у третій особі — нулі (відстань по горизонталі)
 uniform vec3 uWind;          // вітер: x, y — напрям і сила гойдання листя й трави, z — час
+uniform float uCurve;        // кривизна планети: далечінь опускається на d² · uCurve (1 / 2R)
 out vec3 vCol, vW;
 out float vFog;
 out vec2 vUV;
@@ -27,6 +28,7 @@ void main() {
   if (aMat == 12.0 || aMat == 20.0 || aMat == 21.0)        // листя, пелюстки, трава гойдаються від вітру
     lp.xy += uWind.xy * (0.55 + 0.45 * sin(uWind.z * 1.9 + aPos.x * 0.9 + aPos.y * 1.3 + aPos.z * 0.7));
   vec3 p = (uModel * vec4(lp, 1.0)).xyz;
+  p.z -= dot(p.xy, p.xy) * uCurve;
   vec3 n = normalize(mat3(uModel) * aNor);
   gl_Position = uView * vec4(p, 1.0);
   vCol = aCol * (uAmb + (1.0 - uAmb) * max(dot(n, uLight), 0.0)) * uLightCol * uTint;
@@ -257,7 +259,7 @@ export function createGL(canvas) {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   gl.activeTexture(gl.TEXTURE0);
   const U = {};
-  for (const k of ['uModel', 'uView', 'uLight', 'uLightCol', 'uTint', 'uAmb', 'uFogCol', 'uFog', 'uCut', 'uCutD', 'uAlpha', 'uTex', 'uTime', 'uFR', 'uFU', 'uEye', 'uFade', 'uWind']) U[k] = gl.getUniformLocation(prog, k);
+  for (const k of ['uModel', 'uView', 'uLight', 'uLightCol', 'uTint', 'uAmb', 'uFogCol', 'uFog', 'uCut', 'uCutD', 'uAlpha', 'uTex', 'uTime', 'uFR', 'uFU', 'uEye', 'uFade', 'uWind', 'uCurve']) U[k] = gl.getUniformLocation(prog, k);
   gl.useProgram(prog);
   gl.enable(gl.DEPTH_TEST);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -314,13 +316,14 @@ export function createGL(canvas) {
       for (const b of mesh.bufs) gl.deleteBuffer(b);
     },
     // Кадр: небо, світло, туман, камера (view — матриця з camera.viewProj); cut — «вікно» до гравця або null
-    begin({ fogCol, light, amb, lightCol, fog, fogAxes = null, view, cut, time = 0, sky = null, wind = [0, 0] }) {
+    begin({ fogCol, light, amb, lightCol, fog, fogAxes = null, view, cut, time = 0, sky = null, wind = [0, 0], curve = 0 }) {
       gl.clearColor(fogCol[0] / 255, fogCol[1] / 255, fogCol[2] / 255, 1);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       if (sky) R.drawSky(sky);
       gl.useProgram(prog);
       gl.uniform1f(U.uTime, time);
       gl.uniform3f(U.uWind, wind[0], wind[1], time);
+      gl.uniform1f(U.uCurve, curve);
       const [fr, fu] = fogAxes || [[0, 0, 0], [0, 0, 0]];
       gl.uniform3f(U.uFR, fr[0], fr[1], fr[2]); gl.uniform3f(U.uFU, fu[0], fu[1], fu[2]);
       gl.uniformMatrix4fv(U.uView, false, view);

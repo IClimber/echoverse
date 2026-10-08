@@ -30,6 +30,7 @@ function kindOf(L, seg) {
 
 // Погода у мить clock: {kind, next, t (перехід 0…1), clouds, vis, precip, dust, dim, wind [x, y] (клітинок/с), flash}
 export function weatherAt(L, clock) {
+  clock *= L.phys ? L.phys.time : 1;                  // місцевий час (плин часу всесвіту)
   const len = L.air.segMin * 60, f = clock / len, seg = Math.floor(f), u = f - seg;
   const a = kindOf(L, seg), b = kindOf(L, seg + 1), t = clamp01((u - 0.85) / 0.15), A = LOOK[a], B = LOOK[b];
   const m = (k) => A[k] + (B[k] - A[k]) * t;

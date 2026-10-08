@@ -181,13 +181,16 @@ function boot() {
     if (at === undefined) return;                               // ще генерується — стрибок трохи зачекає
     const P = g.world.laws(g.d, g.n), was = P.grav, L = g.world.laws(d, n), depth = d !== g.d;
     g.dev.done([g.d, g.n]);
-    g.d = d; g.n = n; g.me.x = at[0]; g.me.y = at[1]; g.me.z = at[2]; g.me.vz = 0; g.me.ground = false; g.me.stepOff = 0; g.me.fly = false;
+    g.d = d; g.n = n; g.me.x = at[0]; g.me.y = at[1]; g.me.z = at[2]; g.me.vz = 0; g.me.vx = 0; g.me.vy = 0; g.me.ground = false; g.me.stepOff = 0; g.me.fly = false;
     const msg = [];
     if (depth) msg.push(`глибина ${d}`);
     if (Math.abs(L.grav - was) >= 0.12) msg.push(`гравітація ${gStr(L)} — ${L.grav < was ? 'легше' : 'важче'}`);
     const lq = L.liquid;
     if (lq.kind !== P.liquid.kind || lq.danger !== P.liquid.danger) msg.push(`у водоймах — ${liqStr(lq)}`);
     if (!L.air.breath && (P.air.breath || L.air.gas !== P.air.gas)) msg.push(`повітря ${L.air.gasName}`);
+    if (L.phys.friction < 1 && P.phys.friction === 1) msg.push('ковзкий ґрунт');
+    if (L.phys.bounce > 0 && !P.phys.bounce) msg.push('пружний ґрунт');
+    if (Math.abs(L.phys.time / P.phys.time - 1) > 0.3) msg.push(`час тече ${L.phys.time > P.phys.time ? 'швидше' : 'повільніше'} (×${L.phys.time.toFixed(1).replace('.', ',')})`);
     if (msg.length) toast(msg.join(' · ').replace(/^./, (c) => c.toUpperCase()));
     $('flash').classList.add('on');
     requestAnimationFrame(() => requestAnimationFrame(() => $('flash').classList.remove('on')));

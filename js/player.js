@@ -6,7 +6,7 @@
 // перешкод (скільки клітинок навколо перевіряти), liquid — рідина всесвіту ({swim — тримає на плаву, danger}).
 // ph — рух від гравітації (physOf): up, speed, settle, g.
 import { LEVEL } from './iso.js';
-import { solidB, B_LIQ } from './gen/chunk.js';
+import { solidB, B_LIQ, B_ICE } from './gen/chunk.js';
 
 export const SPEED = 4.2;            // клітинок за секунду (при 1 g)
 export const FOOT = 0.24;            // півширина габариту
@@ -20,7 +20,7 @@ export const FLY_V = 8;              // політ: швидкість угор�
 const FLY_TOP = 70;                  // політ: вище цієї висоти не піднятися
 const CLIMB_OUT = 2;                 // з рідини можна вилізти на берег до 2 блоків над її поверхнею
 const LEAP = 0.3;                    // стрибок з рідини: стільки секунд рідина не тягне назад
-export const PH1 = { up: 1, speed: 1, settle: 14, g: 1 };
+export const PH1 = { up: 1, speed: 1, settle: 14, g: 1, vT: 1e9, friction: 1, bounce: 0 };
 const R2 = Math.SQRT1_2;
 const MB45 = [[R2, -R2], [R2, R2]];  // базис руху ізометрії з азимутом 45°: праворуч, униз екрана
 const EPS = 1e-4;
@@ -92,13 +92,25 @@ export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
   p.leap = Math.max(0, (p.leap || 0) - dt);
   const surf = liquidAt(P, p.x, p.y, p.z), buoy = P.liquid.swim;
   const deep = surf !== null && !p.ground;
-  p.moving = !!(ix || iy);
-  if (p.moving) {
+  // Горизонтальна швидкість наздоганяє бажану з прискоренням від тертя: звичайний ґрунт — одразу, ковзкий (закон
+  // всесвіту, лід) — розганяєшся й гальмуєш повільно; у повітрі керування не гірше за половину звичайного
+  let tvx = 0, tvy = 0;
+  if (ix || iy) {
     let vx = ix * mb[0][0] + iy * mb[1][0], vy = ix * mb[0][1] + iy * mb[1][1];
     const run = ctl.sprint ? (surf === null ? SPRINT : 1 + (SPRINT - 1) / 2) : 1;
-    const l = Math.hypot(vx, vy), sp = SPEED * ph.speed * run * (surf === null ? 1 : deep || !buoy ? 0.5 : 0.7) * dt;
-    vx /= l; vy /= l;
+    const l = Math.hypot(vx, vy), sp = SPEED * ph.speed * run * (surf === null ? 1 : deep || !buoy ? 0.5 : 0.7);
+    tvx = vx / l * sp; tvy = vy / l * sp;
     p.yaw = Math.atan2(vy, vx);
+  }
+  const under = p.ground ? P.block(Math.floor(p.x), Math.floor(p.y), Math.floor(p.z / LEVEL + EPS) - 1) : 0;
+  let fr = surf !== null ? 1 : under === B_ICE ? 0.15 : ph.friction ?? 1;
+  if (!p.ground && surf === null) fr = Math.max(fr, 0.5);
+  const acc = fr >= 1 ? 1 : fr * 12 * dt;                    // тертя 1 — одразу; 0,15 — за ~0,5 с
+  if (p.vx === undefined) { p.vx = 0; p.vy = 0; }
+  if (acc >= 1) { p.vx = tvx; p.vy = tvy; }
+  else { p.vx += (tvx - p.vx) * acc; p.vy += (tvy - p.vy) * acc; }
+  p.moving = !!(ix || iy) || Math.hypot(p.vx, p.vy) > 0.5;
+  if (p.vx || p.vy) {
     const tryMove = (nx, ny) => {
       if (!hits(P, nx, ny, p.z)) { p.x = nx; p.y = ny; return true; }   // з уступу — просто падаєш
       if (p.ground || surf !== null) {                       // крок на уступ (з рідини — вилізти на берег)
@@ -119,15 +131,26 @@ export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
       }
       return false;
     };
-    const nx = p.x + vx * sp, ny = p.y + vy * sp;
-    if (!tryMove(nx, ny)) { if (!(vx && tryMove(nx, p.y))) { if (vy) tryMove(p.x, ny); } }
+    const nx = p.x + p.vx * dt, ny = p.y + p.vy * dt;
+    if (!tryMove(nx, ny)) {                                   // уперся — ковзає вздовж стіни, складова в стіну гасне
+      if (p.vx && tryMove(nx, p.y)) p.vy = 0;
+      else if (p.vy && tryMove(p.x, ny)) p.vx = 0;
+      else { p.vx = 0; p.vy = 0; }
+    }
   }
   // Вертикаль: у рідині, що тримає, — виштовхує до поверхні (м'яка пружина); у рідкій, що не тримає, — повільно
   // тонеш (опір); інакше — гравітація
   const s2 = liquidAt(P, p.x, p.y, p.z);
   if (s2 !== null && buoy && !p.ground && !p.leap) p.vz += ((s2 - floatZ(P) - p.z) * 22 - p.vz * 7) * dt;
   else if (s2 !== null && !buoy) p.vz += (-GRAVITY * ph.g * 0.35 - p.vz * 4) * dt;
-  else p.vz -= GRAVITY * ph.g * dt;
+  else {
+    // опір повітря: падіння не швидше за vT; пробіл під час падіння — ширяння (у густому повітрі помітно):
+    // межу досягнуто — далі не швидше; уже швидше за межу (почав ширяти) — плавно гальмуєш до неї
+    const vT = (ph.vT ?? 1e9) * (ctl.vert > 0 && p.vz < 0 ? 0.45 : 1), v0 = p.vz;
+    p.vz -= GRAVITY * ph.g * dt;
+    if (p.vz < -vT) p.vz = v0 >= -vT ? -vT : v0 + (-vT - v0) * Math.min(1, dt * 6);
+  }
+  p.glide = !p.ground && s2 === null && ctl.vert > 0 && p.vz < 0;
   if (jump) {
     if (p.ground) p.vz = JUMP_V * (s2 === null ? 1 : 0.85);
     else if (s2 !== null && buoy && p.z > s2 - floatZ(P) - 0.25) { p.vz = JUMP_V * 0.8; p.leap = LEAP; }   // з поверхні — вистрибнути
@@ -135,8 +158,12 @@ export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
   let nz = p.z + p.vz * dt;
   if (p.vz <= 0) {
     const g = support(P, p.x, p.y, p.z + EPS, p.z - nz + 0.05);
-    if (g && nz <= g.z + EPS) { nz = g.z; p.vz = 0; p.ground = true; }
-    else p.ground = false;
+    if (g && nz <= g.z + EPS) {
+      nz = g.z;
+      // пружний ґрунт: після падіння відскакуєш (слабкий удар — ні)
+      if (ph.bounce && p.vz < -5 && s2 === null) { p.vz = -p.vz * ph.bounce; p.ground = false; p.bounced = true; }
+      else { p.vz = 0; p.ground = true; }
+    } else p.ground = false;
   } else if (hits(P, p.x, p.y, nz)) { nz = p.z; p.vz = 0; }   // стеля
   else p.ground = false;
   p.z = nz;
