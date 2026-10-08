@@ -70,7 +70,7 @@ export class Mesh {
 // рослини й каміння зблизька (flora: повна будова, трава й квіти) і здалеку (far: спрощені великі рослини й каміння).
 // Трава, степ і пустеля — відтінку біому клітинки (межі біомів — усереднення по сусідах 3×3)
 const DIRS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
-export function chunkMesh(C, L) {
+export function chunkMesh(C, L, { near = true, far = true } = {}) {
   const M = new Mesh(), W = new Mesh(), P = L.pal, B = C.b;
   // об'єм: висоти K0…K0+NK−1 (локальні k від 0), рамка — k = −1 і k = NK
   const NK = C.nk ?? H, K0 = C.k0 ?? 0, bi = (x, y, k) => bv(x, y, k, NK);
@@ -244,24 +244,32 @@ export function chunkMesh(C, L) {
       else { const Y = dy > 0 ? y + 1 : y; W.quad([x, Y, top], [x + 1, Y, top], [x + 1, Y, z0], [x, Y, z0], 0, dy, 0, sc, LM); }
     }
   }
-  // Рослини й каміння: шаблон виду (варіант будови — від хешу) з поворотом, віком, нахилом і розкидом кольору.
-  // Перешкоди для зіткнень (у самі дані чанка: o.cx, o.cy — центр, o.r — півширина, o.top — висота над основою):
-  // дерево — основа стовбура з корінням; камінь — уся брила, лише вищий за пів блоку (нижчий — переступаєш)
+  const { F, Ff } = objMeshes(C, L, K0, NK, near, far);
+  return { solid: M.finish(), liquid: W.n ? W.finish() : null, flora: F.n ? F.finish() : null, far: Ff.n ? Ff.finish() : null };
+}
+
+// Рослини й каміння предметів з основою в K0…K0+NK−1: шаблон виду (варіант будови — від хешу) з поворотом, віком,
+// нахилом і розкидом кольору; висота — від K0. F — зблизька (повна будова, трава й квіти), Ff — здалеку (спрощені
+// великі рослини й каміння); near / far — що рахувати
+function objMeshes(C, L, K0, NK, near, far) {
   const F = new Mesh(), Ff = new Mesh();
   for (const o of C.obj) {
     if (o.z < K0 || o.z >= K0 + NK) continue;                 // предмет — у секції своєї основи
     const z = (o.z - K0) * LEVEL, v = o.v, g = C.sp[o.s], q = objPose(C, L, o);
+    if (o.k === O_FLOAT) continue;                            // ширяюче каміння — тіла (bodies.js), малюються окремо
     const { cx, cy, rot, s, cj } = q;
     if (o.k === O_TREE) {
       const tl = ((v >> 2 & 7) / 7) * 0.1;
-      place(F, template(g, v % 3, 0), cx, cy, z, rot, s, tl, cj);
-      place(Ff, template(g, 0, 1), cx, cy, z, rot, s, tl, cj);
-    } else if (o.k === O_COVER) place(F, template(g, v & 1, 0), cx, cy, z, rot, s, 0, cj);
-    else if (o.k === O_FLOAT) continue;                       // ширяюче каміння — тіла (bodies.js), малюються окремо
-    else { const T = template(o.st ? stoneGenome(L, g, o.st) : g, v & 3, 0, styleOf(g, v)); place(F, T, cx, cy, z, rot, s, 0, cj); place(Ff, T, cx, cy, z, rot, s, 0, cj); }
+      if (near) place(F, template(g, v % 3, 0), cx, cy, z, rot, s, tl, cj);
+      if (far) place(Ff, template(g, 0, 1), cx, cy, z, rot, s, tl, cj);
+    } else if (o.k === O_COVER) { if (near) place(F, template(g, v & 1, 0), cx, cy, z, rot, s, 0, cj); }
+    else { const T = template(o.st ? stoneGenome(L, g, o.st) : g, v & 3, 0, styleOf(g, v)); if (near) place(F, T, cx, cy, z, rot, s, 0, cj); if (far) place(Ff, T, cx, cy, z, rot, s, 0, cj); }
   }
-  return { solid: M.finish(), liquid: W.n ? W.finish() : null, flora: F.n ? F.finish() : null, far: Ff.n ? Ff.finish() : null };
+  return { F, Ff };
 }
+
+// Рослини й каміння зблизька всього стовпця (окрема робота: потрібні лише біля камери); висота — від блоку K0
+export function floraMesh(C, L, K0) { return objMeshes(C, L, K0, 1e9, true, false).F; }
 
 // Положення, поворот, масштаб і колір предмета o стовпця C; перешкода для зіткнень — у самі дані предмета
 // (o.cx, o.cy — центр у чанку, o.r — півширина, o.top — висота над основою): дерево — основа стовбура з корінням;

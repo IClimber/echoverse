@@ -149,3 +149,33 @@ test('еталон мешів MESH_GOLD', () => {
   assert.deepEqual(got, MESH_GOLD);
   assert.equal(packStats.overflow, o0);
 });
+
+// ================= Роботи генератора в щільному форматі =================
+import { runJob } from '../js/gen/job.js';
+
+test('робота sec: op = тверде + далекі рослини, усе в коробці', () => {
+  const L = lawsOf(hashStr('test'), 0, 0), cache = new Map(), C = runJob(L, { type: 'col', d: 0, n: 0, cx: 0, cy: 0 }, cache).data;
+  let seen = 0;
+  for (let cz = C.czLo; cz <= C.czHi; cz++) {
+    const r = runJob(L, { type: 'sec', d: 0, n: 0, cx: 0, cy: 0, cz }, cache);
+    if (!r.mesh) continue;
+    const u = unpack(r.mesh.op), b = r.mesh.bb;
+    assert.equal(u.n, r.mesh.ns + r.mesh.nf);
+    for (let i = 0; i < u.n * 3; i++) assert.ok(u.pos[i] >= b[i % 3] && u.pos[i] <= b[i % 3 + 3]);
+    seen++;
+  }
+  assert.ok(seen > 0);
+});
+
+test('робота flora: рослини зблизька стовпця — ті самі, що в MESH_GOLD', () => {
+  const seed = hashStr('test');
+  SPOTS.forEach(([d, n, cx, cy], i) => {
+    const L = lawsOf(seed, d, n), cache = new Map(), C = runJob(L, { type: 'col', d, n, cx, cy }, cache).data;
+    const r = runJob(L, { type: 'flora', d, n, cx, cy }, cache);
+    if (!r.mesh.n) { assert.equal(MESH_GOLD[`${i}:near`], '0:00000000'); return; }
+    // кадр еталона — регіон секції czLo: зсунути на різницю регіонів по висоті
+    const dz = (r.data.rz - Math.floor(C.czLo / RS)) * RS * SEC * LEVEL, u = new Uint16Array(r.mesh.fl.slice(0));
+    for (let j = 0; j < r.mesh.n; j++) u[j * 8 + 2] += dz * 128;
+    assert.equal(meshDigest(meshHash(u.buffer)), MESH_GOLD[`${i}:near`]);
+  });
+});

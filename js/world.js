@@ -1,6 +1,7 @@
 // world.js — світ у грі: зерно, закони всесвітів, стовпці й секції з генератора і запити до блоків (рух, приземлення
 // після стрибка, камера, F3). Стовпець (зведення: поверхня, предмети, межі секцій) — на кожні 16×16 клітинок; секція —
-// 16×16×16 блоків з рамкою. Геометрію секції віддає рендеру через onMesh.
+// 16×16×16 блоків з рамкою. Геометрію віддає рендеру через onMesh(kind: 'sec' | 'flora' | 'far', d, n, ключ, запит, дані, меш):
+// ключ секції — sk, рослин — ck, плитки далечі — рядок.
 import { lawsOf, physOf, KMIN, KMAX } from './universe.js';
 import { CS, ci, bv, solidB, blocks, genColumn, B_AIR, B_STONE, O_FLOAT, SEC } from './gen/chunk.js';
 import { LEVEL } from './iso.js';
@@ -78,14 +79,15 @@ export function createWorld(seed, onMesh) {
     genMs += ms; genN++;
     if (q.type === 'col') { colTimes.push(performance.now()); addCol(data); return; }
     if (q.type === 'far') {
-      fars.delete(key); fars.set(key, data); onMesh(key, data, mesh);
+      fars.delete(key); fars.set(key, data); onMesh('far', q.d, q.n, key, q, data, mesh);
       if (fars.size > KEEP_FARS) for (const k of fars.keys()) { if (fars.size <= KEEP_FARS * 0.9) break; fars.delete(k); }
       return;
     }
+    if (q.type === 'flora') { onMesh('flora', q.d, q.n, ck(q.cx, q.cy), q, data, mesh); return; }
     const U = uni(q.d, q.n, true), k = sk(q.cx, q.cy, q.cz), was = U.secs.get(k);
     if (was) { was.dead = true; U.secs.delete(k); } else nSecs++;
     U.secs.set(k, data);
-    if (mesh) onMesh(key, data, mesh);
+    onMesh('sec', q.d, q.n, k, q, data, mesh);
     nSecs = trim('secs', nSecs, KEEP_SECS);
   });
 
@@ -178,6 +180,8 @@ export function createWorld(seed, onMesh) {
     // Плитка далечі (крок s): запит (готова — far(key): zmin, zmax; меш — у рендері), ключ
     wantFar(d, n, tx, ty, s, pri) { const key = `f${d}:${n}:${tx}:${ty}:${s}`; gen.want(key, { type: 'far', d, n, tx, ty, s }, pri); return key; },
     far: (key) => touch(fars, key),
+    // Рослини зблизька стовпця (меш — у рендері)
+    wantFlora(d, n, cx, cy, pri) { const key = `p${d}:${n}:${cx}:${cy}`; gen.want(key, { type: 'flora', d, n, cx, cy }, pri); return key; },
     wantSec(d, n, cx, cy, cz, pri) { const key = skey(d, n, cx, cy, cz); gen.want(key, { type: 'sec', d, n, cx, cy, cz }, pri); return key; },
     stats: () => {
       const now = performance.now();

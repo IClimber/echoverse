@@ -1,70 +1,104 @@
-// gl.js — WebGL2 без бібліотек: один шейдер для пласких граней (колір вершини, напрямлене світло, туман),
-// меші (VAO), матриця камери (camera.js: ізометрія чи третя особа). Буфер глибини сам вирішує, що попереду.
-// Позиції в меші — локальні; матриця моделі несе зсув від камери, порахований у float64 на CPU
-// (далеко від початку float32 тремтів би), і повороти частин фігури.
+// gl.js — WebGL2 без бібліотек: шейдер пласких граней у варіантах (колір вершини, напрямлене світло, туман), арени
+// щільних вершин регіонів (спільний буфер, multi-draw), окремі меші (VAO) для фігури, тіней, плиток далечі, тіл;
+// матриця камери (camera.js: ізометрія чи третя особа). Буфер глибини сам вирішує, що попереду. Позиції — локальні;
+// зсув від цілі камери (кут регіону, матриця моделі) рахується у float64 на CPU (далеко від початку float32 тремтів би).
+import { createAlloc } from './arena.js';
 
-const VS = `#version 300 es
+// Шейдер граней — один текст, варіанти через #define (кеш програм у createGL):
+// PACKED — щільна вершина регіону (pack.js: позиція u16 у 1/128 від кута регіону, uOrigin — кут відносно цілі),
+// інакше — float-позиції з матрицею моделі (фігура, тінь, плитки далечі, тіла). RING — малювати лише між uRing.x і
+// uRing.y від цілі по горизонталі (шов далечі); FADE — розчинення біля ока (рослини в третій особі); CUT / CUTF — «вікно»
+// до гравця (CUTF — ширше, для рослин). Без визначень — жодного discard. Спільне на кадр — UBO Frame (один запис у begin)
+const FRAME = `layout(std140) uniform Frame {
+  mat4 uView;       // камера: відносно цілі → clip
+  vec4 uLight;      // напрям світла; w — розсіяне
+  vec4 uLightCol;   // колір світла; w — кривизна планети (далечінь опускається на d² · w, 1 / 2R)
+  vec4 uFogCol;     // колір туману; w — місцевий час
+  vec4 uFog;        // туман від x до y; розчинення рослин: ближче за z до ока — зникли, від z до w — дизеринг (w = 0 — вимкнено)
+  vec4 uFR;         // туман згори: осі екрана (відстань — на екрані); у третій особі — нулі (відстань по горизонталі)
+  vec4 uFU;
+  vec4 uWind;       // вітер: x, y — напрям і сила гойдання листя й трави, z — час
+  vec4 uEye;        // око (відносно цілі)
+  vec4 uCut;        // «вікно» до гравця: x, y — px, z — радіус px (0 — вимкнено), w — висота відсікання
+  vec4 uCutF;       // те саме ширше (рослини)
+  vec4 uMisc;       // x — глибина гравця (як gl_FragCoord.z)
+};`;
+const VS = `
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec3 aNor;
 layout(location = 2) in vec3 aCol;
 layout(location = 3) in float aMat;  // матеріал — шар текстури
-uniform mat4 uModel;      // локальні координати меша → світ відносно камери (зсув, повороти, рівномірний масштаб)
-uniform mat4 uView;       // камера: відносно цілі → clip
-uniform vec3 uLight, uLightCol, uTint;
-uniform float uAmb;
-uniform vec3 uFR, uFU;       // туман згори: осі екрана (відстань — на екрані); у третій особі — нулі (відстань по горизонталі)
-uniform vec3 uWind;          // вітер: x, y — напрям і сила гойдання листя й трави, z — час
-uniform float uCurve;        // кривизна планети: далечінь опускається на d² · uCurve (1 / 2R)
+${FRAME}
+uniform mat4 uModel;      // (не PACKED) локальні координати → світ відносно цілі (зсув, повороти, рівномірний масштаб)
+uniform vec3 uOrigin;     // (PACKED) кут регіону відносно цілі
+uniform vec3 uCell;       // (PACKED) кут регіону за модулем 1024 — світові клітинки текстур
+uniform vec3 uTint;
 out vec3 vCol, vW;
 out float vFog;
 out vec2 vUV;
 flat out float vMat;
 void main() {
-  // Текстурні координати — проєкція локальної позиції на площину грані (1 одиниця = одна текстура; угору — угору)
+#ifdef PACKED
+  vec3 lp = aPos * (1.0 / 128.0) - vec3(192.0, 192.0, 64.0), tp = lp + uCell;
+#else
+  vec3 lp = aPos, tp = aPos;
+#endif
+  // Текстурні координати — проєкція позиції на площину грані (1 одиниця = одна текстура; угору — угору)
   vec3 an = abs(aNor);
-  vUV = an.z >= max(an.x, an.y) ? aPos.xy : (an.x >= an.y ? vec2(aPos.y, -aPos.z) : vec2(aPos.x, -aPos.z));
+  vUV = an.z >= max(an.x, an.y) ? tp.xy : (an.x >= an.y ? vec2(tp.y, -tp.z) : vec2(tp.x, -tp.z));
   vMat = aMat;
-  vec3 lp = aPos;
   if (aMat == 12.0 || aMat == 20.0 || aMat == 21.0)        // листя, пелюстки, трава гойдаються від вітру
-    lp.xy += uWind.xy * (0.55 + 0.45 * sin(uWind.z * 1.9 + aPos.x * 0.9 + aPos.y * 1.3 + aPos.z * 0.7));
-  vec3 p = (uModel * vec4(lp, 1.0)).xyz;
-  p.z -= dot(p.xy, p.xy) * uCurve;
-  vec3 n = normalize(mat3(uModel) * aNor);
+    lp.xy += uWind.xy * (0.55 + 0.45 * sin(uWind.z * 1.9 + tp.x * 0.9 + tp.y * 1.3 + tp.z * 0.7));
+#ifdef PACKED
+  vec3 p = lp + uOrigin, n = normalize(aNor);
+#else
+  vec3 p = (uModel * vec4(lp, 1.0)).xyz, n = normalize(mat3(uModel) * aNor);
+#endif
+  p.z -= dot(p.xy, p.xy) * uLightCol.w;
   gl_Position = uView * vec4(p, 1.0);
-  vCol = aMat == 19.0 ? aCol * uTint : aCol * (uAmb + (1.0 - uAmb) * max(dot(n, uLight), 0.0)) * uLightCol * uTint;   // лава світиться сама
+  float amb = uLight.w;
+  vCol = aMat == 19.0 ? aCol * uTint : aCol * (amb + (1.0 - amb) * max(dot(n, uLight.xyz), 0.0)) * uLightCol.rgb * uTint;   // лава світиться сама
   vW = p;
-  vFog = dot(uFR, uFR) > 0.0 ? length(vec2(dot(p, uFR), dot(p, uFU))) : length(p.xy);
+  vFog = dot(uFR.xyz, uFR.xyz) > 0.0 ? length(vec2(dot(p, uFR.xyz), dot(p, uFU.xyz))) : length(p.xy);
 }`;
 
-const FS = `#version 300 es
+const FS = `
 precision highp float;
 in vec3 vCol, vW;
 in float vFog;
 in vec2 vUV;
 flat in float vMat;
+${FRAME}
 uniform highp sampler2DArray uTex;
-uniform float uTime;
-uniform vec3 uFogCol;
-uniform vec2 uFog;        // туман: від r0 до r1 (світові одиниці від камери по горизонталі)
-uniform vec4 uCut;        // «вікно» до гравця: x, y — px екрана, z — радіус px (0 — вимкнено), w — висота відсікання
-uniform float uCutD;      // глибина гравця (як gl_FragCoord.z): ближче за неї й вище за коліна — вирізаємо
-uniform float uAlpha;     // прозорість (лише тінь; решта — 1)
-uniform vec3 uEye;        // око (відносно цілі) — для розчинення рослин біля камери
-uniform vec2 uFade;       // рослини: ближче за x до ока — зникли, від x до y — розчиняються (дизеринг); y = 0 — вимкнено
-uniform vec2 uRing;       // шов далечі (по горизонталі від цілі): малюємо лише від x до y (y = 0 — усе)
+uniform float uAlpha;     // прозорість (рідини, тінь; решта — 1)
+uniform vec2 uRing;       // (RING) шов далечі: малюємо лише від x до y
 out vec4 o;
+#ifdef FADE
 // Поріг упорядкованого дизерингу 4×4 (0…1)
 float bayer(vec2 p) {
   int x = int(mod(p.x, 4.0)), y = int(mod(p.y, 4.0)), i = x + y * 4;
   int b[16] = int[16](0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5);
   return (float(b[i]) + 0.5) / 16.0;
 }
+#endif
 void main() {
-  if (uRing.y > 0.0) { float r = length(vW.xy); if (r < uRing.x || r > uRing.y) discard; }
-  if (uFade.y > 0.0) { float t = (distance(vW, uEye) - uFade.x) / (uFade.y - uFade.x); if (t < bayer(gl_FragCoord.xy)) discard; }
-  if (uCut.z > 0.0 && gl_FragCoord.z < uCutD && vW.z > uCut.w && distance(gl_FragCoord.xy, uCut.xy) < uCut.z
+#ifdef RING
+  { float r = length(vW.xy); if (r < uRing.x || r > uRing.y) discard; }
+#endif
+#ifdef FADE
+  if (uFog.w > 0.0) { float t = (distance(vW, uEye.xyz) - uFog.z) / (uFog.w - uFog.z); if (t < bayer(gl_FragCoord.xy)) discard; }
+#endif
+#if defined(CUT) || defined(CUTF)
+#ifdef CUT
+  vec4 cut = uCut;
+#else
+  vec4 cut = uCutF;
+#endif
+  if (cut.z > 0.0 && gl_FragCoord.z < uMisc.x && vW.z > cut.w && distance(gl_FragCoord.xy, cut.xy) < cut.z
       && mod(floor(gl_FragCoord.x) + floor(gl_FragCoord.y), 2.0) < 1.0) discard;
-  vec2 uv = vUV + (vMat == 1.0 ? uTime * vec2(0.05, 0.03) : vMat == 19.0 ? uTime * vec2(0.008, 0.005) : vec2(0.0));   // вода пливе, лава — повільно
+#endif
+  float time = uFogCol.w;
+  vec2 uv = vUV + (vMat == 1.0 ? time * vec2(0.05, 0.03) : vMat == 19.0 ? time * vec2(0.008, 0.005) : vec2(0.0));   // вода пливе, лава — повільно
   // Кожна клітинка текстури — зі своїм поворотом і віддзеркаленням (за хешем клітинки й матеріалу), щоб однакові
   // текстури не складалися в помітну сітку. Вода, лава (спільний плин) і край дерну — без повороту; візерунки з
   // напрямом (брижі піску, пласти скель, кора) — лише на 180°. Градієнти — до повороту (textureGrad): без швів мип-мап
@@ -78,7 +112,7 @@ void main() {
     f = R * f; g1 = R * g1; g2 = R * g2;
   }
   vec3 c = vCol * textureGrad(uTex, vec3(f + 0.5, vMat), g1, g2).rgb * 2.0;   // текстура — множник кольору (0,5 = ×1)
-  o = vec4(mix(c, uFogCol, smoothstep(uFog.x, uFog.y, vFog)), uAlpha);
+  o = vec4(mix(c, uFogCol.rgb, smoothstep(uFog.x, uFog.y, vFog)), uAlpha);
 }`;
 
 // Небо: трикутник на весь екран; напрям погляду — з оберненої матриці камери. Градієнт зеніт — обрій, світіння
@@ -257,11 +291,32 @@ function compile(gl, type, src) {
 export function createGL(canvas) {
   const gl = canvas.getContext('webgl2', { antialias: true, alpha: false, powerPreference: 'high-performance' });
   if (!gl) throw new Error('WebGL2 недоступний');
-  const prog = gl.createProgram();
-  gl.attachShader(prog, compile(gl, gl.VERTEX_SHADER, VS));
-  gl.attachShader(prog, compile(gl, gl.FRAGMENT_SHADER, FS));
-  gl.linkProgram(prog);
-  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+  // UBO кадру (std140): uView [0–15], далі по vec4 — uLight, uLightCol, uFogCol, uFog, uFR, uFU, uWind, uEye, uCut, uCutF, uMisc
+  const ubo = gl.createBuffer(), F = new Float32Array(60);
+  gl.bindBuffer(gl.UNIFORM_BUFFER, ubo); gl.bufferData(gl.UNIFORM_BUFFER, F.byteLength, gl.DYNAMIC_DRAW);
+  gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, ubo);
+  // Програми граней за набором визначень (див. VS / FS): {p, U — розташування уніформ}
+  const progs = new Map();
+  const program = (defs) => {
+    let P = progs.get(defs);
+    if (P) return P;
+    const head = '#version 300 es\n' + defs.split(' ').filter(Boolean).map((d) => `#define ${d}\n`).join('');
+    const p = gl.createProgram();
+    gl.attachShader(p, compile(gl, gl.VERTEX_SHADER, head + VS));
+    gl.attachShader(p, compile(gl, gl.FRAGMENT_SHADER, head + FS));
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+    gl.uniformBlockBinding(p, gl.getUniformBlockIndex(p, 'Frame'), 0);
+    const U = {};
+    for (const k of ['uModel', 'uOrigin', 'uCell', 'uTint', 'uTex', 'uAlpha', 'uRing']) U[k] = gl.getUniformLocation(p, k);
+    gl.useProgram(p);
+    gl.uniform3f(U.uTint, 1, 1, 1); gl.uniform1f(U.uAlpha, 1); gl.uniform1i(U.uTex, 0);
+    P = { p, U, defs };
+    progs.set(defs, P);
+    if (cur) gl.useProgram(cur.p);
+    return P;
+  };
+  let cur = null;
   const sky = gl.createProgram();
   gl.attachShader(sky, compile(gl, gl.VERTEX_SHADER, SKY_VS));
   gl.attachShader(sky, compile(gl, gl.FRAGMENT_SHADER, SKY_FS));
@@ -283,16 +338,11 @@ export function createGL(canvas) {
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, 64, 64, 0, gl.RED, gl.FLOAT, new Float32Array(64 * 64).fill(-1e4));
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   gl.activeTexture(gl.TEXTURE0);
-  const U = {};
-  for (const k of ['uModel', 'uView', 'uLight', 'uLightCol', 'uTint', 'uAmb', 'uFogCol', 'uFog', 'uCut', 'uCutD', 'uAlpha', 'uTex', 'uTime', 'uFR', 'uFU', 'uEye', 'uFade', 'uRing', 'uWind', 'uCurve']) U[k] = gl.getUniformLocation(prog, k);
-  gl.useProgram(prog);
   gl.enable(gl.DEPTH_TEST);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-  gl.uniform1f(U.uAlpha, 1);
   const shift = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
   // Текстури: масив шарів (по шару на матеріал); поки немає — один нейтральний шар
   const tex = gl.createTexture(), aniso = gl.getExtension('EXT_texture_filter_anisotropic');
-  gl.uniform1i(U.uTex, 0);
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex);
   gl.texImage3D(gl.TEXTURE_2D_ARRAY, 0, gl.RGBA8, 1, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([128, 128, 128, 255]));
@@ -306,10 +356,23 @@ export function createGL(canvas) {
   // Час GPU (EXT_disjoint_timer_query_webgl2): кільце запитів, результат — згладжено; немає розширення — null
   const tq = gl.getExtension('EXT_disjoint_timer_query_webgl2'), queries = [];
   let qOn = null;
+  const multi = gl.getExtension('WEBGL_multi_draw');
+  // Щільна вершина (pack.js, 16 Б): позиція u16 ×3, нормаль i8 ×3 (нормовано), колір u8 ×3 (нормовано), матеріал u8
+  const packedAttrs = (buf) => {
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.UNSIGNED_SHORT, false, 16, 0);
+    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.BYTE, true, 16, 6);
+    gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 3, gl.UNSIGNED_BYTE, true, 16, 10);
+    gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 1, gl.UNSIGNED_BYTE, false, 16, 13);
+  };
 
   const R = {
-    gl,
-    stats: { draws: 0, tris: 0, upBytes: 0, up: 0, gpuBytes: 0 },
+    gl, multi: !!multi,
+    stats: { draws: 0, tris: 0, upBytes: 0, up: 0, gpuBytes: 0, arenaBytes: 0, arenaUsed: 0 },
+    program,
+    // Зробити програму поточною (кеш: без зайвих useProgram)
+    use(P) { if (cur !== P) { gl.useProgram(P.p); cur = P; } return P; },
+    get cur() { return cur; },
     gpuMs: tq ? 0 : null,
     get width() { return W; }, get height() { return H; }, get dpr() { return dpr; },
     resize() {
@@ -360,28 +423,57 @@ export function createGL(canvas) {
       if (queries.length < 4) { qOn = gl.createQuery(); gl.beginQuery(tq.TIME_ELAPSED_EXT, qOn); }
     },
     end() { if (qOn) { gl.endQuery(tq.TIME_ELAPSED_EXT); queries.push(qOn); qOn = null; } },
-    // Кадр: небо, світло, туман, камера (view — матриця з camera.viewProj); cut — «вікно» до гравця або null
-    begin({ fogCol, light, amb, lightCol, fog, fogAxes = null, view, cut, time = 0, sky = null, wind = [0, 0], curve = 0 }) {
+    // Кадр: небо, світло, туман, камера (view — матриця з camera.viewProj); cut / cutF — «вікно» до гравця (рослини —
+    // ширше) або null; fade — розчинення рослин біля ока [зникли, видно] або null, eye — око відносно цілі
+    begin({ fogCol, light, amb, lightCol, fog, fogAxes = null, view, cut, cutF = null, fade = null, eye = [0, 0, 0], time = 0, sky = null, wind = [0, 0], curve = 0 }) {
       R.stats.up = R.stats.upBytes; R.stats.draws = 0; R.stats.tris = 0; R.stats.upBytes = 0;
       R.timeBegin();
       gl.clearColor(fogCol[0] / 255, fogCol[1] / 255, fogCol[2] / 255, 1);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       if (sky) R.drawSky(sky);
-      gl.useProgram(prog);
-      gl.uniform1f(U.uTime, time);
-      gl.uniform3f(U.uWind, wind[0], wind[1], time);
-      gl.uniform1f(U.uCurve, curve);
       const [fr, fu] = fogAxes || [[0, 0, 0], [0, 0, 0]];
-      gl.uniform3f(U.uFR, fr[0], fr[1], fr[2]); gl.uniform3f(U.uFU, fu[0], fu[1], fu[2]);
-      gl.uniformMatrix4fv(U.uView, false, view);
-      gl.uniform3f(U.uLight, light[0], light[1], light[2]);
-      gl.uniform3f(U.uLightCol, lightCol[0], lightCol[1], lightCol[2]);
-      gl.uniform1f(U.uAmb, amb);
-      gl.uniform3f(U.uFogCol, fogCol[0] / 255, fogCol[1] / 255, fogCol[2] / 255);
-      gl.uniform2f(U.uFog, fog[0], fog[1]);
-      R.setCut(cut);
-      R.setRing(null);
+      F.set(view, 0);
+      F.set([light[0], light[1], light[2], amb, lightCol[0], lightCol[1], lightCol[2], curve, fogCol[0] / 255, fogCol[1] / 255, fogCol[2] / 255, time,
+        fog[0], fog[1], fade ? fade[0] : 0, fade ? fade[1] : 0, fr[0], fr[1], fr[2], 0, fu[0], fu[1], fu[2], 0, wind[0], wind[1], time, 0, eye[0], eye[1], eye[2], 0], 16);
+      const c4 = (c, o) => { if (c) F.set([c.x * dpr, (H - c.y) * dpr, c.r * dpr, c.z], o); else F.fill(0, o, o + 4); };
+      c4(cut, 48); c4(cutF, 52);
+      F[56] = cut ? cut.depth : cutF ? cutF.depth : 0;
+      gl.bindBuffer(gl.UNIFORM_BUFFER, ubo); gl.bufferSubData(gl.UNIFORM_BUFFER, 0, F);
     },
+    // Арена щільних вершин (спільний буфер регіону): {buf, vao, a — алокатор (arena.js), put(off, u8), grow(cap2), drop()}
+    arena(cap) {
+      const A = { buf: gl.createBuffer(), vao: gl.createVertexArray(), a: createAlloc(cap) };
+      const make = (n) => { gl.bindBuffer(gl.ARRAY_BUFFER, A.buf); gl.bufferData(gl.ARRAY_BUFFER, n * 16, gl.STATIC_DRAW); R.stats.arenaBytes += n * 16; };
+      gl.bindVertexArray(A.vao); make(cap); packedAttrs(A.buf); gl.bindVertexArray(null);
+      A.put = (off, u8) => {
+        gl.bindBuffer(gl.ARRAY_BUFFER, A.buf); gl.bufferSubData(gl.ARRAY_BUFFER, off * 16, u8);
+        R.stats.upBytes += u8.byteLength;
+      };
+      // Більша ємність: новий буфер, старий вміст — копією на GPU
+      A.grow = (cap2) => {
+        const old = A.buf, oc = A.a.cap;
+        A.buf = gl.createBuffer(); make(cap2);
+        gl.bindBuffer(gl.COPY_READ_BUFFER, old); gl.bindBuffer(gl.COPY_WRITE_BUFFER, A.buf);
+        gl.copyBufferSubData(gl.COPY_READ_BUFFER, gl.COPY_WRITE_BUFFER, 0, 0, oc * 16);
+        gl.deleteBuffer(old); R.stats.arenaBytes -= oc * 16;
+        gl.bindVertexArray(A.vao); packedAttrs(A.buf); gl.bindVertexArray(null);
+        A.a.grow(cap2);
+      };
+      A.drop = () => { gl.deleteBuffer(A.buf); gl.deleteVertexArray(A.vao); R.stats.arenaBytes -= A.a.cap * 16; };
+      return A;
+    },
+    // Діапазони арени (first[i], count[i] вершин, i — від off, n штук) одним викликом (WEBGL_multi_draw) чи циклом
+    drawRanges(A, first, count, off, n) {
+      if (!n) return;
+      gl.bindVertexArray(A.vao);
+      if (multi) { multi.multiDrawArraysWEBGL(gl.TRIANGLES, first, off, count, off, n); R.stats.draws++; }
+      else { for (let i = off; i < off + n; i++) gl.drawArrays(gl.TRIANGLES, first[i], count[i]); R.stats.draws += n; }
+      for (let i = off; i < off + n; i++) R.stats.tris += count[i] / 3;
+    },
+    // Уніформи поточної програми
+    origin(x, y, z, cx, cy, cz) { gl.uniform3f(cur.U.uOrigin, x, y, z); gl.uniform3f(cur.U.uCell, cx, cy, cz); },
+    alpha(a) { gl.uniform1f(cur.U.uAlpha, a); },
+    ring(r0, r1) { gl.uniform2f(cur.U.uRing, r0, r1); },
     // Небо на весь екран (до всього іншого, без глибини): sky — {inv (обернена матриця камери), st (sky.js skyState)}
     drawSky({ inv, st }) {
       const c = (v) => [v[0] / 255, v[1] / 255, v[2] / 255];
@@ -428,34 +520,23 @@ export function createGL(canvas) {
       gl.drawArrays(gl.TRIANGLES, 0, PARTICLES * 6);
       R.stats.draws++; R.stats.tris += PARTICLES * 2;
       gl.disable(gl.BLEND); gl.depthMask(true);
-      gl.useProgram(prog);
-    },
-    // Розчинення біля ока (рослини в третій особі): fade — [зникли, видно] у світових одиницях або null
-    // Шов далечі: малювати лише між r0 і r1 від цілі по горизонталі; null — усе
-    setRing(r) { gl.uniform2f(U.uRing, r ? r[0] : 0, r ? r[1] : 0); },
-    setFade(fade, eye) {
-      if (fade) { gl.uniform2f(U.uFade, fade[0], fade[1]); gl.uniform3f(U.uEye, eye[0], eye[1], eye[2]); }
-      else gl.uniform2f(U.uFade, 0, 0);
-    },
-    setCut(cut) {
-      if (cut) { gl.uniform4f(U.uCut, cut.x * dpr, (H - cut.y) * dpr, cut.r * dpr, cut.z); gl.uniform1f(U.uCutD, cut.depth); }
-      else gl.uniform4f(U.uCut, 0, 0, 0, 0);
+      if (cur) gl.useProgram(cur.p);
     },
     // Напівпрозоре між beginAlpha / endAlpha (без запису глибини): поверхні рідин
-    beginAlpha(alpha) { gl.enable(gl.BLEND); gl.depthMask(false); gl.uniform1f(U.uAlpha, alpha); },
-    endAlpha() { gl.uniform1f(U.uAlpha, 1); gl.disable(gl.BLEND); gl.depthMask(true); },
+    beginAlpha() { gl.enable(gl.BLEND); gl.depthMask(false); },
+    endAlpha() { gl.disable(gl.BLEND); gl.depthMask(true); },
     // Напівпрозорий меш поверх (без запису глибини): тінь
     drawAlpha(mesh, model, alpha) {
       gl.enable(gl.BLEND); gl.depthMask(false);
-      gl.uniform1f(U.uAlpha, alpha);
+      gl.uniform1f(cur.U.uAlpha, alpha);
       R.draw(mesh, model);
-      gl.uniform1f(U.uAlpha, 1);
+      gl.uniform1f(cur.U.uAlpha, 1);
       gl.disable(gl.BLEND); gl.depthMask(true);
     },
-    // model — матриця 4×4 (mat.js)
+    // Меш з матрицею моделі (поточна програма — без PACKED); model — матриця 4×4 (mat.js)
     draw(mesh, model, tint = null) {
-      gl.uniformMatrix4fv(U.uModel, false, model);
-      if (tint) gl.uniform3f(U.uTint, tint[0], tint[1], tint[2]); else gl.uniform3f(U.uTint, 1, 1, 1);
+      gl.uniformMatrix4fv(cur.U.uModel, false, model);
+      if (tint) gl.uniform3f(cur.U.uTint, tint[0], tint[1], tint[2]); else gl.uniform3f(cur.U.uTint, 1, 1, 1);
       gl.bindVertexArray(mesh.vao);
       gl.drawElements(gl.TRIANGLES, mesh.count, mesh.type, 0);
       R.stats.draws++; R.stats.tris += mesh.count / 3;

@@ -1,7 +1,7 @@
 // main.js — запуск: меню світів, ігровий цикл (рух, стрибки, камера, підвантаження чанків), HUD, автозбереження.
 // ?strip — замість гри стенд «смуга всесвітів» (js/strip.js), ?flora — галерея видів рослин (js/flora-stand.js).
 import { createRenderer } from './render.js';
-import { createWorld, findSpawn, ck, skey } from './world.js';
+import { createWorld, findSpawn, ck, sk, skey } from './world.js';
 import { createDevice, landing, landingChunks, CHARGE } from './device.js';
 import { step, support, windShelter, SPRINT, GRAVITY, FOOT } from './player.js';
 import { stepBody, windMoves, push, rayBody, PLAYER_MASS, HIT_IMPULSE } from './bodies.js';
@@ -23,6 +23,7 @@ const SAVE_MS = 10000;                     // автозбереження
 const CAM_KEY = 'echoverse-camera';         // вибраний вигляд (на браузер)
 const ZR_FAR = [-200, 2050];                 // висоти (од.) для піраміди видимості ще не згенерованої плитки далечі
 const UNDER_R = 64;                            // під землею: радіус (клітинок), у якому вантажимо секції біля висоти гравця (зали)
+const FLORA_R = 60;                            // рослини зблизька замовляємо для стовпців ближче (рендер малює ближче NEAR 44)
 
 const QS = new URLSearchParams(location.search);
 if (QS.has('strip')) import('./strip.js').then((m) => m.runStrip());
@@ -60,7 +61,7 @@ function boot() {
       frameStats();
       const st = g ? g.world.stats() : {}, R = renderer.R;
       return { fps: perf.fps, frameMs: perf.frameMs, p99: perf.p99, upd: perf.upd, drw: perf.drw, gpuMs: R.gpuMs, draws: R.stats.draws, tris: R.stats.tris,
-        gpuMB: R.stats.gpuBytes / 1048576, colsPerSec: st.colsPerSec, pending: st.pending, cols: st.cols, secs: st.secs, meshes: renderer.meshCount, workers: st.workers };
+        gpuMB: (R.stats.gpuBytes + R.stats.arenaBytes) / 1048576, colsPerSec: st.colsPerSec, pending: st.pending, cols: st.cols, secs: st.secs, meshes: renderer.meshCount, workers: st.workers };
     },
   };
 
@@ -141,9 +142,13 @@ function boot() {
     const p = rec.player;
     renderer.clear();
     g = {
-      rec, world: createWorld(rec.seed, (key, c, m) => renderer.add(key, m)), dev: createDevice(rec.history),
+      rec, world: createWorld(rec.seed, (kind, d, n, k, q, data, m) => {
+        if (kind === 'sec') renderer.addSection(d, n, k, q, m);
+        else if (kind === 'flora') renderer.addFlora(d, n, k, q, data, m);
+        else renderer.addFar(k, data, m);
+      }), dev: createDevice(rec.history),
       d: p.d, n: p.n, me: { x: p.x, y: p.y, z: p.z, vz: 0, air: false, ground: true, yaw: Math.PI * 0.75, moving: false, placed: false },
-      cam: [p.x, p.y, p.z || 0], lastSave: performance.now(), vis: [], view: null, clock: rec.clock || 0,
+      cam: [p.x, p.y, p.z || 0], lastSave: performance.now(), view: null, clock: rec.clock || 0,
     };
     g.world.setCurrent(g.d, g.n);
     if (camera.mode === THIRD) setYaw(camera, g.me.yaw + Math.PI);
@@ -354,7 +359,7 @@ function boot() {
   // під час заряджання — усе видиме у всесвіті, куди стрибаємо
   // Підвантаження: стовпці (зведення) у видимості, у них — секції з поверхнею й островами, що потрапляють у піраміду
   // видимості; біля гравця — ще й секції навколо його висоти (печери, глибина). Для стрибка — те саме у всесвітах,
-  // куди можна стрибнути. g.vis — видимі секції з мешами, g.visCols — видимі стовпці (тіла)
+  // куди можна стрибнути. g.visCols — видимі стовпці (тіла)
   function stream() {
     const keys = new Set(), W = g.world, me = g.me, t = g.cam, m = g.view.m;
     const kMe = Math.floor((me.z ?? 0) / LEVEL), czMe = Math.floor(kMe / SEC);
@@ -367,13 +372,13 @@ function boot() {
       const key = skey(d, n, cx, cy, cz);
       keys.add(key);
       const S = W.touchSec(d, n, cx, cy, cz);                 // меш могли звільнити з GPU — тоді наново
-      if (!S || (!S.empty && !renderer.has(key))) W.wantSec(d, n, cx, cy, cz, pri);
+      if (!S || (!S.empty && !renderer.hasSection(d, n, sk(cx, cy, cz)))) W.wantSec(d, n, cx, cy, cz, pri);
       return key;
     };
     // секції стовпця, що видно: поверхня й острови в піраміді; поруч з гравцем — ±2 секції від його висоти;
     // під землею (великі порожнини) — ще ±3 секції в піраміді видимості до UNDER_R клітинок
     const myC = W.col(g.d, g.n, Math.floor(me.x / CS), Math.floor(me.y / CS)), under = !!myC && czMe < myC.czLo;
-    const visSecs = (d, n, C, pri, near, out) => {
+    const visSecs = (d, n, C, pri, near) => {
       const list = [], cave = under && Math.hypot(C.cx * CS + 8 - me.x, C.cy * CS + 8 - me.y) < UNDER_R;
       for (let cz = C.czLo; cz <= C.czHi; cz++) list.push(cz);
       for (const cz of C.isl) if (cz < C.czLo || cz > C.czHi) list.push(cz);
@@ -382,19 +387,19 @@ function boot() {
       for (const cz of list) {
         const z0 = cz * SEC * LEVEL - t[2], ax = C.cx * CS - t[0], ay = C.cy * CS - t[1];
         if (!near && !boxInView(m, ax, ay, z0, z0 + SEC * LEVEL + 12)) continue;
-        const key = sec(d, n, C.cx, C.cy, cz, pri + Math.abs(cz - czMe) * 40);
-        if (out) out.push({ key, cx: C.cx, cy: C.cy, cz });
+        sec(d, n, C.cx, C.cy, cz, pri + Math.abs(cz - czMe) * 40);
       }
+      // рослини зблизька — окрема робота стовпця, лише біля цілі камери
+      if (C.obj.length && Math.hypot(C.cx * CS + 8 - t[0], C.cy * CS + 8 - t[1]) < FLORA_R && !renderer.hasFlora(d, n, ck(C.cx, C.cy))) keys.add(W.wantFlora(d, n, C.cx, C.cy, pri));
     };
-    const vis = g.view.chunks, ch = g.dev.charge, out = [];
+    const vis = g.view.chunks, ch = g.dev.charge;
     const nearCols = landingChunks(me.x, me.y, CS);
-    for (const [cx, cy] of nearCols) { const C = col(g.d, g.n, cx, cy, -3e6); if (C) visSecs(g.d, g.n, C, -3e6, true, null); }   // під ногами — першими
-    for (const v of vis) { const C = col(g.d, g.n, v.cx, v.cy, v.dist2 - 1e5); if (C) visSecs(g.d, g.n, C, v.dist2, Math.abs(v.cx * CS + 8 - me.x) < 24 && Math.abs(v.cy * CS + 8 - me.y) < 24, out); }
-    g.vis = out;
+    for (const [cx, cy] of nearCols) { const C = col(g.d, g.n, cx, cy, -3e6); if (C) visSecs(g.d, g.n, C, -3e6, true); }   // під ногами — першими
+    for (const v of vis) { const C = col(g.d, g.n, v.cx, v.cy, v.dist2 - 1e5); if (C) visSecs(g.d, g.n, C, v.dist2, Math.abs(v.cx * CS + 8 - me.x) < 24 && Math.abs(v.cy * CS + 8 - me.y) < 24); }
     g.visCols = vis.map((v) => ck(v.cx, v.cy));
     const other = (d, n, hot) => {
-      for (const [cx, cy] of nearCols) { const C = col(d, n, cx, cy, hot ? -2e6 : 1e5); if (C) visSecs(d, n, C, hot ? -2e6 : 1e5, true, null); }
-      if (hot) for (const v of vis) { const C = col(d, n, v.cx, v.cy, -1e6 + v.dist2); if (C) visSecs(d, n, C, -1e6 + v.dist2, false, null); }
+      for (const [cx, cy] of nearCols) { const C = col(d, n, cx, cy, hot ? -2e6 : 1e5); if (C) visSecs(d, n, C, hot ? -2e6 : 1e5, true); }
+      if (hot) for (const v of vis) { const C = col(d, n, v.cx, v.cy, -1e6 + v.dist2); if (C) visSecs(d, n, C, -1e6 + v.dist2, false); }
     };
     g.far = camera.mode === ISO ? null : farTiles(keys, t, m);
     for (const dir of [-1, 1]) other(g.d, g.n + dir, ch && ch.to[0] === g.d && ch.to[1] === g.n + dir);
@@ -415,12 +420,12 @@ function boot() {
       if (near > FAR_R || far < SEAM) continue;
       const s = near < 300 ? 2 : near < 700 ? 4 : 8;
       let F = null;
-      for (const ss of [s, s * 2, s / 2, s * 4]) { if (ss < 2 || ss > 8) continue; const k = `f${g.d}:${g.n}:${tx}:${ty}:${ss}`; if (renderer.has(k)) { F = { k, d: W.far(k) }; break; } }
+      for (const ss of [s, s * 2, s / 2, s * 4]) { if (ss < 2 || ss > 8) continue; const k = `f${g.d}:${g.n}:${tx}:${ty}:${ss}`; if (renderer.hasFar(k)) { F = { k, d: W.far(k) }; break; } }
       const z0 = F && F.d ? F.d.zmin - t[2] : ZR_FAR[0] - t[2], z1 = F && F.d ? F.d.zmax + 40 - t[2] : ZR_FAR[1] - t[2];
       if (!boxInView(m, ax, ay, z0, z1, FT)) continue;
       const key = `f${g.d}:${g.n}:${tx}:${ty}:${s}`;
       keys.add(key);
-      if (!renderer.has(key)) W.wantFar(g.d, g.n, tx, ty, s, 2e5 + near);
+      if (!renderer.hasFar(key)) W.wantFar(g.d, g.n, tx, ty, s, 2e5 + near);
       if (F) { keys.add(F.k); out.push({ key: F.k, x0: tx * FT, y0: ty * FT }); }
     }
     return out;
@@ -451,7 +456,7 @@ function boot() {
     const anim = animate(me, dt, now, physOf(L).speed * (me.run ? SPRINT * 0.85 : 1));
     if (!g.view) return;
     const sk = renderer.draw({
-      camera, target: g.cam, view: g.view, laws: L, keys: g.vis, far: g.far, clock: g.clock, bodies: g.world.bodiesIn(g.d, g.n, g.visCols || []), weather: { W: loc.W, loc }, rain: me.placed && loc.type ? rainMap(now) : null,
+      camera, target: g.cam, view: g.view, laws: L, far: g.far, clock: g.clock, bodies: g.world.bodiesIn(g.d, g.n, g.visCols || []), weather: { W: loc.W, loc }, rain: me.placed && loc.type ? rainMap(now) : null,
       me: me.placed ? { x: me.x, y: me.y, z: me.vis ?? me.z, gz: under ? under.z : me.z, yaw: me.yaw, swim: me.swim, fly: me.fly, tint: [1 + a * 0.4, 1 + a, 1 + a * 1.3], anim } : null,
     });
     setText('addr', `Глибина ${g.d} · всесвіт ${fmtN(g.n)} · ${clockStr(sk.phase)}${L.sky.lock ? ' (вічно)' : ''}`);

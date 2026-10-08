@@ -1,8 +1,9 @@
 // gen/job.js — одна робота генератора (у worker чи в головному потоці): зведення стовпця чи секція з мешем.
 // Стовпець (клітинки, «небо», ґратка шуму, предмети з положеннями) рахується раз і живе в кеші: секції стовпця беруть
 // його звідти. Зведення стовпця — поверхня, укриття від опадів, межі секцій із поверхнею, предмети.
-import { genCol, genSection, CW, SEC, T_WATER, T_ICE, T_BED } from './chunk.js';
-import { chunkMesh, objPose } from './mesh.js';
+import { genCol, genSection, CW, SEC, T_WATER, T_ICE, T_BED, O_FLOAT } from './chunk.js';
+import { chunkMesh, floraMesh, objPose } from './mesh.js';
+import { packMesh, concat, frameOf, RS } from './pack.js';
 import { farMesh } from './far.js';
 import { L_DRY, SEA } from '../universe.js';
 
@@ -39,7 +40,10 @@ export function colSummary(col, L) {
   };
 }
 
-// Робота q = {type: 'col' | 'sec' | 'far' (плитка далечі tx, ty з кроком s), d, n, cx, cy, cz}: {data, mesh?, bufs — що можна передати без копіювання}
+// Робота q = {type: 'col' | 'sec' | 'flora' | 'far' (плитка далечі tx, ty з кроком s), d, n, cx, cy, cz}:
+// {data, mesh?, bufs — що можна передати без копіювання}. Меші секцій і рослин — щільні вершини в кадрі регіону (pack.js):
+// секція — op (тверде, за ним ns вершин — nf далеких рослин) і liq (поверхня рідини); рослини зблизька — весь стовпець
+// окремо (потрібні лише біля камери), кадр — регіон rz найнижчого предмета
 export function runJob(L, q, cache) {
   if (q.type === 'far') {                      // плитка далечі: висотне поле поверхні з кроком q.s
     const f = farMesh(L, q.tx, q.ty, q.s), m = f.mesh;
@@ -47,10 +51,24 @@ export function runJob(L, q, cache) {
   }
   const col = colFor(L, q, cache);
   if (q.type === 'col') return { data: colSummary(col, L), bufs: [] };
+  if (q.type === 'flora') {
+    let zmin = Infinity;
+    for (const o of col.obj) if (o.k !== O_FLOAT && o.z < zmin) zmin = o.z;
+    if (zmin === Infinity) return { data: { rz: 0 }, mesh: { fl: null, n: 0, bb: null }, bufs: [] };
+    const rz = Math.floor(Math.floor(zmin / SEC) / RS), [dx, dy] = frameOf(q.cx, q.cy, 0);
+    const f = packMesh(floraMesh(col, L, rz * RS * SEC).finish(), dx, dy, 0);
+    return { data: { rz }, mesh: { fl: f.n ? f.buf : null, n: f.n, bb: f.bb }, bufs: f.n ? [f.buf] : [] };
+  }
   const sec = genSection(L, col, q.cz);
   if (sec.empty) return { data: sec, bufs: [] };
-  const m = chunkMesh({ cx: q.cx, cy: q.cy, h: col.h, bm: col.bm, v: col.v, b: sec.b, k0: sec.k0, nk: sec.nk, obj: col.obj, sp: col.sp }, L);
-  const bufs = [sec.b.buffer];
-  for (const x of [m.solid, m.liquid, m.flora, m.far]) if (x) bufs.push(x.pos.buffer, x.nor.buffer, x.col.buffer, x.mat.buffer, x.idx.buffer);
-  return { data: { b: sec.b, k0: sec.k0, nk: sec.nk }, mesh: m, bufs };
+  const m = chunkMesh({ cx: q.cx, cy: q.cy, h: col.h, bm: col.bm, v: col.v, b: sec.b, k0: sec.k0, nk: sec.nk, obj: col.obj, sp: col.sp }, L, { near: false });
+  const [dx, dy, dz] = frameOf(q.cx, q.cy, q.cz), s = packMesh(m.solid, dx, dy, dz), f = packMesh(m.far, dx, dy, dz);
+  const op = f.n ? concat(s, f) : s, lq = m.liquid ? packMesh(m.liquid, dx, dy, dz) : null;
+  const bufs = [sec.b.buffer, op.buf];
+  if (lq) bufs.push(lq.buf);
+  return {
+    data: { b: sec.b, k0: sec.k0, nk: sec.nk },
+    mesh: { op: op.buf, ns: s.n, nf: f.n, bb: op.n ? op.bb : null, liq: lq ? lq.buf : null, nl: lq ? lq.n : 0, lbb: lq ? lq.bb : null },
+    bufs,
+  };
 }
