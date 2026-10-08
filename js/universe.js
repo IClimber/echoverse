@@ -6,7 +6,7 @@ import { hash2, hash3, unit } from './rng.js';
 import { noise2 } from './noise.js';
 import { BIOMES, BIOME_IN_ZONE, ZONES } from './gen/biomes.js';
 
-export const GEN = 9;        // версія генератора; зберігається у світі (змінений генератор — інші незмінені чанки)
+export const GEN = 10;        // версія генератора; зберігається у світі (змінений генератор — інші незмінені чанки)
                              // 2 — гравітація (07.10.2026): рельєф, рослини, ширяюче каміння
                              // 3 — рідини (07.10.2026): дно водойм, вид рідини, сухі русла
                              // 4 — вокселі (07.10.2026): блоки-півблоки, печери, нависання, ширяючі острови
@@ -140,6 +140,8 @@ export function lawsOf(seed, d, n) {
   // Об'ємний рельєф: печери (частота 0…1 і ширина), нависання й арки (сила 0…1), ширяючі острови (частота 0…1;
   // легка гравітація — частіше). Біля старту — помірно
   const caves = 0.15 + 0.7 * U(54, 40) * (0.5 + 0.5 * mild), caveW = 0.05 + 0.06 * U(55, 30);
+  // великі порожнини («сир», як у Minecraft): частка 0…1 (біля старту помірно, зрідка — майже немає чи дуже багато)
+  const cheese = 0.15 + 0.85 * U(256, 60);
   const overhang = U(56, 35) * (0.3 + 0.7 * mild);
   // магнітне поле (сила 0…1, нахил магнітного полюса від географічного, відтінок сяйв): від нього — полярні сяйва,
   // умова левітації деяких порід, пізніше — компас
@@ -275,11 +277,11 @@ export function lawsOf(seed, d, n) {
     d, n, seed: hash3(seed, d, n), ds, weird, exotic: exotic > 0, grav,
     seaE, amp, wc, wh, wd, contrast, temp, wet,
     flora, treeH, rocks, biomes, bioS, regS, pal,
-    hue: { g: hG, s: hS, w: hW, r: hR, sat, gl: 0.42 + 0.08 * U(22, 20) }, light, sky, air, phys, relief, tex, liquid, caves, caveW, overhang, islands,
+    hue: { g: hG, s: hS, w: hW, r: hR, sat, gl: 0.42 + 0.08 * U(22, 20) }, light, sky, air, phys, relief, tex, liquid, caves, caveW, cheese, overhang, islands,
     mag, stones, islandStone, anom, mount,
     // зерна шумів (спільні для глибини: так рельєф сусідніх номерів зв'язаний)
     sA: hash2(ds, 1), sB: hash2(ds, 2), sC: hash2(ds, 3), sT: hash2(ds, 4), sW: hash2(ds, 5),
-    sF: hash2(ds, 6), sM: hash2(ds, 7), sO: hash2(ds, 8), sK: hash2(ds, 9), sK2: hash2(ds, 10), sV: hash2(ds, 11), sI: hash2(ds, 12),
+    sF: hash2(ds, 6), sM: hash2(ds, 7), sO: hash2(ds, 8), sK: hash2(ds, 9), sK2: hash2(ds, 10), sV: hash2(ds, 11), sI: hash2(ds, 12), sCh: hash2(ds, 25), sCw: hash2(ds, 26),
     sBv: hash2(ds, 13), sRg: hash2(ds, 14), sCv: hash2(ds, 15), sRv: hash2(ds, 16), sCy: hash2(ds, 17), sTr: hash2(ds, 18), sDn: hash2(ds, 19), sFt: hash2(ds, 20),
     sAn: hash2(ds, 21), sAn2: hash2(ds, 22), sMt: hash2(ds, 23), sMt2: hash2(ds, 24),
   };

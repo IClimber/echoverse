@@ -7,6 +7,7 @@
 // ph — рух від гравітації (physOf): up, speed, settle, g.
 import { LEVEL } from './iso.js';
 import { solidB, B_LIQ, B_ICE } from './gen/chunk.js';
+import { KMIN } from './universe.js';
 
 export const SPEED = 4.2;            // клітинок за секунду (при 1 g)
 export const FOOT = 0.24;            // півширина габариту
@@ -19,6 +20,8 @@ export const FLY_SPEED = 12;         // політ: клітинок за сек
 export const FLY_V = 8;              // політ: швидкість угору / униз
 const FLY_TOP = 2040;                // політ: вище цієї висоти не піднятися (майже верх світу)
 const CLIMB_OUT = 2;                 // з рідини можна вилізти на берег до 2 блоків над її поверхнею
+const WIND_G = 0.7;                  // вітер зносить лише при гравітації нижче (повністю — нижче 0,4 g)
+const WIND_MIN = 11;                 // і лише сильніший за 11 клітинок/с (~20 м/с), зносить надлишок
 const LEAP = 0.3;                    // стрибок з рідини: стільки секунд рідина не тягне назад
 export const PH1 = { up: 1, speed: 1, settle: 14, g: 1, vT: 1e9, friction: 1, bounce: 0 };
 const R2 = Math.SQRT1_2;
@@ -62,7 +65,7 @@ export function bodyAt(P, x, y, z) {
 // Опора під габаритом не нижче за z − drop: {z (верх опори)} або null. Рідина — не опора (liq — опора: поверхневий
 // натяг на бігу)
 export function support(P, x, y, z, drop = 40, liq = false) {
-  const kTop = Math.floor(z / LEVEL + EPS) - 1, kBot = Math.max(-1, Math.floor((z - drop) / LEVEL));   // нижче світу — камінь
+  const kTop = Math.floor(z / LEVEL + EPS) - 1, kBot = Math.max(KMIN - 1, Math.floor((z - drop) / LEVEL));   // нижче світу — камінь
   let best = null;
   for (const [ox, oy] of [[-FOOT, -FOOT], [FOOT, -FOOT], [-FOOT, FOOT], [FOOT, FOOT]]) {
     const tx = Math.floor(x + ox), ty = Math.floor(y + oy);
@@ -102,10 +105,11 @@ export function liquidAt(P, x, y, z) {
 // ctl — {sprint (біг), vert (політ: 1 — угору, −1 — униз), wind [x, y] (вітер, клітинок/с)}. ph.tilt — нахил тяжіння
 // (аномалія), P.liquid.visc — в'язкість, P.liquid.tension — поверхневий натяг (на бігу рідина тримає). p.fly — летить (як у Minecraft: без гравітації, торкнувся
 // землі — політ скінчився). p.wet — тіло в рідині, p.swim — пливе (рідина тримає, дна немає), p.air — у повітрі,
-// p.vis — висота для малювання
+// p.vis — висота для малювання, p.jumped — у повітрі після стрибка (інакше — падає)
 export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
   if (p.stepOff === undefined) p.stepOff = 0;
   if (p.fly) return fly(p, ix, iy, dt, P, ph, mb, ctl.vert || 0);
+  const wasGround = p.ground;
   p.leap = Math.max(0, (p.leap || 0) - dt);
   const surf = liquidAt(P, p.x, p.y, p.z), buoy = P.liquid.swim, visc = P.liquid.visc || 1, vs = 1 / Math.sqrt(visc);
   const deep = surf !== null && !p.ground;
@@ -119,10 +123,13 @@ export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
     tvx = vx / l * sp; tvy = vy / l * sp;
     p.yaw = Math.atan2(vy, vx);
   }
-  // вітер зносить у повітрі (ширяння — майже з вітром), на землі — лише сильний; нахил тяжіння (аномалія) — як схил
+  // вітер зносить лише за низької гравітації (до WIND_G) і справді сильний (від WIND_MIN): на землі — понад поріг, у
+  // стрибку — помітніше; ширяння (пробіл у падінні) — майже з вітром за будь-якої гравітації. Нахил тяжіння (аномалія) — як схил
   const wind = ctl.wind;
   if (wind && surf === null) {
-    const wk = p.ground ? Math.max(0, Math.hypot(wind[0], wind[1]) - 5) * 0.06 : p.glide ? 0.7 : 0.25;
+    const ws = Math.hypot(wind[0], wind[1]), low = Math.min(1, Math.max(0, (WIND_G - ph.g) / 0.3));
+    const over = ws > 1e-9 ? Math.max(0, ws - WIND_MIN) / ws : 0;
+    const wk = p.glide ? 0.7 : low * over * (p.ground ? 0.35 : 0.6);
     tvx += wind[0] * wk; tvy += wind[1] * wk;
   }
   if (ph.tilt) { tvx += ph.tilt[0] * 9 * ph.g; tvy += ph.tilt[1] * 9 * ph.g; }
@@ -176,7 +183,7 @@ export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
   }
   p.glide = !p.ground && s2 === null && ctl.vert > 0 && p.vz < 0;
   if (jump) {
-    if (p.ground) p.vz = JUMP_V * (s2 === null ? 1 : 0.85);
+    if (p.ground) { p.vz = JUMP_V * (s2 === null ? 1 : 0.85); p.jumped = true; }
     else if (s2 !== null && buoy && p.z > s2 - floatZ(P) - 0.25) { p.vz = JUMP_V * 0.8; p.leap = LEAP; }   // з поверхні — вистрибнути
   }
   let nz = p.z + p.vz * dt;
@@ -187,9 +194,15 @@ export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
       nz = g.z;
       // пружний ґрунт: після падіння відскакуєш (слабкий удар — ні)
       if (ph.bounce && p.vz < -5 && s2 === null) { p.vz = -p.vz * ph.bounce; p.ground = false; p.bounced = true; }
-      else { p.vz = 0; p.ground = true; }
+      else { p.vz = 0; p.ground = true; p.jumped = false; }
       p.onBody = g.body || null;
-    } else { p.ground = false; p.onBody = null; }
+    } else {
+      // плавний спуск (уступ не вищий за крок угору — на вигляд схил): ноги лишаються на землі, вигляд опускається
+      // плавно; глибше — падаєш
+      const d = wasGround && s2 === null ? support(P, p.x, p.y, p.z + EPS, ph.up * LEVEL + 0.05) : null;
+      if (d) { p.stepOff += p.z - d.z; nz = d.z; p.vz = 0; p.ground = true; p.onBody = d.body || null; }
+      else { p.ground = false; p.onBody = null; }
+    }
   } else if (hits(P, p.x, p.y, nz)) { nz = p.z; p.vz = 0; }   // стеля
   else p.ground = false;
   p.z = nz;
@@ -225,6 +238,27 @@ function fly(p, ix, iy, dt, P, ph, mb, vert) {
   p.vis = p.z + p.stepOff;
   p.swim = false; p.wet = false;
   p.air = !p.ground;
+}
+
+// Затишок від вітру для тіла з ногами в (x, y, z): множник вітру 0…1. Перешкода з навітряного боку (блоки, стовбур,
+// камінь) ближче за 3 клітинки — вітру немає, до 4,5 — слабшає; під стелею (печера, навіс) — не дує, якщо з навітряного
+// боку стіна ближче за 16 клітинок (у вхід печери, відкритий вітру, дує)
+const LEE = 3, LEE_FADE = 1.5, CAVE_LEE = 16, ROOF = 48;
+export function windShelter(P, x, y, z, wind) {
+  const w = Math.hypot(wind[0], wind[1]);
+  if (w < 1e-6) return 1;
+  const ux = -wind[0] / w, uy = -wind[1] / w, k0 = Math.floor(z / LEVEL + EPS);
+  let roof = false;
+  for (let k = k0 + 2; k <= k0 + ROOF; k++) { const b = P.block(Math.floor(x), Math.floor(y), k); if (b !== -1 && solidB(b)) { roof = true; break; } }
+  const R = roof ? CAVE_LEE : LEE + LEE_FADE;
+  for (let d = 0.4; d <= R; d += 0.25) {
+    const px = x + ux * d, py = y + uy * d, tx = Math.floor(px), ty = Math.floor(py);
+    let hit = false;
+    for (const dz of [0.3, 0.8]) { const b = P.block(tx, ty, Math.floor((z + dz) / LEVEL)); if (b !== -1 && solidB(b)) { hit = true; break; } }
+    if (!hit) hit = objsNear(P, px, py, (o) => Math.abs(px - o.cx) < o.r + 0.1 && Math.abs(py - o.cy) < o.r + 0.1 && z + 0.3 < o.z1 && z + 0.8 > o.z0);
+    if (hit) return roof || d <= LEE ? 0 : (d - LEE) / LEE_FADE;
+  }
+  return 1;
 }
 
 // Чи можна стати, ноги в (x, y, z): габарит вільний, не в рідині, і є опора саме під ногами

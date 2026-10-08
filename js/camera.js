@@ -147,13 +147,24 @@ export function isoRadius(c, W, H, zr, targetZ) {
   return R + 4;
 }
 
-// Третя особа: відстань до ока, щоб камера не заходила в блоки й рідину за спиною. solid(x, y, z) → чи там тверде
+// Третя особа: відстань до ока, щоб камера не заходила в блоки й рідину за спиною. solid(x, y, z) → чи там тверде.
+// Промінь «товстий» (5 паралельних на відстані PAD — ближня площина не чіпляє стіну збоку); результат треба
+// згладжувати (camDist): скорочувати одразу, відновлювати плавно — інакше на краях блоків камера тремтить
+const PAD = 0.22;
 export function clipDist(c, target, solid) {
-  const u = eyeDir(c);
-  for (let t = 0.6; t <= c.dist; t += 0.2) {
-    const x = target[0] + u[0] * t, y = target[1] + u[1] * t, z = target[2] + u[2] * t;
-    if (solid(Math.floor(x), Math.floor(y), z - 0.2) || solid(Math.floor(x), Math.floor(y), z + 0.2)) return Math.max(1.0, t - 0.3);
+  const u = eyeDir(c), { r, up } = basis(c);
+  const offs = [[0, 0], [PAD, 0], [-PAD, 0], [0, PAD], [0, -PAD]];
+  for (let t = 0.1; t <= c.dist; t += 0.1) {
+    for (const [a, b] of offs) {
+      const x = target[0] + u[0] * t + r[0] * a + up[0] * b, y = target[1] + u[1] * t + r[1] * a + up[1] * b, z = target[2] + u[2] * t + up[2] * b;
+      if (solid(Math.floor(x), Math.floor(y), z)) return Math.max(0.15, t - PAD);
+    }
   }
   return c.dist;
+}
+// Згладжена відстань: ближче — одразу, далі — плавно (≈ 4 одиниці за секунду на старті)
+export function camDist(prev, want, dt) {
+  if (prev === undefined || want < prev) return want;
+  return prev + (want - prev) * Math.min(1, dt * 4);
 }
 export { LEVEL };

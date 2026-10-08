@@ -144,7 +144,8 @@ export function createRenderer(canvas) {
       for (const v of st.keys) { const e = meshes.get(v.key); if (e && e.liq) R.drawAt(e.liq, v.cx * CS - t[0], v.cy * CS - t[1], zOf(v)); }
       R.endAlpha();
       R.setRing(null);
-      if (me) {
+      // камера впритул (притиснута до стіни за спиною) — фігуру не малюємо, інакше око в голові
+      if (me && (view.ortho || Math.hypot(...view.eye) > 0.7)) {
         R.setCut(null);                             // власні грані гравця не вирізаємо
         const ox = me.x - t[0], oy = me.y - t[1], pose = poseMatrices(me.anim, ox, oy, me.z - t[2], me.yaw);
         for (const p in fig) R.draw(fig[p], pose[p], me.tint);

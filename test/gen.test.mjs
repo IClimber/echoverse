@@ -361,3 +361,23 @@ test('далечінь: плитка — узгоджений меш, висот
     }
   }
 });
+
+test('печери: великі зали (порожнина ≥ 30 блоків заввишки), прохідні ходи', async () => {
+  const { genCol, genBlocks, bv, B_AIR: AIR, CS: N } = await import('../js/gen/chunk.js');
+  let big = 0, runs = [];
+  for (const n of [0, 37, 500]) {
+    const L = lawsOf(hashStr('test'), 0, n);
+    for (let c = 0; c < 4; c++) {
+      const col = genCol(L, c * 7, c * 3 - 5), k0 = col.hmin - 160, V = genBlocks(L, col, k0, 160);
+      for (let x = 0; x < N; x += 3) for (let y = 0; y < N; y += 3) {
+        let r = 0;
+        for (let k = 0; k < 160; k++) if (V.b[bv(x, y, k, 160)] === AIR) r++; else { if (r) runs.push(r); r = 0; }
+      }
+    }
+  }
+  runs.sort((a, b) => a - b);
+  big = runs.filter((r) => r >= 30).length;
+  const med = runs[runs.length >> 1];
+  assert.ok(big > 0, 'великі зали трапляються');
+  assert.ok(med >= 4, `медіана висоти порожнин ${med} блоків — ходи прохідні (гравець — 2)`);
+});

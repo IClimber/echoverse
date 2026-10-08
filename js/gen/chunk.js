@@ -251,19 +251,23 @@ export const SEC = 16;                                    // секція — 16
 const ISL0 = 44, ISL1 = 84, ISLC = 63;                    // смуга висот ширяючих островів (блоки)
 
 // Груба ґратка 3D-шуму (крок G блоків, вузли — на спільній світовій сітці) над прямокутником клітинок і діапазоном
-// висот kA…kB: чотири поля — два для печер (тунель — там, де обидва близькі до нуля), нависання, острови. Значення між
+// висот kA…kB: шість полів — два для печер-тунелів (тунель — там, де обидва близькі до нуля), нависання, острови,
+// великі порожнини («сир»), ширина тунелів (змінюється по карті: є лази й широкі ходи). Шуми печер — у світових одиницях
+// однакові по горизонталі й вертикалі (блок — пів одиниці заввишки, тож k ділимо на вдвічі більше). Значення між
 // вузлами — трилінійна інтерполяція (точна арифметика; від положення ґратки не залежить)
-const G = 4;
+const G = 4, NF = 6;
 function lattice(L, x0, y0, x1, y1, kA = 0, kB = H) {
   const gx0 = Math.floor(x0 / G), gy0 = Math.floor(y0 / G), nx = Math.floor(x1 / G) - gx0 + 2, ny = Math.floor(y1 / G) - gy0 + 2;
   const q0 = Math.floor(kA / G), nk = Math.floor(kB / G) - q0 + 2;
-  const F = new Float64Array(nx * ny * nk * 4), isl = L.islands > 0.02;
+  const F = new Float64Array(nx * ny * nk * NF), isl = L.islands > 0.02;
   for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) for (let q = 0; q < nk; q++) {
-    const x = (gx0 + i) * G, y = (gy0 + j) * G, k = (q0 + q) * G, o = ((j * nx + i) * nk + q) * 4;
-    F[o] = noise3(L.sK, x / 28, y / 28, k / 14);
-    F[o + 1] = noise3(L.sK2, x / 28, y / 28, k / 14);
+    const x = (gx0 + i) * G, y = (gy0 + j) * G, k = (q0 + q) * G, o = ((j * nx + i) * nk + q) * NF;
+    F[o] = noise3(L.sK, x / 28, y / 28, k / 48);
+    F[o + 1] = noise3(L.sK2, x / 28, y / 28, k / 48);
     F[o + 2] = noise3(L.sV, x / 20, y / 20, k / 10);
     F[o + 3] = isl && k >= ISL0 - G && k <= ISL1 + G ? 0.85 * noise3(L.sI, x / 22, y / 22, k / 8) + 0.35 * noise3(L.sI ^ 0x5bd1, x / 9, y / 9, k / 5) : -9;
+    F[o + 4] = noise3(L.sCh, x / 72, y / 72, k / 110) + 0.45 * noise3(L.sCh ^ 0x77, x / 26, y / 26, k / 40);
+    F[o + 5] = noise3(L.sCw, x / 96, y / 96, k / 160);
   }
   return { F, gx0, gy0, q0, nx, nk };
 }
@@ -271,7 +275,7 @@ function sample(Lt, f, x, y, k) {
   const gx = x / G - Lt.gx0, gy = y / G - Lt.gy0, gk = k / G - Lt.q0;
   const i = Math.floor(gx), j = Math.floor(gy), q = Math.floor(gk);
   const u = gx - i, v = gy - j, w = gk - q, nx = Lt.nx, nk = Lt.nk, F = Lt.F;
-  const at = (a, b, c) => F[(((j + b) * nx + i + a) * nk + q + c) * 4 + f];
+  const at = (a, b, c) => F[(((j + b) * nx + i + a) * nk + q + c) * NF + f];
   const l = (a, b, t) => a + (b - a) * t;
   return l(l(l(at(0, 0, 0), at(1, 0, 0), u), l(at(0, 1, 0), at(1, 1, 0), u), v),
     l(l(at(0, 0, 1), at(1, 0, 1), u), l(at(0, 1, 1), at(1, 1, 1), u), v), w);
@@ -284,10 +288,17 @@ function raw(L, Lt, c, px, py, k) {
   // нависання й арки: поверхня зсувається 3D-шумом поблизу (тож профіль схилу буває не монотонним)
   const ov = L.overhang * 5;
   if (ov > 0.2 && k > c.h - 7 && k < c.h + 7) s = k < c.h + sample(Lt, 2, px, py, k) * ov;
-  // печери-тунелі: обидва поля близькі до нуля; углиб — аж до дна світу
+  // печери-тунелі: обидва поля близькі до нуля; ширина — від поля ширини (лази й широкі ходи); углиб — аж до дна світу
   if (s && k < c.h + 1) {
-    const cr = L.caveW * (0.5 + L.caves), a = sample(Lt, 0, px, py, k), b = sample(Lt, 1, px, py, k);
+    const w = 1 + 1.8 * sample(Lt, 5, px, py, k), cr = L.caveW * (0.5 + L.caves) * (w < 0.35 ? 0.35 : w);
+    const a = sample(Lt, 0, px, py, k), b = sample(Lt, 1, px, py, k);
     if (a * a + b * b < cr * cr) s = false;
+  }
+  // великі порожнини («сир»): поріг росте до поверхні — схили не дірявить, ближче 12 блоків — ніколи
+  const dep = c.h - k;
+  if (s && dep > 12 && L.cheese > 0) {
+    const thr = 0.78 - 0.36 * L.cheese + (dep < 60 ? (60 - dep) * 0.008 : 0);
+    if (sample(Lt, 4, px, py, k) > thr) s = false;
   }
   if (s) return 1;
   // ширяючі острови: краплі щільності в смузі висот

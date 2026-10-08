@@ -3,7 +3,7 @@
 import { createRenderer } from './render.js';
 import { createWorld, findSpawn, ckey, skey } from './world.js';
 import { createDevice, landing, landingChunks, CHARGE } from './device.js';
-import { step, support, SPRINT, GRAVITY, FOOT } from './player.js';
+import { step, support, windShelter, SPRINT, GRAVITY, FOOT } from './player.js';
 import { stepBody, push, rayBody, PLAYER_MASS, HIT_IMPULSE } from './bodies.js';
 import { initInput, moveAxis, turnAxis, sprintHeld, vertAxis, takeActions, takeWheel, takeDrag, clearInput, lockPointer, unlockPointer, locked } from './input.js';
 import { listWorlds, putWorld, deleteWorld, serialize, deserialize, newId } from './save.js';
@@ -16,13 +16,14 @@ import { animate } from './anim.js';
 import { clockStr } from './sky.js';
 import { weatherAt, localWeather } from './weather.js';
 import { T_SNOW, T_ICE, T_DESERT, T_DRY } from './gen/chunk.js';
-import { createCamera, rotate, wheel, smooth, moveBasis, clipDist, facing, setYaw, basis, boxInView, ISO, THIRD, HEAD, FAR_R, SEAM } from './camera.js';
+import { createCamera, rotate, wheel, smooth, moveBasis, clipDist, camDist, facing, setYaw, basis, boxInView, ISO, THIRD, HEAD, FAR_R, SEAM } from './camera.js';
 import { FT } from './gen/far.js';
 
 const $ = (id) => document.getElementById(id);
 const SAVE_MS = 10000;                     // автозбереження
 const CAM_KEY = 'echoverse-camera';         // вибраний вигляд (на браузер)
 const ZR_FAR = [-200, 2050];                 // висоти (од.) для піраміди видимості ще не згенерованої плитки далечі
+const UNDER_R = 64;                            // під землею: радіус (клітинок), у якому вантажимо секції біля висоти гравця (зали)
 
 const QS = new URLSearchParams(location.search);
 if (QS.has('strip')) import('./strip.js').then((m) => m.runStrip());
@@ -230,7 +231,8 @@ function boot() {
     for (const b of near) {
       if (b.sleep) continue;
       const ph = physAt(L, b.x, b.y);
-      stepBody(b, dt, g.world.probe(g.d, g.n), { g: ph.g, vT: ph.vT, bounce: L.phys.bounce, friction: L.phys.friction, wind: [W.wind[0] * wk, W.wind[1] * wk] });
+      const P = g.world.probe(g.d, g.n), lee = windShelter(P, b.x, b.y, b.z - b.hz, W.wind);
+      stepBody(b, dt, P, { g: ph.g, vT: ph.vT, bounce: L.phys.bounce, friction: L.phys.friction, wind: [W.wind[0] * wk * lee, W.wind[1] * wk * lee] });
     }
     if (ob) { me.x += ob.x - ox; me.y += ob.y - oy; me.z = ob.z + ob.hz; }
   }
@@ -303,7 +305,9 @@ function boot() {
       const sprint = sprintHeld();
       const L = g.world.laws(g.d, g.n), W = weatherAt(L, g.clock), wk = Math.sqrt(Math.min(3, L.air.pressure));   // вітер як сила: густіше повітря — сильніше
       g.ph = physAt(L, me.x, me.y);
-      step(me, ix, iy, jump, dt, g.world.probe(g.d, g.n), g.ph, moveBasis(camera), { sprint, vert: vertAxis(), wind: [W.wind[0] * wk, W.wind[1] * wk] });
+      const probe = g.world.probe(g.d, g.n);
+      g.lee = windShelter(probe, me.x, me.y, me.z, W.wind);       // затишок: стіна, дерево чи камінь з навітряного боку, печера
+      step(me, ix, iy, jump, dt, probe, g.ph, moveBasis(camera), { sprint, vert: vertAxis(), wind: [W.wind[0] * wk * g.lee, W.wind[1] * wk * g.lee] });
       me.run = sprint && me.moving && !me.fly;
       if (camera.mode === THIRD) me.yaw = facing(camera);                 // спиною до камери; S — задкує
       simBodies(dt, L, W, wk);
@@ -312,9 +316,17 @@ function boot() {
     }
     // Ціль камери: гравець (у третій особі — його голова); плавно, по висоті — повільніше (стрибок не трусить камеру)
     const k = Math.min(1, dt * (camera.mode === ISO ? 8 : 14)), kz = Math.min(1, dt * 5);
-    const tz = (me.vis ?? me.z ?? 0) + (camera.mode === THIRD ? HEAD : 0);
-    g.cam[0] += (me.x - g.cam[0]) * k; g.cam[1] += (me.y - g.cam[1]) * k; g.cam[2] += (tz - g.cam[2]) * kz;
-    const dist = camera.mode === THIRD ? clipDist(camera, g.cam, (x, y, z) => { const b = g.world.block(g.d, g.n, x, y, Math.floor(z / LEVEL)); return b === B_LIQ || solidB(b); }) : camera.dist;
+    let tz = (me.vis ?? me.z ?? 0) + (camera.mode === THIRD ? HEAD : 0), capped = false;
+    const solidAt = (x, y, z) => { const b = g.world.block(g.d, g.n, x, y, Math.floor(z / LEVEL)); return b === B_LIQ || solidB(b); };
+    if (camera.mode === THIRD && me.placed) {                 // низька стеля (печера): ціль — під нею, інакше видно крізь блоки
+      const fx = Math.floor(me.x), fy = Math.floor(me.y), base = me.vis ?? me.z;
+      for (let z = me.z + 0.6; z <= me.z + HEAD + 0.35; z += LEVEL) if (solidAt(fx, fy, z)) { tz = Math.min(tz, Math.floor(z / LEVEL) * LEVEL - me.z + base - 0.28); capped = true; break; }
+    }
+    g.cam[0] += (me.x - g.cam[0]) * k; g.cam[1] += (me.y - g.cam[1]) * k;
+    g.cam[2] += (tz - g.cam[2]) * kz;
+    if (capped && tz < g.cam[2]) g.cam[2] = tz;               // під стелю — одразу
+    g.camDist = camera.mode === THIRD ? camDist(g.camDist, clipDist(camera, g.cam, solidAt), dt) : camera.dist;
+    const dist = g.camDist;
     g.view = renderer.view(camera, g.cam, dist);
     stream();
     if (now - g.lastSave > SAVE_MS) { g.lastSave = now; save(); }
@@ -342,12 +354,15 @@ function boot() {
       else S.used = performance.now();
       return key;
     };
-    // секції стовпця, що видно: поверхня й острови в піраміді; поруч з гравцем — ±2 секції від його висоти
+    // секції стовпця, що видно: поверхня й острови в піраміді; поруч з гравцем — ±2 секції від його висоти;
+    // під землею (великі порожнини) — ще ±3 секції в піраміді видимості до UNDER_R клітинок
+    const myC = W.col(g.d, g.n, Math.floor(me.x / CS), Math.floor(me.y / CS)), under = !!myC && czMe < myC.czLo;
     const visSecs = (d, n, C, pri, near, out) => {
-      const list = [];
+      const list = [], cave = under && Math.hypot(C.cx * CS + 8 - me.x, C.cy * CS + 8 - me.y) < UNDER_R;
       for (let cz = C.czLo; cz <= C.czHi; cz++) list.push(cz);
       for (const cz of C.isl) if (cz < C.czLo || cz > C.czHi) list.push(cz);
-      if (near) for (let cz = czMe - 2; cz <= czMe + 2; cz++) if (!list.includes(cz)) list.push(cz);
+      const r = near ? 2 : cave ? 3 : -1;
+      for (let cz = czMe - r; cz <= czMe + r; cz++) if (!list.includes(cz)) list.push(cz);
       for (const cz of list) {
         const z0 = cz * SEC * LEVEL - t[2], ax = C.cx * CS - t[0], ay = C.cy * CS - t[1];
         if (!near && !boxInView(m, ax, ay, z0, z0 + SEC * LEVEL + 12)) continue;
@@ -422,7 +437,7 @@ function boot() {
     const an = g.ph && g.ph.anom ? ` · аномалія ×${g.ph.anom.toFixed(1).replace('.', ',')}` : '';
     setText('coords', `x ${Math.floor(me.x)} · y ${Math.floor(me.y)} · висота ${Math.floor(me.z / LEVEL) - SEA} · гравітація ${gStr(L)}${an}${me.wet ? ` · у рідині: ${liqStr(L.liquid)}${L.liquid.danger ? ' — небезпечно' : ''}` : ''}`);
     const A = L.air;
-    setText('env', `${loc.name}${W.windK > 0.3 ? ` · вітер ${(W.windK * 1.8).toFixed(0)} м/с` : ''}${A.breath ? '' : ` · повітря ${A.gasName}`}${A.rad > 0.3 ? ` · радіація ${A.rad > 0.65 ? 'висока' : 'помірна'}` : ''}`);
+    setText('env', `${loc.name}${W.windK > 0.3 ? ` · вітер ${(W.windK * 1.8).toFixed(0)} м/с${g.lee < 0.5 ? ' (затишок)' : ''}` : ''}${A.breath ? '' : ` · повітря ${A.gasName}`}${A.rad > 0.3 ? ` · радіація ${A.rad > 0.65 ? 'висока' : 'помірна'}` : ''}`);
     $('charge').hidden = !ch;
     if (ch) {
       setText('chargeTxt', ch.t < CHARGE ? `Стрибок → ${addrStr(ch.to[0], ch.to[1])}` : 'Стабілізація…');
