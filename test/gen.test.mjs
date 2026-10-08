@@ -135,7 +135,7 @@ test('плавна поверхня: рівнина — пласка на вер
   const mk = (hx) => {
     const C = genChunk(L, 3, 3);
     C.obj = [];
-    for (let y = -1; y <= CS; y++) for (let x = -1; x <= CS; x++) for (let k = 0; k < 96; k++) C.b[biF(x, y, k)] = k < hx(x) ? B_GRASS : B_AIR;
+    for (let y = -1; y <= CS; y++) for (let x = -1; x <= CS; x++) for (let k = -1; k < 96; k++) C.b[biF(x, y, k)] = k < hx(x) ? B_GRASS : B_AIR;   // і нижня рамка — суцільна
     return chunkMesh(C, L).solid;
   };
   const m = mk((x) => x < 8 ? 6 : 7), zs = new Set();
@@ -153,19 +153,22 @@ test('плавна поверхня: рівнина — пласка на вер
   assert.ok(pa.size > 0 && pb.size > 0);
 });
 
-test('гравітація: межі, ≈ 1 g біля старту, легкі й важкі всесвіти трапляються; легка — вільніший рух і ширяюче каміння', async () => {
+test('гравітація: розподіл з реальних тіл (0,027…3,4 g, медіана 1 g), ≈ 1 g біля старту; легка — вільніший рух', async () => {
   const { physOf, FLOAT_G } = await import('../js/universe.js');
-  const { solidMask, O_FLOAT } = await import('../js/gen/chunk.js');
-  const seed = hashStr('гравітація');
+  const seed = hashStr('гравітація'), G = [];
   let lo = null, hi = null;
-  for (let n = -400; n <= 400; n++) {
-    const g = lawsOf(seed, 0, n).grav;
-    assert.ok(g >= 0.35 && g <= 2.2);
-    if (Math.abs(n) <= 5) assert.ok(Math.abs(g - 1) < 0.2, `біля старту ${n}: ${g}`);
+  for (let i = 0; i < 20000; i++) {
+    const n = i < 801 ? i - 400 : 200 + i * 7, g = lawsOf(seed, 0, n).grav;
+    assert.ok(g >= 0.027 && g <= 3.4, `${n}: ${g}`);
+    if (Math.abs(n) <= 5) assert.ok(g > 0.8 && g < 1.2, `біля старту ${n}: ${g}`);
     if (g < FLOAT_G && lo === null) lo = n;
     if (g > 1.4 && hi === null) hi = n;
+    if (i >= 801) G.push(g);
   }
   assert.ok(lo !== null && hi !== null, 'немає легких чи важких всесвітів');
+  G.sort((a, b) => a - b);
+  const q = (p) => G[Math.floor(G.length * p)];
+  for (const [p, v] of [[0.08, 0.38], [0.5, 1], [0.97, 2.3]]) assert.ok(Math.abs(q(p) - v) < 0.06 * v + 0.02, `квантиль ${p}: ${q(p)} замість ${v}`);
   const pl = physOf(lawsOf(seed, 0, lo)), ph = physOf(lawsOf(seed, 0, hi));
   assert.ok(pl.up >= ph.up && pl.speed > ph.speed);
 });
@@ -183,7 +186,8 @@ test('левітуючі породи: біля старту немає; тра�
     if (L.islandStone >= 0) { islands++; assert.ok(L.stones[L.islandStone].active && L.islands > 0); } else assert.equal(L.islands, 0);
     if (anomU === null && L.anom.freq > 0.3) anomU = n;
   }
-  assert.ok(conds.size === 4 && withFloat !== null && islands > 10 && islands < 300, `умов ${conds.size}, островів ${islands}`);
+  for (let n = 801; anomU === null && n < 60000; n += 3) if (lawsOf(seed, 0, n).anom.freq > 0.3) anomU = n;   // аномалії — рідкість
+  assert.ok(conds.size === 4 && withFloat !== null && islands > 3 && islands < 120, `умов ${conds.size}, островів ${islands}`);
   let floatsN = 0;
   const L = lawsOf(seed, 0, withFloat);
   for (let cx = 0; cx < 12; cx++) {
@@ -240,8 +244,10 @@ test('вокселі: стовпець окремо = стовпець у чан
   for (let y = 0; y < CS; y++) for (let k = 0; k < H; k++) assert.equal(A.b[bi(CS, y, k)], E.b[bi(0, y, k)]);
   // печери: повітря під поверхнею (не у водоймах) і острови: тверде високо над рельєфом — у якомусь із всесвітів
   let caves = 0, isl = 0;
-  for (let n = 0; n < 400 && (!caves || !isl); n += 7) {
-    const M = lawsOf(seed, 1, n), C = genChunk(M, 0, 0);
+  for (let n = 0; n < 20000 && (!caves || !isl); n += 7) {     // печери й острови — рідкість: шукаємо всесвіти з ними
+    const M = lawsOf(seed, 1, n);
+    if (M.caveShare < 0.3 && M.islands <= 0.02) continue;
+    const C = genChunk(M, 0, 0);
     for (let y = 0; y < CS; y++) for (let x = 0; x < CS; x++) {
       const h = C.h[ci(x, y)];
       for (let k = 2; k < h - 2; k++) if (C.b[bi(x, y, k)] === B_AIR) caves++;
@@ -324,10 +330,12 @@ test('рослини: дерева не впритул (між стовбура�
 
 test('форми рельєфу: річки (вузькі смуги рідини), вулкани з лавою, вершини понад амплітуду, кратери й дюни трапляються', async () => {
   const seed = hashStr('test'), c = {};
-  let magma = 0, high = 0, river = 0;
-  for (const n of [-130, -95, 0, 17]) {
+  let magma = 0, high = 0, river = 0, vn = 200;
+  while (!(lawsOf(seed, 0, vn).relief.volcano > 0.4 && lawsOf(seed, 0, vn).relief.volcanoLava)) vn += 7;   // вулкани — рідкість
+  for (const n of [-130, -95, 0, 17, vn]) {
     const L = lawsOf(seed, 0, n);
-    for (let y = -600; y <= 600; y += 5) for (let x = -600; x <= 600; x += 5) {
+    const r = n === vn ? 1500 : 600;
+    for (let y = -r; y <= r; y += 5) for (let x = -r; x <= r; x += 5) {
       tile(L, x, y, c);
       magma += c.magma; if (c.t !== 0 && c.h > 6 + L.amp) high++;
     }
@@ -365,7 +373,9 @@ test('далечінь: плитка — узгоджений меш, висот
 test('печери: великі зали (порожнина ≥ 30 блоків заввишки), прохідні ходи', async () => {
   const { genCol, genBlocks, bv, B_AIR: AIR, CS: N } = await import('../js/gen/chunk.js');
   let big = 0, runs = [];
-  for (const n of [0, 37, 500]) {
+  const ns = [];                                  // печери — рідкість: беремо всесвіти, де печерних областей багато
+  for (let n = 200; ns.length < 3; n += 7) if (lawsOf(hashStr('test'), 0, n).caveShare >= 0.5) ns.push(n);
+  for (const n of ns) {
     const L = lawsOf(hashStr('test'), 0, n);
     for (let c = 0; c < 4; c++) {
       const col = genCol(L, c * 7, c * 3 - 5), k0 = col.hmin - 160, V = genBlocks(L, col, k0, 160);
@@ -380,4 +390,67 @@ test('печери: великі зали (порожнина ≥ 30 блокі�
   const med = runs[runs.length >> 1];
   assert.ok(big > 0, 'великі зали трапляються');
   assert.ok(med >= 4, `медіана висоти порожнин ${med} блоків — ходи прохідні (гравець — 2)`);
+});
+
+test('рідкісність законів: класи всесвітів 30 / 45 / 20 / 5 %, крайнє й легендарне — рідко, біля старту — лише звичайне', async () => {
+  const { qOf, STRANGE_NAMES } = await import('../js/universe.js');
+  const seed = hashStr('test'), N = 20000, cls = [0, 0, 0, 0], dec = new Array(10).fill(0);
+  let none = 0, ext = 0, leg = 0, isl = 0, anom = 0, volc = 0, w360 = 0;
+  const W = [];
+  for (let i = 0; i < N; i++) {
+    const L = lawsOf(seed, 0, 200 + i * 7), t = Object.values(L.tiers), m = t.length ? Math.max(...t) : 0;
+    cls[L.strange.cls]++; dec[Math.min(9, Math.floor(qOf((i * 0.618034 % 1) * 2.2 - 1.1) * 10))]++;
+    if (m === 0) none++; if (m >= 2) ext++; if (m === 3) leg++;
+    if (L.islands > 0) isl++; if (L.anom.freq >= 0.02) anom++; if (L.relief.volcano > 0.4) volc++;
+    const kmh = L.air.wind * 2.2 * 1.8 * 3.6; W.push(kmh); if (kmh > 360) w360++;
+  }
+  const pc = (v) => v / N * 100;
+  [30, 45, 20, 5].forEach((v, i) => assert.ok(Math.abs(pc(cls[i]) - v) < 3, `${STRANGE_NAMES[i]}: ${pc(cls[i]).toFixed(1)} %`));
+  assert.ok(pc(none) > 25 && pc(none) < 42, `без незвичного ${pc(none)}`);
+  assert.ok(pc(ext) > 12 && pc(ext) < 30, `з крайнім ${pc(ext)}`);
+  assert.ok(pc(leg) > 0.2 && pc(leg) < 2.5, `з легендарним ${pc(leg)}`);
+  assert.ok(pc(isl) > 1.2 && pc(isl) < 6, `острови ${pc(isl)}`);
+  assert.ok(pc(anom) < 25 && pc(volc) < 10, `аномалії ${pc(anom)}, вулкани ${pc(volc)}`);
+  W.sort((a, b) => a - b);
+  assert.ok(W[N >> 1] < 90 && pc(w360) < 1 && W[N - 1] > 400, `вітер: медіана ${W[N >> 1]}, > 360 — ${pc(w360)} %, максимум ${W[N - 1]}`);
+  for (let n = -5; n <= 5; n++) { const L = lawsOf(seed, 0, n); assert.equal(Object.keys(L.tiers).length, 0, `біля старту ${n}: ${Object.keys(L.tiers)}`); }
+});
+
+test('рідкісність: qOf робить lane рівномірним', async () => {
+  const { qOf } = await import('../js/universe.js');
+  const { noise2 } = await import('../js/noise.js');
+  const dec = new Array(10).fill(0);
+  let N = 0;
+  for (let s = 1; s < 9; s++) for (let n = 0; n < 20000; n += 3) {
+    const sd = Math.imul(s, 0x9e3779b9), v = noise2(sd, n / 37, s * 7 + 0.5) + 0.25 * noise2(sd ^ 0x5bd1e995, n / (37 * 0.4), 0.5);
+    dec[Math.min(9, Math.floor(qOf(v) * 10))]++; N++;
+  }
+  for (const c of dec) assert.ok(Math.abs(c / N - 0.1) < 0.015, `децилі: ${dec.map((c) => (c / N * 100).toFixed(1))}`);
+});
+
+test('печери за рідкісністю: лише в печерних областях (частка ≈ закону); звичайно мало, пронизані світи — рідкість', async () => {
+  const { genCol, genBlocks, bv, B_AIR: AIR } = await import('../js/gen/chunk.js');
+  const { noise3 } = await import('../js/noise.js');
+  const seed = hashStr('test'), fr = [];
+  const airOf = (L) => {
+    let air = 0, tot = 0;
+    for (let c = 0; c < 6; c++) {
+      const col = genCol(L, c * 9 - 20, c * 5 - 11), k0 = col.hmin - 80, V = genBlocks(L, col, k0, 60);
+      for (let x = 0; x < CS; x += 2) for (let y = 0; y < CS; y += 2) for (let k = 0; k < 60; k++) { tot++; if (V.b[bv(x, y, k, 60)] === AIR) air++; }
+    }
+    return air / tot * 100;
+  };
+  for (let i = 0; i < 40; i++) fr.push(airOf(lawsOf(seed, 0, 300 + i * 97)));
+  fr.sort((a, b) => a - b);
+  assert.ok(fr[20] < 4, `медіана повітря під землею ${fr[20]} %`);
+  assert.ok(fr[0] < 0.5, `є світи майже без печер: ${fr[0]}`);
+  let riddled = null;
+  for (let n = 200; riddled === null; n += 7) if (lawsOf(seed, 0, n).caveShare > 0.85) riddled = n;
+  assert.ok(airOf(lawsOf(seed, 0, riddled)) > 3, 'пронизаний світ — порожнистий');
+  for (const n of [300, 397, riddled]) {
+    const L = lawsOf(seed, 0, n);
+    let inn = 0, t = 0;
+    for (let i = 0; i < 20000; i++) { t++; if (noise3(L.sCm, ((i * 37) % 3000) / 200, ((i * 91) % 2900) / 200, -((i * 13) % 400) / 300) > L.caveThr) inn++; }
+    assert.ok(Math.abs(inn / t - L.caveShare) < 0.08, `області ${inn / t} проти ${L.caveShare}`);
+  }
 });

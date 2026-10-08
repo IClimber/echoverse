@@ -215,7 +215,7 @@ export function tile(L, x, y, out = {}) {
   // Тож у сусідніх всесвітах ліс той самий, лише рідший чи густіший. Дерево — лише там, де r найменший серед сусідів
   const r = unit(hash3(L.sO, x, y));
   const patch = 0.3 + 1.4 * clamp01(0.5 + noise3(L.sF, px / 24, py / 24, L.n * 0.06));
-  if (Bm.trees && unit(hash3(L.sO ^ 0x2545f491, x, y)) < L.flora * 6 * Bm.trees * patch && lonely(L, x, y, r, Bm.dense, L.treeH < 1.5 ? 1 : L.treeH < 3 ? 2 : 3)) out.o = O_TREE;
+  if (Bm.trees && unit(hash3(L.sO ^ 0x2545f491, x, y)) < L.flora * 6 * Bm.trees * patch && lonely(L, x, y, r, Bm.dense, L.treeH < 1.5 ? 1 : L.treeH < 3 ? 2 : L.treeH < 6 ? 3 : 4)) out.o = O_TREE;
   else if (r > 1 - L.rocks * Bm.rocks) out.o = O_ROCK;
   else if (Bm.small.length && unit(hash3(L.sCv, x, y)) < Bm.cover * (0.35 + 1.3 * clamp01(0.5 + noise3(L.sCv, px / 14, py / 14, L.n * 0.06)))) out.o = O_COVER;
   if (out.o) { out.ov = hash3(L.sO, y, x) & 0xffff; out.os = hash3(L.sM, x, y); }
@@ -257,22 +257,24 @@ const ISL0 = 44, ISL1 = 84, ISLC = 63;                    // смуга висо
 
 // Груба ґратка 3D-шуму (крок G блоків, вузли — на спільній світовій сітці) над прямокутником клітинок і діапазоном
 // висот kA…kB: шість полів — два для печер-тунелів (тунель — там, де обидва близькі до нуля), нависання, острови,
-// великі порожнини («сир»), ширина тунелів (змінюється по карті: є лази й широкі ходи). Шуми печер — у світових одиницях
+// великі порожнини («сир», масштаб — розмір залів hallS), ширина тунелів (змінюється по карті: є лази й широкі ходи),
+// маска печерних областей (печери — лише там, де вона вища за поріг caveThr). Шуми печер — у світових одиницях
 // однакові по горизонталі й вертикалі (блок — пів одиниці заввишки, тож k ділимо на вдвічі більше). Значення між
 // вузлами — трилінійна інтерполяція (точна арифметика; від положення ґратки не залежить)
-const G = 4, NF = 6;
+const G = 4, NF = 7;
 function lattice(L, x0, y0, x1, y1, kA = 0, kB = H) {
   const gx0 = Math.floor(x0 / G), gy0 = Math.floor(y0 / G), nx = Math.floor(x1 / G) - gx0 + 2, ny = Math.floor(y1 / G) - gy0 + 2;
   const q0 = Math.floor(kA / G), nk = Math.floor(kB / G) - q0 + 2;
-  const F = new Float64Array(nx * ny * nk * NF), isl = L.islands > 0.02;
+  const F = new Float64Array(nx * ny * nk * NF), isl = L.islands > 0.02, hs = L.hallS, mask = L.caveShare > 0 && L.caveShare < 0.999;
   for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) for (let q = 0; q < nk; q++) {
     const x = (gx0 + i) * G, y = (gy0 + j) * G, k = (q0 + q) * G, o = ((j * nx + i) * nk + q) * NF;
     F[o] = noise3(L.sK, x / 28, y / 28, k / 48);
     F[o + 1] = noise3(L.sK2, x / 28, y / 28, k / 48);
     F[o + 2] = noise3(L.sV, x / 20, y / 20, k / 10);
     F[o + 3] = isl && k >= ISL0 - G && k <= ISL1 + G ? 0.85 * noise3(L.sI, x / 22, y / 22, k / 8) + 0.35 * noise3(L.sI ^ 0x5bd1, x / 9, y / 9, k / 5) : -9;
-    F[o + 4] = noise3(L.sCh, x / 72, y / 72, k / 110) + 0.45 * noise3(L.sCh ^ 0x77, x / 26, y / 26, k / 40);
+    F[o + 4] = noise3(L.sCh, x / hs, y / hs, k / (hs * 1.53)) + 0.45 * noise3(L.sCh ^ 0x77, x / (hs * 0.36), y / (hs * 0.36), k / (hs * 0.55));
     F[o + 5] = noise3(L.sCw, x / 96, y / 96, k / 160);
+    F[o + 6] = mask ? noise3(L.sCm, x / 200, y / 200, k / 300) : L.caveShare > 0 ? 9 : -9;
   }
   return { F, gx0, gy0, q0, nx, nk };
 }
@@ -293,16 +295,22 @@ function raw(L, Lt, c, px, py, k) {
   // нависання й арки: поверхня зсувається 3D-шумом поблизу (тож профіль схилу буває не монотонним)
   const ov = L.overhang * 5;
   if (ov > 0.2 && k > c.h - 7 && k < c.h + 7) s = k < c.h + sample(Lt, 2, px, py, k) * ov;
+  // печери — лише в печерних областях: cm — 0 поза областю, 1 усередині (край — плавно: ходи звужуються, зали мілішають)
+  let cm = 0;
+  if (s && k < c.h + 1 && L.caveShare > 0) {
+    const m = (sample(Lt, 6, px, py, k) - L.caveThr) / 0.06;
+    cm = m <= 0 ? 0 : m >= 1 ? 1 : m;
+  }
   // печери-тунелі: обидва поля близькі до нуля; ширина — від поля ширини (лази й широкі ходи); углиб — аж до дна світу
-  if (s && k < c.h + 1) {
-    const w = 1 + 1.8 * sample(Lt, 5, px, py, k), cr = L.caveW * (0.5 + L.caves) * (w < 0.35 ? 0.35 : w);
+  if (cm > 0) {
+    const w = 1 + 1.8 * sample(Lt, 5, px, py, k), cr = L.caveW * (0.5 + L.caves) * (w < 0.35 ? 0.35 : w) * cm;
     const a = sample(Lt, 0, px, py, k), b = sample(Lt, 1, px, py, k);
     if (a * a + b * b < cr * cr) s = false;
   }
   // великі порожнини («сир»): поріг росте до поверхні — схили не дірявить, ближче 12 блоків — ніколи
   const dep = c.h - k;
-  if (s && dep > 12 && L.cheese > 0) {
-    const thr = 0.78 - 0.36 * L.cheese + (dep < 60 ? (60 - dep) * 0.008 : 0);
+  if (s && cm > 0 && dep > 12 && L.cheese > 0) {
+    const thr = 0.78 - 0.36 * L.cheese + (dep < 60 ? (60 - dep) * 0.008 : 0) + (1 - cm) * 2;
     if (sample(Lt, 4, px, py, k) > thr) s = false;
   }
   if (s) return 1;
