@@ -13,6 +13,8 @@ import { LEVEL } from './iso.js';
 import { debugText, fmtN } from './debug.js';
 import { animate } from './anim.js';
 import { clockStr } from './sky.js';
+import { weatherAt, localWeather } from './weather.js';
+import { T_SNOW, T_ICE, T_DESERT, T_DRY } from './gen/chunk.js';
 import { createCamera, rotate, wheel, smooth, moveBasis, clipDist, facing, setYaw, ISO, THIRD, HEAD } from './camera.js';
 
 const $ = (id) => document.getElementById(id);
@@ -185,6 +187,7 @@ function boot() {
     if (Math.abs(L.grav - was) >= 0.12) msg.push(`гравітація ${gStr(L)} — ${L.grav < was ? 'легше' : 'важче'}`);
     const lq = L.liquid;
     if (lq.kind !== P.liquid.kind || lq.danger !== P.liquid.danger) msg.push(`у водоймах — ${liqStr(lq)}`);
+    if (!L.air.breath && (P.air.breath || L.air.gas !== P.air.gas)) msg.push(`повітря ${L.air.gasName}`);
     if (msg.length) toast(msg.join(' · ').replace(/^./, (c) => c.toUpperCase()));
     $('flash').classList.add('on');
     requestAnimationFrame(() => requestAnimationFrame(() => $('flash').classList.remove('on')));
@@ -285,18 +288,33 @@ function boot() {
     W.gen.tick();
   }
 
+  // Карта укриттів від опадів (64×64 навколо гравця): висота верху стовпця; перебудова — коли гравець перейшов
+  // у іншу клітинку чи раз на секунду (догенерувались чанки)
+  const rainBuf = new Float32Array(64 * 64);
+  function rainMap(now) {
+    const x0 = Math.floor(g.me.x) - 32, y0 = Math.floor(g.me.y) - 32, r = g.rain;
+    if (r && r.x0 === x0 && r.y0 === y0 && r.d === g.d && r.n === g.n && now - r.at < 1000) return r;
+    for (let j = 0; j < 64; j++) for (let i = 0; i < 64; i++) { const z = g.world.topAt(g.d, g.n, x0 + i, y0 + j); rainBuf[j * 64 + i] = z === null ? -1e4 : z; }
+    renderer.R.setRainMap(rainBuf);
+    return (g.rain = { x0, y0, d: g.d, n: g.n, at: now });
+  }
+
   function draw(dt, now) {
     const ch = g.dev.charge, me = g.me, L = g.world.laws(g.d, g.n);
+    const W = weatherAt(L, g.clock), col = me.placed ? g.world.column(g.d, g.n, Math.floor(me.x), Math.floor(me.y)) : null;
+    const loc = localWeather(L, W, !!col && (col.t === T_SNOW || col.t === T_ICE), !!col && col.t === T_DESERT, !!col && (col.t === T_DESERT || col.t === T_DRY));
     const a = ch ? ch.t / CHARGE * (0.35 + 0.35 * Math.sin(now / 45)) : 0;
     const under = me.placed ? support(g.world.probe(g.d, g.n), me.x, me.y, me.z + 0.01) : null;
     const anim = animate(me, dt, now, physOf(L).speed * (me.run ? SPRINT * 0.85 : 1));
     if (!g.view) return;
     const sk = renderer.draw({
-      camera, target: g.cam, view: g.view, laws: L, keys: g.vis, clock: g.clock,
+      camera, target: g.cam, view: g.view, laws: L, keys: g.vis, clock: g.clock, weather: { W: loc.W, loc }, rain: me.placed ? rainMap(now) : null,
       me: me.placed ? { x: me.x, y: me.y, z: me.vis ?? me.z, gz: under ? under.z : me.z, yaw: me.yaw, swim: me.swim, fly: me.fly, tint: [1 + a * 0.4, 1 + a, 1 + a * 1.3], anim } : null,
     });
     setText('addr', `Глибина ${g.d} · всесвіт ${fmtN(g.n)} · ${clockStr(sk.phase)}${L.sky.lock ? ' (вічно)' : ''}`);
     setText('coords', `x ${Math.floor(me.x)} · y ${Math.floor(me.y)} · гравітація ${gStr(L)}${me.wet ? ` · у рідині: ${liqStr(L.liquid)}${L.liquid.danger ? ' — небезпечно' : ''}` : ''}`);
+    const A = L.air;
+    setText('env', `${loc.name}${W.windK > 0.3 ? ` · вітер ${(W.windK * 1.8).toFixed(0)} м/с` : ''}${A.breath ? '' : ` · повітря ${A.gasName}`}${A.rad > 0.3 ? ` · радіація ${A.rad > 0.65 ? 'висока' : 'помірна'}` : ''}`);
     $('charge').hidden = !ch;
     if (ch) {
       setText('chargeTxt', ch.t < CHARGE ? `Стрибок → ${addrStr(ch.to[0], ch.to[1])}` : 'Стабілізація…');

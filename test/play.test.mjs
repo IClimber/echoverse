@@ -305,3 +305,33 @@ test('небо й час: біля старту — одне сонце, міс�
   const w = { id: 'a', name: 'x', seedText: 'x', seed: 1, gen: 6, created: 1, played: 1, player: { d: 0, n: 0, x: 0, y: 0 }, history: [], clock: 1234.5 };
   assert.equal(deserialize(serialize(w)).world.clock, 1234.5);
 });
+
+test('атмосфера й погода: біля старту — придатне повітря ~1 атм; трапляються інші; погода детермінована й змінюється; місце уточнює', async () => {
+  const { lawsOf } = await import('../js/universe.js');
+  const { weatherAt, localWeather, W_STORM } = await import('../js/weather.js');
+  const { skyState, applyWeather } = await import('../js/sky.js');
+  const { hashStr } = await import('../js/rng.js');
+  const seed = hashStr('повітря'), gases = new Set();
+  let vac = 0;
+  for (const d of [0, 3]) for (let n = -1000; n <= 1000; n++) {
+    const A = lawsOf(seed, d, n).air;
+    if (d === 0 && Math.abs(n) <= 8) assert.ok(A.breath && A.pressure > 0.8 && A.pressure < 1.2 && A.rad < 0.1, `біля старту ${n}`);
+    assert.ok(A.pressure > 0 && A.pressure < 3.5 && A.rad >= 0 && A.rad <= 1 && A.haze >= 0 && A.haze <= 1);
+    gases.add(A.gas); vac += A.pressure < 0.1;
+  }
+  assert.ok(gases.size === 5 && vac > 5, `видів повітря ${gases.size}, без повітря ${vac}`);
+  const L = lawsOf(seed, 0, 0), kinds = new Set();
+  for (let t = 0; t < 3600 * 10; t += 20) { const W = weatherAt(L, t); kinds.add(W.kind); assert.deepEqual(weatherAt(L, t), W); }
+  assert.ok(kinds.size >= 3, `погод лише ${kinds.size}`);
+  const W = { kind: 2, clouds: 0.85, vis: 0.7, precip: 0.7, dust: 0, dim: 0.3, wind: [1, 0], windK: 1, flash: 0 };
+  assert.equal(localWeather(L, W, false, false).type, L.air.acid ? 'acid' : 'rain');
+  assert.equal(localWeather(L, W, true, false).type, 'snow');
+  assert.equal(localWeather(L, W, false, true).type, null);                     // у пустелі дощ не долітає
+  const D = { ...W, kind: 5, precip: 0, dust: 1 };
+  assert.equal(localWeather(L, D, false, false, true).type, 'dust');
+  assert.equal(localWeather(L, D, false, false, false).type, null);              // пилова буря — лише в сухому
+  // без повітря — чорне небо із зорями вдень
+  const st = skyState(L, (0.5 - L.sky.off + 1) % 1 * L.sky.dayMin * 60), sv = applyWeather(skyState(L, (0.5 - L.sky.off + 1) % 1 * L.sky.dayMin * 60), { ...L, air: { ...L.air, pressure: 0.02 } }, { ...W, precip: 0, clouds: 0, dim: 0 }, 0);
+  assert.ok(sv.zenith[2] < st.zenith[2] * 0.4 && sv.stars > 0.5 && !sv.cloud, 'без повітря');
+  assert.ok(W_STORM === 3);
+});

@@ -88,3 +88,25 @@ function celMatrix(A, h) {
   const X = [x0[0] * c + y0[0] * s, x0[1] * c + y0[1] * s, x0[2] * c + y0[2] * s], Y = [y0[0] * c - x0[0] * s, y0[1] * c - x0[1] * s, y0[2] * c - x0[2] * s];
   return [...X, ...Y, ...p];
 }
+
+// Атмосфера й погода поверх стану неба st (змінює його): розріджене повітря — темніший зеніт, без повітря — чорне
+// небо із зорями вдень; серпанок — колір обрію й видимість; хмари й опади — сіріше й темніше; пил — колір пустелі;
+// блискавка — спалах. W — weather.js weatherAt, clock — для руху хмар. Додає st.cloud, st.flash, st.visK
+export function applyWeather(st, L, W, clock) {
+  const A = L.air, thin = clamp01(1 - A.pressure / 0.7), vac = A.pressure < 0.1, I = Math.min(1, st.lightK[1]);
+  st.zenith = mix(st.zenith, [4, 6, 14], thin * 0.8);
+  if (vac) { st.horizon = mix(st.horizon, [12, 14, 22], 0.85); st.stars = Math.max(st.stars, 0.9); st.dusk *= 0.2; }
+  st.horizon = mix(st.horizon, A.hazeCol.map((v) => v * (0.25 + 0.75 * I)), A.haze * 0.45);
+  const gray = [150 * (0.2 + 0.8 * I), 156 * (0.2 + 0.8 * I), 166 * (0.22 + 0.78 * I)];
+  st.horizon = mix(st.horizon, gray, W.dim * 1.2 + (1 - W.vis) * 0.4 * (1 - W.dust));
+  st.zenith = mix(st.zenith, gray, W.dim * 1.4);
+  if (W.dust > 0) st.horizon = mix(st.horizon, L.pal.desert.map((v) => v * (0.3 + 0.7 * I)), W.dust * 0.75);
+  const dimK = 1 - W.dim * 0.55, fl = W.flash * 1.6;
+  st.lightK = [st.lightK[0] * dimK + fl, st.lightK[1] * dimK + fl, st.lightK[2] * dimK + fl * 1.1];
+  st.fog = st.horizon;
+  const cw = 0.0012 + 0.0004 * A.wind;
+  st.cloud = vac ? null : { k: W.clouds, off: [clock * W.wind[0] * cw + 13.7, clock * W.wind[1] * cw + 5.1], dark: W.dim * 1.3, col: [255 * (0.18 + 0.82 * I), 255 * (0.18 + 0.82 * I), 255 * (0.2 + 0.8 * I)] };
+  st.flash = W.flash;
+  st.visK = vac ? 1.15 : W.vis * (1 - 0.45 * A.haze);
+  return st;
+}

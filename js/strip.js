@@ -86,7 +86,7 @@ export function runStrip() {
       const cap = document.createElement('figcaption');
       const mm = minimap(L, x0, y0);
       const S = L.sky;
-      cap.textContent = `${d}:${fmtN(n)} · доба ${S.lock ? 'вічна' : S.dayMin.toFixed(0) + ' хв'} · сонць ${S.suns.length}, місяців ${S.moons.length}${S.rings ? ', кільця' : ''} · ${L.grav.toFixed(2)} g · ${L.liquid.name}${L.liquid.kind === 0 ? ' ' + L.liquid.tC + '°' : ''} · море ${L.seaE.toFixed(2)} · рельєф ${L.amp} · t ${L.temp.toFixed(2)} · вол ${L.wet.toFixed(2)} · біомів ${mm.biomes}, видів ${mm.species}`;
+      cap.textContent = `${d}:${fmtN(n)} · доба ${S.lock ? 'вічна' : S.dayMin.toFixed(0) + ' хв'} · сонць ${S.suns.length}, місяців ${S.moons.length}${S.rings ? ', кільця' : ''} · повітря ${L.air.gasName.split(' ')[0]} ${L.air.pressure.toFixed(1)} атм · ${L.grav.toFixed(2)} g · ${L.liquid.name}${L.liquid.kind === 0 ? ' ' + L.liquid.tC + '°' : ''} · море ${L.seaE.toFixed(2)} · рельєф ${L.amp} · t ${L.temp.toFixed(2)} · вол ${L.wet.toFixed(2)} · біомів ${mm.biomes}, видів ${mm.species}`;
       fig.append(skyBar(L), mm.cv, cap);
       wrap.append(fig);
     }

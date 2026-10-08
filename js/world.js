@@ -63,6 +63,14 @@ export function createWorld(seed, onMesh) {
       const C = chunkOf(d, n, x, y);
       return C ? C.b[bi(x - C.cx * CS, y - C.cy * CS, k)] : -1;
     },
+    // Верх найвищого непорожнього блоку стовпця (x, y) у світі (одиниці); чанка немає — null. Для карти укриттів від опадів
+    topAt(d, n, x, y) {
+      const C = chunkOf(d, n, x, y);
+      if (!C) return null;
+      const o = bi(x - C.cx * CS, y - C.cy * CS, 0);
+      for (let k = H - 1; k >= 0; k--) if (C.b[o + k] !== B_AIR) return (k + 1) * LEVEL;
+      return 0;
+    },
     // Перешкода-предмет, що росте в клітинці (x, y): {cx, cy, z0, z1, r} або null
     obst(d, n, x, y) {
       const C = chunkOf(d, n, x, y);

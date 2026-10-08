@@ -41,6 +41,7 @@
   #where { position: absolute; left: 14px; top: 14px; }
   #addr { font-weight: 600; letter-spacing: .02em; }
   #coords { color: var(--muted); font-size: 13px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  #env { color: var(--muted); font-size: 13px; margin-top: 2px; }
   #help { position: absolute; left: 14px; bottom: 14px; color: var(--muted); font-size: 13px; line-height: 1.6; }
   #help b { color: var(--ink); font-weight: 600; }
   #charge { position: absolute; left: 50%; bottom: 46px; transform: translateX(-50%); text-align: center; min-width: 220px; }
@@ -79,7 +80,7 @@
 <canvas id="gl"></canvas>
 
 <div id="hud" hidden>
-  <div id="where" class="chip"><div id="addr"></div><div id="coords"></div></div>
+  <div id="where" class="chip"><div id="addr"></div><div id="coords"></div><div id="env"></div></div>
   <div id="help" class="chip">
     <b>WASD</b> — рух · <b>Shift</b> — біг · <b>пробіл</b> — стрибок, двічі — політ (пробіл / Shift — угору / униз) · <b>Q</b> / <b>E</b> — у сусідній всесвіт · <b>R</b> — у випадковий (<b>Shift+R</b> — і глибина)<br>
     <b>V</b> — камера (третя особа / згори) · <b>права кнопка миші</b> чи <b>Z</b> / <b>C</b> — обертати · <b>коліщатко</b> — масштаб<br>

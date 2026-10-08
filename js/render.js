@@ -8,7 +8,7 @@ import { WORLD_H, SEA, MAX_AMP } from './universe.js';
 import { figureParts, Mesh } from './gen/mesh.js';
 import { poseMatrices } from './anim.js';
 import { chain, translate, scale, invert } from './mat.js';
-import { skyState } from './sky.js';
+import { skyState, applyWeather } from './sky.js';
 import { ISO, VIEW_R, viewProj, chunksInView, isoRadius, project, basis } from './camera.js';
 import { texturesOf, TEX } from './textures.js';
 import { LAYERS } from './gen/materials.js';
@@ -16,6 +16,14 @@ import { LAYERS } from './gen/materials.js';
 const MAX_MESH = 700;                          // чанків з мешами в GPU; третя особа бачить далеко
 const ZR = [0, WORLD_H * LEVEL + 40];          // висоти світу: від дна до верху островів і крон велетнів (піраміда видимості)
 const ZR_ISO = [0, (SEA + MAX_AMP) * LEVEL + 6]; // згори радіус — по рельєфу з деревами (інакше чанків набагато більше)
+// Частинки за типом опадів: шейдерний тип, коробка (півширина, висота), падіння (од/с), довжина риски, розмір,
+// частка частинок, колір
+const PART = {
+  rain: { kind: 0, box: [13, 11], fall: 15, len: 0.6, size: 0.018, dens: 1, col: [0.8, 0.85, 0.94, 0.5] },
+  acid: { kind: 0, box: [13, 11], fall: 13, len: 0.55, size: 0.02, dens: 1, col: [0.62, 0.95, 0.32, 0.55] },
+  snow: { kind: 1, box: [15, 11], fall: 1.6, len: 0, size: 0.03, dens: 0.8, col: [1, 1, 1, 0.85] },
+  dust: { kind: 2, box: [16, 7], fall: 0.25, len: 0, size: 0.045, dens: 1, col: [0.8, 0.7, 0.5, 0.5] },
+};
 const NEAR = 44;                               // ближче (від цілі до центру чанка) — повні рослини, трава й квіти; далі — спрощені
 const REF_Z = 0.77;                            // при сонці на цій висоті верхня грань — рівно колір палітри
 
@@ -57,11 +65,16 @@ export function createRenderer(canvas) {
       return { ...v, rad, fog: iso ? [0.8 * rs, 1.15 * rs] : [0.55 * VIEW_R, 0.95 * VIEW_R], fogAxes: iso ? [b.r, b.up] : null, chunks: chunksInView(v.m, target, rad, ZR) };
     },
 
-    // st: {camera, target [x,y,z], view (з view()), laws, clock (с, годинник світу), keys (видимі чанки [{key, cx, cy}]),
+    // st: {camera, target [x,y,z], view (з view()), laws, clock (с, годинник світу), weather ({W — weather.js weatherAt,
+    // loc — localWeather}), rain ({x0, y0} — кут карти укриттів), keys (видимі чанки [{key, cx, cy}]),
     // me {x, y, z, gz, yaw, tint, anim}}. Повертає стан неба (sky.js) — для HUD
     draw(st) {
       frame++;
-      const { target: t, view, laws } = st, sk = skyState(laws, st.clock || 0), [lx, ly, lz] = sk.light, amb = sk.amb;
+      const { target: t, view, laws } = st, sk = skyState(laws, st.clock || 0), wt = st.weather;
+      if (wt) applyWeather(sk, laws, wt.W, st.clock || 0);
+      const [lx, ly, lz] = sk.light, amb = sk.amb, vk = sk.visK ?? 1;
+      const fogR = st.camera.mode === ISO ? [view.fog[0] * Math.sqrt(vk), view.fog[1] * Math.sqrt(vk)] : [view.fog[0] * vk, view.fog[1] * vk];
+      const wind = wt ? [wt.W.wind[0] * 0.012, wt.W.wind[1] * 0.012] : [0, 0];
       const k = 1 / (amb + (1 - amb) * REF_Z);
       const lightCol = [sk.lightK[0] * k, sk.lightK[1] * k, sk.lightK[2] * k];
       const me = st.me;
@@ -78,7 +91,7 @@ export function createRenderer(canvas) {
       }
       const tk = `${laws.d}:${laws.n}:${laws.ds}`;
       if (texFor !== tk) { texFor = tk; R.setTextures(texturesOf(laws), TEX, LAYERS); }
-      R.begin({ fogCol: sk.fog, light: [lx, ly, lz], amb, lightCol, fog: view.fog, fogAxes: view.fogAxes, view: view.m, cut, time: performance.now() / 1000 % 1000, sky: { inv: invert(view.m), st: sk } });
+      R.begin({ fogCol: sk.fog, light: [lx, ly, lz], amb, lightCol, fog: fogR, fogAxes: view.fogAxes, view: view.m, cut, time: performance.now() / 1000 % 1000, sky: { inv: invert(view.m), st: sk }, wind });
       for (const v of st.keys) {
         const e = meshes.get(v.key);
         if (!e) continue;
@@ -107,6 +120,16 @@ export function createRenderer(canvas) {
         for (const p in fig) R.draw(fig[p], pose[p], me.tint);
         const up = me.z - me.gz, sz = Math.max(0.45, 1 - up * 0.25);  // тінь: що вище в повітрі, то менша й блідіша; у воді — немає
         if (!me.swim) R.drawAlpha(shadow, chain(translate(ox, oy, me.gz - t[2]), scale(sz, sz, 1)), 0.3 * (0.4 + 0.6 * sk.day) / (1 + up * 0.6));
+      }
+      // Опади й пил — останніми (напівпрозорі, без запису глибини: рельєф їх закриває)
+      const loc = wt && wt.loc;
+      if (loc && loc.type && st.rain) {
+        const P = PART[loc.type], b = basis(st.camera), B2 = P.box[0] * 2, md = (v) => ((v % B2) + B2) % B2;
+        const col = loc.type === 'dust' ? [...laws.pal.desert.map((v) => v / 255 * (0.35 + 0.65 * Math.min(1, sk.lightK[1]))), 0.55] : P.col.map((v, i) => i < 3 ? v * (0.3 + 0.7 * Math.min(1, sk.lightK[1])) : v);
+        R.drawParticles({
+          view: view.m, box: P.box, t: [md(t[0]), md(t[1])], z: t[2], move: [wt.W.wind[0], wt.W.wind[1], P.fall, performance.now() / 1000 % 10000],
+          r: b.r, u: b.up, kind: [P.kind, loc.k * P.dens, P.len, P.size], mapO: [st.rain.x0 - t[0], st.rain.y0 - t[1]], col,
+        });
       }
       return sk;
     },

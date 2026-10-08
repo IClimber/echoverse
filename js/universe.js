@@ -175,6 +175,31 @@ export function lawsOf(seed, d, n) {
     stars: 0.25 + 0.75 * U(148, 30), starHue: U(149, 25),
     dusk: hsl(0.03 + 0.07 * L(150, 25) + exotic + (weird > 0.3 ? 0.5 * U(151, 20) * weird : 0), 0.75, 0.6),
   };
+  // Атмосфера й погода (лише вигляд і показ; вплив на виживання — етап 2; смуги 160…): тиск (атм; рідко — майже
+  // без повітря: чорне небо, ні хмар, ні погоди), чим дихати (придатне, розріджене, задушливе, отруйне), радіація,
+  // серпанок (видимість) і його колір, вітер (сила, напрям), ваги погод (дощ / сніг — від вологи й холоду, гроза,
+  // туман, пилова буря — від сухості й вітру; кислотний дощ — де кислота чи отруйне повітря), тривалість погоди.
+  // Біля старту — придатне повітря ~1 атм, слабка радіація, звичайна погода
+  const thinU = U(160, 50), pressure = mild < 0.6 ? 0.85 + 0.3 * U(161, 30)
+    : thinU > 0.98 - 0.1 * weird && U(173, 30) > 0.85 - 0.3 * weird ? 0.02 : 0.3 + 0.75 * U(161, 40) + 1.6 * U(174, 40) * U(174, 40) * U(174, 40);
+  const gasU = U(162, 40), gas = mild < 0.6 ? 0 : pressure < 0.1 ? 4 : pressure < 0.5 ? 1 : gasU > 0.86 - 0.25 * weird ? 3 : gasU < 0.1 + 0.1 * weird ? 2 : 0;
+  const rad = mild < 0.6 ? 0.04 : Math.min(1, 0.02 + 0.9 * U(163, 40) * U(163, 40) * (1 + weird) + (pressure < 0.1 ? 0.4 : 0));
+  const dry = clamp01(0.5 - 0.6 * wet), atmo = pressure >= 0.1;
+  const air = {
+    pressure, gas, rad,
+    gasName: ['придатне', 'розріджене', 'задушливе (вуглекислий газ)', 'отруйне (сірчане)', 'майже немає'][gas],
+    breath: gas === 0,
+    haze: atmo ? clamp01(0.08 + 0.55 * U(164, 30) * (0.5 + 0.5 * Math.min(2, pressure)) + (gas === 3 ? 0.25 : 0)) : 0,
+    hazeCol: gas === 3 ? hsl(0.16 + 0.05 * L(165, 20), 0.45, 0.62) : gas === 2 ? hsl(0.1, 0.12, 0.66) : hsl(hSky + 0.04 * L(165, 20), 0.2, 0.78),
+    wind: atmo ? 0.1 + 0.8 * U(166, 30) * Math.min(1.5, 0.5 + pressure * 0.5) : 0, windAz: 3.14159 * L(167, 40),
+    w: atmo ? {                                        // ваги погод: ясно, хмарно, дощ, гроза, туман, пилова буря
+      clear: 1.2 + 1.5 * dry, cloudy: 0.6 + 0.6 * U(168, 30), rain: 0.15 + 1.6 * clamp01(0.4 + 0.7 * wet),
+      storm: 0.4 * U(169, 30) * clamp01(0.4 + temp + wet), fog: 0.1 + 0.8 * U(170, 30) * clamp01(0.5 + wet),
+      dust: dry * (0.2 + 1.2 * U(171, 30)) * (0.5 + 0.8 * U(166, 30)),
+    } : { clear: 1, cloudy: 0, rain: 0, storm: 0, fog: 0, dust: 0 },
+    acid: gas === 3 || kind === L_ACID,
+    segMin: 2 + 6 * U(172, 30),                       // скільки триває погода, хв
+  };
   // Візерунки текстур (лише вигляд, textures.js): стиль трави, квіти, хвилі піску й води, пласти скель, тріщини, плями
   const tex = {
     grass: cat(U(35, 30), 4), grassC: 0.6 + 0.8 * U(36, 25), flowers: 0.04 * U(37, 20) * U(37, 20) * 4, flowerHue: U(38, 15),
@@ -186,7 +211,7 @@ export function lawsOf(seed, d, n) {
     d, n, seed: hash3(seed, d, n), ds, weird, exotic: exotic > 0, grav,
     seaE, amp, wc, wh, wd, contrast, temp, wet,
     flora, treeH, rocks, biomes, bioS, regS, pal,
-    hue: { g: hG, s: hS, w: hW, r: hR, sat, gl: 0.42 + 0.08 * U(22, 20) }, light, sky, tex, liquid, caves, caveW, overhang, islands,
+    hue: { g: hG, s: hS, w: hW, r: hR, sat, gl: 0.42 + 0.08 * U(22, 20) }, light, sky, air, tex, liquid, caves, caveW, overhang, islands,
     // зерна шумів (спільні для глибини: так рельєф сусідніх номерів зв'язаний)
     sA: hash2(ds, 1), sB: hash2(ds, 2), sC: hash2(ds, 3), sT: hash2(ds, 4), sW: hash2(ds, 5),
     sF: hash2(ds, 6), sM: hash2(ds, 7), sO: hash2(ds, 8), sK: hash2(ds, 9), sK2: hash2(ds, 10), sV: hash2(ds, 11), sI: hash2(ds, 12),

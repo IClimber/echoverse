@@ -13,6 +13,7 @@ uniform mat4 uView;       // камера: відносно цілі → clip
 uniform vec3 uLight, uLightCol, uTint;
 uniform float uAmb;
 uniform vec3 uFR, uFU;       // туман згори: осі екрана (відстань — на екрані); у третій особі — нулі (відстань по горизонталі)
+uniform vec3 uWind;          // вітер: x, y — напрям і сила гойдання листя й трави, z — час
 out vec3 vCol, vW;
 out float vFog;
 out vec2 vUV;
@@ -22,7 +23,10 @@ void main() {
   vec3 an = abs(aNor);
   vUV = an.z >= max(an.x, an.y) ? aPos.xy : (an.x >= an.y ? vec2(aPos.y, -aPos.z) : vec2(aPos.x, -aPos.z));
   vMat = aMat;
-  vec3 p = (uModel * vec4(aPos, 1.0)).xyz;
+  vec3 lp = aPos;
+  if (aMat == 12.0 || aMat == 20.0 || aMat == 21.0)        // листя, пелюстки, трава гойдаються від вітру
+    lp.xy += uWind.xy * (0.55 + 0.45 * sin(uWind.z * 1.9 + aPos.x * 0.9 + aPos.y * 1.3 + aPos.z * 0.7));
+  vec3 p = (uModel * vec4(lp, 1.0)).xyz;
   vec3 n = normalize(mat3(uModel) * aNor);
   gl_Position = uView * vec4(p, 1.0);
   vCol = aCol * (uAmb + (1.0 - uAmb) * max(dot(n, uLight), 0.0)) * uLightCol * uTint;
@@ -86,8 +90,17 @@ uniform vec2 uStars;         // яскравість, відтінок
 uniform mat3 uCel;
 uniform vec4 uRing;          // r0, r1, непрозорість (0 — немає), смуг
 uniform vec3 uRingCol, uPole;
+uniform vec4 uCloud;         // хмарність 0…1, зсув x, y (вітер), темність
+uniform vec3 uCloudCol;
+uniform float uFlash;        // спалах блискавки
 out vec4 o;
 float hash(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 45.164))) * 43758.5453); }
+float vnoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p), u = f * f * (3.0 - 2.0 * f);
+  float a = hash(vec3(i, 1.0)), b = hash(vec3(i + vec2(1, 0), 1.0)), c = hash(vec3(i + vec2(0, 1), 1.0)), d = hash(vec3(i + vec2(1, 1), 1.0));
+  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+float fbm(vec2 p) { float v = 0.0, a = 0.5; for (int i = 0; i < 5; i++) { v += a * vnoise(p); p = p * 2.03 + 17.1; a *= 0.5; } return v; }
 void main() {
   vec4 a = uInv * vec4(vN, -1.0, 1.0), b = uInv * vec4(vN, 1.0, 1.0);
   vec3 d = normalize(b.xyz / b.w - a.xyz / a.w);
@@ -136,16 +149,76 @@ void main() {
       c = mix(c, uMoonCol[i] * (0.14 + 0.86 * lit), smoothstep(1.0, 0.9, l2) * above * (1.0 - 0.45 * uDay));
     }
   }
+  float cover = 0.0;
+  if (uCloud.x > 0.01 && up > 0.0) {                           // хмари: шар над головою, вітер їх зсуває
+    vec2 uv = d.xy / (up + 0.08) * 0.9 + uCloud.yz;
+    float f = fbm(uv);
+    cover = smoothstep(1.02 - uCloud.x * 0.75, 1.25 - uCloud.x * 0.7, f + 0.25) * smoothstep(0.0, 0.12, up);
+  }
   for (int i = 0; i < 3; i++) {
     if (i >= uNSun) break;
     float cs = dot(d, uSun[i].xyz), s = uSun[i].w, th2 = max(0.0, 2.0 * (1.0 - cs));
     float disk = smoothstep(s * s * 1.1, s * s * 0.85, th2);
     vec3 sc = uSunCol[i].rgb;
-    c = mix(c, min(vec3(1.0), sc * 1.3 + 0.15), disk * above);
-    c += sc * uSunCol[i].a * (exp(-th2 / (s * s * 9.0)) * 0.45 + exp(-th2 / (s * s * 90.0)) * 0.12) * above;
+    float hide = 1.0 - cover * 0.85;
+    c = mix(c, min(vec3(1.0), sc * 1.3 + 0.15), disk * above * hide);
+    c += sc * uSunCol[i].a * (exp(-th2 / (s * s * 9.0)) * 0.45 * hide + exp(-th2 / (s * s * 90.0)) * 0.12) * above;
   }
+  if (cover > 0.0) {
+    float sh = 1.0 - uCloud.w * smoothstep(0.3, 1.0, cover);
+    c = mix(c, uCloudCol * sh + uDusk.rgb * uDusk.a * 0.25, cover * 0.92);
+  }
+  c += vec3(0.85, 0.88, 1.0) * uFlash * (0.5 + 0.5 * cover);
   o = vec4(c, 1.0);
 }`;
+
+// Опади й пил: N частинок, кожна — 2 трикутники з gl_VertexID (буферів немає). Положення — з хешу номера частинки
+// в коробці навколо цілі камери, прив'язане до світу (рух гравця не тягне дощ за собою); падають і зносяться вітром.
+// Карта укриттів (uMap, 64×64 клітинки: висота верхнього непорожнього блоку відносно цілі) ховає частинки під
+// дахом, кронами блоків, у печерах. Дощ — риска вздовж швидкості, сніг і пил — квадратики до камери
+const PART_VS = `#version 300 es
+uniform mat4 uView;
+uniform vec3 uT;             // ціль камери за модулем коробки (x, y) і висота (z, у світі)
+uniform vec4 uMove;          // вітер x, y; швидкість падіння; час
+uniform vec3 uR, uU;         // осі екрана (праворуч, угору)
+uniform vec4 uKind;          // тип (0 — дощ, 1 — сніг, 2 — пил), частка частинок, довжина, розмір
+uniform highp sampler2D uMap;
+uniform vec2 uMapO;          // кут карти укриттів відносно цілі (клітинки)
+uniform vec2 uBox;           // півширина й висота коробки частинок
+out float vA;
+uint hh(uint x) { x ^= x >> 16; x *= 0x7feb352du; x ^= x >> 15; x *= 0x846ca68bu; x ^= x >> 16; return x; }
+float hf(uint x) { return float(hh(x) & 0xffffffu) / 16777216.0; }
+void main() {
+  float B = uBox.x, HZ = uBox.y;
+  int id = gl_VertexID / 6, cn = gl_VertexID % 6;
+  uint u = uint(id) * 4u;
+  vA = 0.0;
+  gl_Position = vec4(0.0, 0.0, -2.0, 1.0);
+  if (hf(u + 3u) > uKind.y) return;
+  float t = uMove.w, fall = uMove.z * (0.75 + 0.5 * hf(u + 4u));
+  vec2 drift = uMove.xy * t * (uKind.x == 2.0 ? 1.0 : 0.6);
+  vec3 p = vec3(mod(hf(u) * 2.0 * B - uT.x - drift.x, 2.0 * B) - B, mod(hf(u + 1u) * 2.0 * B - uT.y - drift.y, 2.0 * B) - B, 0.0);
+  p.z = mod(hf(u + 2u) * HZ - t * fall - uT.z, HZ) - HZ * (uKind.x == 2.0 ? 0.15 : 0.35);
+  if (uKind.x == 1.0) p.xy += 0.3 * vec2(sin(t * 1.3 + hf(u) * 30.0), cos(t * 1.1 + hf(u + 1u) * 30.0));
+  if (uKind.x == 2.0) p.z += 0.4 * sin(t * 2.0 + hf(u) * 20.0);
+  ivec2 mc = ivec2(floor(p.xy - uMapO));
+  if (mc.x >= 0 && mc.y >= 0 && mc.x < 64 && mc.y < 64 && p.z + uT.z < texelFetch(uMap, mc, 0).r) return;
+  vec3 a = p, b = p, side;
+  if (uKind.x == 0.0) {
+    vec3 v = normalize(vec3(uMove.xy, -fall));
+    b = p - v * uKind.z; side = uR * uKind.w;
+  } else { a = p - uU * uKind.w; b = p + uU * uKind.w; side = uR * uKind.w; }
+  vec3 q = (cn == 0 || cn == 3) ? a - side : (cn == 1) ? a + side : (cn == 2 || cn == 4) ? b + side : b - side;
+  vA = 1.0;
+  gl_Position = uView * vec4(q, 1.0);
+}`;
+const PART_FS = `#version 300 es
+precision mediump float;
+in float vA;
+uniform vec4 uCol;
+out vec4 o;
+void main() { if (vA < 0.5) discard; o = uCol; }`;
+export const PARTICLES = 6000;
 
 function compile(gl, type, src) {
   const s = gl.createShader(type);
@@ -168,10 +241,23 @@ export function createGL(canvas) {
   gl.linkProgram(sky);
   if (!gl.getProgramParameter(sky, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(sky));
   const SU = {};
-  for (const k of ['uInv', 'uZen', 'uHor', 'uMain', 'uDusk', 'uSun', 'uSunCol', 'uMoon', 'uMoonCol', 'uNSun', 'uNMoon', 'uDay', 'uStars', 'uCel', 'uRing', 'uRingCol', 'uPole']) SU[k] = gl.getUniformLocation(sky, k);
+  for (const k of ['uInv', 'uZen', 'uHor', 'uMain', 'uDusk', 'uSun', 'uSunCol', 'uMoon', 'uMoonCol', 'uNSun', 'uNMoon', 'uDay', 'uStars', 'uCel', 'uRing', 'uRingCol', 'uPole', 'uCloud', 'uCloudCol', 'uFlash']) SU[k] = gl.getUniformLocation(sky, k);
   const skyVao = gl.createVertexArray();
+  const part = gl.createProgram();
+  gl.attachShader(part, compile(gl, gl.VERTEX_SHADER, PART_VS));
+  gl.attachShader(part, compile(gl, gl.FRAGMENT_SHADER, PART_FS));
+  gl.linkProgram(part);
+  if (!gl.getProgramParameter(part, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(part));
+  const PU = {};
+  for (const k of ['uView', 'uT', 'uMove', 'uR', 'uU', 'uKind', 'uMap', 'uMapO', 'uCol', 'uBox']) PU[k] = gl.getUniformLocation(part, k);
+  const mapTex = gl.createTexture();
+  gl.activeTexture(gl.TEXTURE1);
+  gl.bindTexture(gl.TEXTURE_2D, mapTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, 64, 64, 0, gl.RED, gl.FLOAT, new Float32Array(64 * 64).fill(-1e4));
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.activeTexture(gl.TEXTURE0);
   const U = {};
-  for (const k of ['uModel', 'uView', 'uLight', 'uLightCol', 'uTint', 'uAmb', 'uFogCol', 'uFog', 'uCut', 'uCutD', 'uAlpha', 'uTex', 'uTime', 'uFR', 'uFU', 'uEye', 'uFade']) U[k] = gl.getUniformLocation(prog, k);
+  for (const k of ['uModel', 'uView', 'uLight', 'uLightCol', 'uTint', 'uAmb', 'uFogCol', 'uFog', 'uCut', 'uCutD', 'uAlpha', 'uTex', 'uTime', 'uFR', 'uFU', 'uEye', 'uFade', 'uWind']) U[k] = gl.getUniformLocation(prog, k);
   gl.useProgram(prog);
   gl.enable(gl.DEPTH_TEST);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -228,12 +314,13 @@ export function createGL(canvas) {
       for (const b of mesh.bufs) gl.deleteBuffer(b);
     },
     // Кадр: небо, світло, туман, камера (view — матриця з camera.viewProj); cut — «вікно» до гравця або null
-    begin({ fogCol, light, amb, lightCol, fog, fogAxes = null, view, cut, time = 0, sky = null }) {
+    begin({ fogCol, light, amb, lightCol, fog, fogAxes = null, view, cut, time = 0, sky = null, wind = [0, 0] }) {
       gl.clearColor(fogCol[0] / 255, fogCol[1] / 255, fogCol[2] / 255, 1);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       if (sky) R.drawSky(sky);
       gl.useProgram(prog);
       gl.uniform1f(U.uTime, time);
+      gl.uniform3f(U.uWind, wind[0], wind[1], time);
       const [fr, fu] = fogAxes || [[0, 0, 0], [0, 0, 0]];
       gl.uniform3f(U.uFR, fr[0], fr[1], fr[2]); gl.uniform3f(U.uFU, fu[0], fu[1], fu[2]);
       gl.uniformMatrix4fv(U.uView, false, view);
@@ -262,9 +349,32 @@ export function createGL(canvas) {
       const rg = st.rings;
       gl.uniform4f(SU.uRing, rg ? rg.r0 : 0, rg ? rg.r0 + rg.w : 0, rg ? rg.alpha : 0, rg ? rg.bands : 0);
       gl.uniform3fv(SU.uRingCol, rg ? c(rg.col) : [0, 0, 0]); gl.uniform3fv(SU.uPole, st.pole);
+      const cl = st.cloud || { k: 0, off: [0, 0], dark: 0, col: [255, 255, 255] };
+      gl.uniform4f(SU.uCloud, cl.k, cl.off[0], cl.off[1], cl.dark); gl.uniform3fv(SU.uCloudCol, c(cl.col)); gl.uniform1f(SU.uFlash, st.flash || 0);
       gl.bindVertexArray(skyVao);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       gl.enable(gl.DEPTH_TEST); gl.depthMask(true);
+    },
+    // Карта укриттів 64×64: висота верхнього непорожнього блоку кожної клітинки (у світі)
+    setRainMap(data) {
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, mapTex);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 64, 64, gl.RED, gl.FLOAT, data);
+      gl.activeTexture(gl.TEXTURE0);
+    },
+    // Частинки: p — {view, box [півширина, висота], t (ціль за модулем 2 × півширина), z, move [wx, wy, fall, time], r, u, kind [тип, частка, довжина, розмір], mapO, col [r, g, b, a]}
+    drawParticles(p) {
+      gl.useProgram(part);
+      gl.uniformMatrix4fv(PU.uView, false, p.view);
+      gl.uniform3f(PU.uT, p.t[0], p.t[1], p.z);
+      gl.uniform4f(PU.uMove, ...p.move); gl.uniform3fv(PU.uR, p.r); gl.uniform3fv(PU.uU, p.u);
+      gl.uniform4f(PU.uKind, ...p.kind); gl.uniform1i(PU.uMap, 1); gl.uniform2f(PU.uMapO, p.mapO[0], p.mapO[1]);
+      gl.uniform4f(PU.uCol, ...p.col); gl.uniform2f(PU.uBox, p.box[0], p.box[1]);
+      gl.enable(gl.BLEND); gl.depthMask(false);
+      gl.bindVertexArray(skyVao);
+      gl.drawArrays(gl.TRIANGLES, 0, PARTICLES * 6);
+      gl.disable(gl.BLEND); gl.depthMask(true);
+      gl.useProgram(prog);
     },
     // Розчинення біля ока (рослини в третій особі): fade — [зникли, видно] у світових одиницях або null
     setFade(fade, eye) {
