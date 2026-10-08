@@ -3,7 +3,8 @@
 import { createRenderer } from './render.js';
 import { createWorld, findSpawn, ckey } from './world.js';
 import { createDevice, landing, landingChunks, CHARGE } from './device.js';
-import { step, support, SPRINT } from './player.js';
+import { step, support, SPRINT, GRAVITY, FOOT } from './player.js';
+import { stepBody, push, rayBody, PLAYER_MASS, HIT_IMPULSE } from './bodies.js';
 import { initInput, moveAxis, turnAxis, sprintHeld, vertAxis, takeActions, takeWheel, takeDrag, clearInput, lockPointer, unlockPointer, locked } from './input.js';
 import { listWorlds, putWorld, deleteWorld, serialize, deserialize, newId } from './save.js';
 import { hashStr } from './rng.js';
@@ -15,7 +16,7 @@ import { animate } from './anim.js';
 import { clockStr } from './sky.js';
 import { weatherAt, localWeather } from './weather.js';
 import { T_SNOW, T_ICE, T_DESERT, T_DRY } from './gen/chunk.js';
-import { createCamera, rotate, wheel, smooth, moveBasis, clipDist, facing, setYaw, ISO, THIRD, HEAD } from './camera.js';
+import { createCamera, rotate, wheel, smooth, moveBasis, clipDist, facing, setYaw, basis, ISO, THIRD, HEAD } from './camera.js';
 
 const $ = (id) => document.getElementById(id);
 const SAVE_MS = 10000;                     // автозбереження
@@ -201,6 +202,39 @@ function boot() {
   // Випадкова адреса (для перевірок): номер — у межах ±100 000, з глибиною — 0…12
   const rnd = (k) => { const a = new Uint32Array(1); crypto.getRandomValues(a); return a[0] % k; };
 
+  // Тіла біля гравця (ширяюче каміння): крок фізики; гравець, що стоїть на тілі, тисне його вагою й їде разом з ним;
+  // тіло, у яке йде гравець, штовхається (легке — відкотиться, важке — ні)
+  function simBodies(dt, L, W, wk) {
+    const me = g.me, near = g.world.bodiesNear(g.d, g.n, me.x, me.y, 40), ob = me.ground ? me.onBody : null;
+    const ox = ob && ob.x, oy = ob && ob.y;
+    if (ob) { ob.vz -= PLAYER_MASS * GRAVITY * (g.ph ? g.ph.g : L.grav) * dt / ob.mass; ob.sleep = false; ob.calm = 0; }
+    if (me.moving && !me.fly) for (const b of g.world.bodiesNear(g.d, g.n, me.x, me.y, 1.5)) {
+      if (b === ob || Math.abs(me.x - b.x) > b.hx + FOOT + 0.08 || Math.abs(me.y - b.y) > b.hy + FOOT + 0.08 || me.z > b.z + b.hz || me.z + 0.98 < b.z - b.hz) continue;
+      const dx = b.x - me.x, dy = b.y - me.y, l = Math.hypot(dx, dy) || 1, mv = Math.hypot(me.vx || 0, me.vy || 0);
+      if (mv > 0.1 && (dx * me.vx + dy * me.vy) > 0) push(b, [dx / l * PLAYER_MASS * 5 * dt, dy / l * PLAYER_MASS * 5 * dt, 0]);
+    }
+    for (const b of near) {
+      if (b.sleep) continue;
+      const ph = physAt(L, b.x, b.y);
+      stepBody(b, dt, g.world.probe(g.d, g.n), { g: ph.g, vT: ph.vT, bounce: L.phys.bounce, friction: L.phys.friction, wind: [W.wind[0] * wk, W.wind[1] * wk] });
+    }
+    if (ob) { me.x += ob.x - ox; me.y += ob.y - oy; me.z = ob.z + ob.hz; }
+  }
+  // Удар: промінь з грудей уперед (у третій особі — куди дивиться камера, згори — куди обернений гравець)
+  function hit(now) {
+    const me = g.me;
+    me.hitAt = now;
+    let d;
+    if (camera.mode === THIRD) { const u = basis(camera).u; d = [-u[0], -u[1], -u[2]]; }
+    else d = [Math.cos(me.yaw), Math.sin(me.yaw), 0.05];
+    const l = Math.hypot(...d); d = d.map((v) => v / l);
+    const r = rayBody(g.world.bodiesNear(g.d, g.n, me.x, me.y, 4), me.x, me.y, me.z + 0.65, d, 3);
+    if (!r) return;
+    push(r.b, [d[0] * HIT_IMPULSE, d[1] * HIT_IMPULSE, (d[2] + 0.25) * HIT_IMPULSE]);
+    const dv = HIT_IMPULSE / r.b.mass;
+    if (dv < 0.3) toast('Камінь заважкий — ледь зрушив');
+  }
+
   let spaceAt = 0;                           // коли востаннє натиснули пробіл: двічі поспіль — політ
   function update(dt, now) {
     const menuOpen = !$('menu').hidden;
@@ -228,6 +262,7 @@ function boot() {
         $('mouseHint').hidden = !(camera.mode === THIRD && !locked());
       }
       else if (a === 'jumpPrev' || a === 'jumpNext') { if (g.dev.start([g.d, g.n + (a === 'jumpNext' ? 1 : -1)], a) === 'cancel') toast('Стрибок скасовано'); }
+      else if (a === 'hit') { if (camera.mode === ISO || locked()) hit(now); }   // у третій особі перше клацання — захоплення миші
       else if (a === 'jumpRandom' || a === 'jumpRandomDepth') {
         const to = [a === 'jumpRandomDepth' ? (g.d + 1 + rnd(12)) % 13 : g.d, rnd(200001) - 100000];
         if (g.dev.start(to, a) === 'cancel') toast('Стрибок скасовано');
@@ -257,6 +292,7 @@ function boot() {
       step(me, ix, iy, jump, dt, g.world.probe(g.d, g.n), g.ph, moveBasis(camera), { sprint, vert: vertAxis(), wind: [W.wind[0] * wk, W.wind[1] * wk] });
       me.run = sprint && me.moving && !me.fly;
       if (camera.mode === THIRD) me.yaw = facing(camera);                 // спиною до камери; S — задкує
+      simBodies(dt, L, W, wk);
       warnLiquid();
       if (g.dev.update(dt)) tryJump();
     }
@@ -316,7 +352,7 @@ function boot() {
     const anim = animate(me, dt, now, physOf(L).speed * (me.run ? SPRINT * 0.85 : 1));
     if (!g.view) return;
     const sk = renderer.draw({
-      camera, target: g.cam, view: g.view, laws: L, keys: g.vis, clock: g.clock, weather: { W: loc.W, loc }, rain: me.placed && loc.type ? rainMap(now) : null,
+      camera, target: g.cam, view: g.view, laws: L, keys: g.vis, clock: g.clock, bodies: g.world.bodiesIn(g.vis.map((v) => v.key)), weather: { W: loc.W, loc }, rain: me.placed && loc.type ? rainMap(now) : null,
       me: me.placed ? { x: me.x, y: me.y, z: me.vis ?? me.z, gz: under ? under.z : me.z, yaw: me.yaw, swim: me.swim, fly: me.fly, tint: [1 + a * 0.4, 1 + a, 1 + a * 1.3], anim } : null,
     });
     setText('addr', `Глибина ${g.d} · всесвіт ${fmtN(g.n)} · ${clockStr(sk.phase)}${L.sky.lock ? ' (вічно)' : ''}`);

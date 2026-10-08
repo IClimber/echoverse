@@ -1,7 +1,10 @@
 // world.js — світ у грі: зерно, закони всесвітів, чанки з генератора і запити до блоків (рух, приземлення після
 // стрибка, камера, F3). Геометрію чанка віддає рендеру через onMesh.
 import { lawsOf, physOf } from './universe.js';
-import { CS, ci, bi, H, solidB, blocks, genColumn, surfaceK, B_AIR, B_STONE } from './gen/chunk.js';
+import { CS, ci, bi, H, solidB, blocks, genColumn, surfaceK, B_AIR, B_STONE, O_FLOAT } from './gen/chunk.js';
+import { floatPose } from './gen/mesh.js';
+import { footprint } from './gen/plants.js';
+import { makeBody } from './bodies.js';
 import { LEVEL } from './iso.js';
 import { createGen } from './gen/client.js';
 import { standable } from './player.js';
@@ -19,6 +22,17 @@ export function createWorld(seed, onMesh) {
       const z0 = o.z * LEVEL;
       c.obst[o.y * CS + o.x] = { cx: c.cx * CS + o.cx, cy: c.cy * CS + o.cy, z0, z1: z0 + o.top, r: o.r };
       if (o.r > objR) objR = o.r;
+    }
+    // ширяюче каміння — тіла з масою (розмір — з шаблону каміння; низ — на висоті ширяння)
+    c.bodies = [];
+    const L = W.laws(c.d, c.n);
+    for (const o of c.obj) if (o.k === O_FLOAT) {
+      const pose = floatPose(L, c.sp[o.s], o, o.x + 0.5, o.y + 0.5, o.z * LEVEL), fp = footprint(pose.T), st = L.stones[(o.st || 1) - 1];
+      const h = Math.max(0.08, fp.r * pose.s * 0.75), hz = Math.max(0.06, fp.top * pose.s * 0.5);
+      c.bodies.push(makeBody({
+        x: c.cx * CS + pose.x, y: c.cy * CS + pose.y, z: pose.z, hx: h, hy: h, hz, dens: 0.8 + 0.6 * ((o.v >> 5 & 7) / 7),
+        lift: st ? st.lift : 1.2, hover: pose.z - o.z * LEVEL, T: pose.T, s: pose.s, tilt: pose.tilt, yaw: (o.v >> 8 & 255) / 256 * Math.PI * 2, key,
+      }));
     }
     c.used = performance.now();
     const was = chunks.get(key);
@@ -83,9 +97,27 @@ export function createWorld(seed, onMesh) {
       const i = ci(x - C.cx * CS, y - C.cy * CS);
       return { h: C.h[i], t: C.t[i], v: C.v[i], bm: C.bm[i] };
     },
+    // Тіла чанків навколо (x, y) у радіусі r клітинок
+    bodiesNear(d, n, x, y, r = 3) {
+      const out = [];
+      for (let cy = Math.floor((y - r) / CS); cy <= Math.floor((y + r) / CS); cy++) for (let cx = Math.floor((x - r) / CS); cx <= Math.floor((x + r) / CS); cx++) {
+        const C = chunks.get(ckey(d, n, cx, cy));
+        if (C) for (const b of C.bodies) if (Math.abs(b.x - x) < r + b.hx && Math.abs(b.y - y) < r + b.hy) out.push(b);
+      }
+      return out;
+    },
+    // Тіла завантажених чанків з ключами keys (видимі) — для малювання й симуляції
+    bodiesIn(keys) {
+      const out = [];
+      for (const k of keys) { const C = chunks.get(k); if (C && C.bodies) for (const b of C.bodies) out.push(b); }
+      return out;
+    },
     // «Щуп» для фізики гравця у всесвіті (d, n) — див. player.js
     probe(d, n) {
-      return { liquid: W.laws(d, n).liquid, block: (x, y, k) => W.block(d, n, x, y, k), obj: (x, y) => W.obst(d, n, x, y), get objR() { return objR; } };
+      return {
+        liquid: W.laws(d, n).liquid, block: (x, y, k) => W.block(d, n, x, y, k), obj: (x, y) => W.obst(d, n, x, y), get objR() { return objR; },
+        bodies: (x, y) => W.bodiesNear(d, n, x, y, 2),
+      };
     },
     want(d, n, cx, cy, pri) { gen.want(ckey(d, n, cx, cy), d, n, cx, cy, pri); },
     stats: () => ({ chunks: chunks.size, genMs: genN ? genMs / genN : 0, pending: gen.pending }),

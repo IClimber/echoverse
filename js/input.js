@@ -21,7 +21,10 @@ export function initInput(target = window) {
   target.addEventListener('blur', () => held.clear());
   target.addEventListener('wheel', (e) => { wheel += e.deltaY; }, { passive: true });
   // Обертання камери — права кнопка миші
-  target.addEventListener('mousedown', (e) => { if (e.button === 2) dragging = true; });
+  target.addEventListener('mousedown', (e) => {
+    if (e.button === 2) dragging = true;
+    if (e.button === 0 && !(e.target instanceof HTMLElement && e.target.closest('#menu'))) pressed.push('hit');   // удар (ЛКМ)
+  });
   target.addEventListener('mouseup', (e) => { if (e.button === 2) dragging = false; });
   // Подія з величезним зсувом — збій захоплення миші (буває в момент захоплення): ігноруємо, інакше камеру «смикає»
   target.addEventListener('mousemove', (e) => {
@@ -48,7 +51,8 @@ export const turnAxis = () => (held.has('KeyC') ? 1 : 0) - (held.has('KeyZ') ? 1
 // Зсув миші з правою кнопкою з минулого кадру, px
 export function takeDrag() { const d = [dragX, dragY]; dragX = dragY = 0; return d; }
 // Дії з минулого кадру (кожну — один раз): jump — стрибок, jumpPrev / jumpNext — пристрій (номер −1 / +1),
-// jumpRandom — у випадковий всесвіт (для перевірок), jumpRandomDepth (Shift+R) — і на іншу глибину, camera — вигляд
+// jumpRandom — у випадковий всесвіт (для перевірок), jumpRandomDepth (Shift+R) — і на іншу глибину, camera — вигляд,
+// hit — удар (ЛКМ)
 export function takeActions() { return pressed.splice(0); }
 export function takeWheel() { const w = wheel; wheel = 0; return w; }
 export function clearInput() { held.clear(); pressed.length = 0; wheel = 0; dragX = dragY = 0; dragging = false; }

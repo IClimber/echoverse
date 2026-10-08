@@ -1,7 +1,8 @@
 // anim.js — анімація фігури гравця (лише вигляд): хода — ноги й руки навхрест і похитування,
 // стрибок — руки вгору й ноги підібгані, падіння — руки вперед, приземлення — присідання, спокій — дихання;
 // плавання (як у Minecraft): у русі тіло лягає горизонтально, руки гребуть брасом (уперед — у сторони — назад),
-// ноги часто б'ють; на місці — тіло вертикально, руки повільно розводяться, ноги ступають у воді; ширяння — руки розкинуті.
+// ноги часто б'ють; на місці — тіло вертикально, руки повільно розводяться, ноги ступають у воді; ширяння — руки розкинуті;
+// удар — права рука вперед.
 // Стан — у me.anim; кути плавно наздоганяють ціль, тож переходи без ривків.
 import { chain, translate, rotZ, rotY, rotX, scale } from './mat.js';
 import { PIVOT } from './gen/mesh.js';
@@ -42,6 +43,9 @@ export function animate(me, dt, now, speedK = 1) {
   a.tuck += (tuck - a.tuck) * k; a.bob += (bob - a.bob) * k; a.lean += (lean - a.lean) * k;
   const k2 = Math.min(1, dt * 6);                      // тіло лягає й підводиться повільніше за махи
   a.spread += (spread - a.spread) * k; a.lift += (lift - a.lift) * k2;
+  // удар: права рука різко вперед і назад (0,3 с)
+  const ht = me.hitAt ? (now - me.hitAt) / 300 : 1;
+  a.punch = ht < 1 ? Math.sin(ht * Math.PI) : 0;
   return a;
 }
 
@@ -61,6 +65,6 @@ export function poseMatrices(a, ox, oy, oz, yaw) {
     legL: joint(PIVOT.hip, a.leg + a.tuck),
     legR: joint(PIVOT.hip, -a.leg + a.tuck * 0.4),
     armL: arm(1, -a.arm + a.up),
-    armR: arm(-1, a.arm + a.up),
+    armR: arm(-1, a.arm + a.up + (a.punch || 0) * 1.6),
   };
 }

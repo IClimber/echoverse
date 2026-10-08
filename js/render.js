@@ -7,7 +7,7 @@ import { CS } from './gen/chunk.js';
 import { WORLD_H, SEA, MAX_AMP } from './universe.js';
 import { figureParts, Mesh } from './gen/mesh.js';
 import { poseMatrices } from './anim.js';
-import { chain, translate, scale, invert } from './mat.js';
+import { chain, translate, scale, invert, rotZ, rotX } from './mat.js';
 import { skyState, applyWeather } from './sky.js';
 import { ISO, VIEW_R, viewProj, chunksInView, isoRadius, project, basis } from './camera.js';
 import { texturesOf, TEX } from './textures.js';
@@ -34,6 +34,19 @@ export function createRenderer(canvas) {
   const fig = Object.fromEntries(Object.entries(figureParts([226, 92, 70])).map(([k, m]) => [k, R.upload(m)]));
   const shadow = (() => { const M = new Mesh(); M.quad([-0.3, -0.3, 0.02], [0.3, -0.3, 0.02], [0.3, 0.3, 0.02], [-0.3, 0.3, 0.02], 0, 0, 1, [0, 0, 0]); return R.upload(M.finish()); })();
 
+  // шаблони тіл (ширяюче каміння) у GPU: ключ шаблону → меш
+  const tmpl = new Map();
+  const tmplMesh = (T) => {
+    let m = tmpl.get(T);
+    if (!m) {
+      const idx = T.verts > 65535 ? new Uint32Array(T.verts) : new Uint16Array(T.verts);
+      for (let i = 0; i < T.verts; i++) idx[i] = i;
+      m = R.upload({ pos: T.p, nor: T.n, col: T.c, mat: T.m, idx, count: T.verts });
+      if (tmpl.size > 400) { for (const v of tmpl.values()) R.free(v); tmpl.clear(); }
+      tmpl.set(T, m);
+    }
+    return m;
+  };
   const free = (e) => { for (const m of [e.mesh, e.liq, e.flora, e.far]) if (m) R.free(m); };
   function evict() {
     if (meshes.size <= MAX_MESH) return;
@@ -109,6 +122,10 @@ export function createRenderer(canvas) {
         const ox = v.cx * CS - t[0], oy = v.cy * CS - t[1];
         const fl = (ox + CS / 2) ** 2 + (oy + CS / 2) ** 2 < NEAR * NEAR ? e.flora : e.far;
         if (fl) R.drawAt(fl, ox, oy, -t[2]);
+      }
+      // Тіла (ширяюче каміння): шаблон з поворотом, нахилом і масштабом; низ коробки — основа шаблону
+      if (st.bodies) for (const b of st.bodies) {
+        R.draw(tmplMesh(b.T), chain(translate(b.x - t[0], b.y - t[1], b.z - b.hz - t[2]), rotZ(b.yaw), rotX(b.tilt), scale(b.s, b.s, b.s)));
       }
       R.setFade(null);
       // Поверхні рідин — після всього твердого, напівпрозоро (лава — непрозора)

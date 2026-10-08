@@ -257,7 +257,7 @@ export function chunkMesh(C, L) {
     if (o.k === O_TREE) {
       const s = (0.6 + 0.8 * age) * gs, tl = ((v >> 2 & 7) / 7) * 0.1, T = template(g, v % 3, 0), fp = footprint(T);
     } else if (o.k === O_COVER) place(F, template(g, v & 1, 0), cx, cy, z, rot, (0.6 + 0.8 * age) * Math.sqrt(gs), 0, cj);
-    else if (o.k === O_FLOAT) { const fl = floatPose(L, g, o, cx, cy, z); place(F, fl.T, fl.x, fl.y, fl.z, rot, fl.s, fl.tilt, cj); place(Ff, fl.T, fl.x, fl.y, fl.z, rot, fl.s, fl.tilt, cj); }
+    else if (o.k === O_FLOAT) continue;                       // ширяюче каміння — тіла (bodies.js), малюються окремо
     else {
       const T = template(o.st ? stoneGenome(L, g, o.st) : g, v & 3, 0, styleOf(g, v)), s = 0.8 + 0.4 * age, fp = footprint(T);
       place(F, T, cx, cy, z, rot, s, 0, cj); place(Ff, T, cx, cy, z, rot, s, 0, cj);

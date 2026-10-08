@@ -392,3 +392,26 @@ test('нові сили: вітер зносить у стрибку, в\'язк
   for (let i = 0; i < 30; i++) step(q, 0, 0, false, 1 / 60, P, { ...PH1, tilt: [0.3, 0] });
   assert.ok(q.x > 21, `нахил: ${q.x}`);
 });
+
+test('тіла: левітуюче висить на висоті ширяння, звичайне падає й лежить; удар — легке відлітає, важке ледь зрушить; на тіло можна стати', async () => {
+  const { makeBody, stepBody, push, rayBody, HIT_IMPULSE } = await import('../js/bodies.js');
+  const P = world(Array(40).fill('4'.repeat(40))), env = { g: 1, vT: 20, bounce: 0, friction: 1, wind: [0, 0] };
+  const run = (b, n) => { for (let i = 0; i < n; i++) stepBody(b, 1 / 60, P, env); };
+  const fl = makeBody({ x: 20.5, y: 20.5, z: 4 * LEVEL + 2, hx: 0.2, hy: 0.2, hz: 0.15, lift: 1.3, hover: 1.5 });
+  fl.sleep = false; run(fl, 300);
+  assert.ok(Math.abs(fl.z - fl.hz - (4 * LEVEL + 1.5)) < 0.1, `висота ширяння: ${fl.z}`);
+  const rock = makeBody({ x: 10.5, y: 10.5, z: 4 * LEVEL + 3, hx: 0.2, hy: 0.2, hz: 0.15, lift: 0 });
+  rock.sleep = false; run(rock, 300);
+  assert.ok(Math.abs(rock.z - rock.hz - 4 * LEVEL) < 0.05 && rock.sleep, `лежить: ${rock.z} ${rock.sleep}`);
+  const small = makeBody({ x: 5.5, y: 5.5, z: 4 * LEVEL + 1, hx: 0.12, hy: 0.12, hz: 0.1, lift: 1.3, hover: 1 });
+  const big = makeBody({ x: 5.5, y: 30.5, z: 4 * LEVEL + 1, hx: 1.2, hy: 1.2, hz: 1, lift: 1.3, hover: 1 });
+  const x0 = small.x, x1 = big.x;
+  push(small, [HIT_IMPULSE, 0, 0]); push(big, [HIT_IMPULSE, 0, 0]);
+  run(small, 60); run(big, 60);
+  assert.ok(small.x - x0 > 1 && big.x - x1 < 0.05, `легке ${small.x - x0}, важке ${big.x - x1}`);
+  const hitR = rayBody([big, fl], 18.5, 20.5, fl.z, [1, 0, 0], 3);
+  assert.equal(hitR.b, fl);
+  // гравець стає на тіло
+  const Pb = { ...P, bodies: () => [fl] };
+  assert.ok(Math.abs(support(Pb, fl.x, fl.y, fl.z + fl.hz + 0.5).z - (fl.z + fl.hz)) < 1e-9);
+});

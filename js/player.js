@@ -47,7 +47,16 @@ export function hits(P, x, y, z) {
     const b = P.block(tx, ty, k);
     if (b === -1 || solidB(b)) return true;
   }
-  return objsNear(P, x, y, (o) => over(o, x, y) && z < o.z1 - EPS && z + BODY > o.z0);
+  if (objsNear(P, x, y, (o) => over(o, x, y) && z < o.z1 - EPS && z + BODY > o.z0)) return true;
+  return !!bodyAt(P, x, y, z);
+}
+// Тіло (bodies.js), з яким перетинається габарит у (x, y, z), або null
+export function bodyAt(P, x, y, z) {
+  if (!P.bodies) return null;
+  for (const b of P.bodies(x, y)) {
+    if (Math.abs(x - b.x) < b.hx + FOOT && Math.abs(y - b.y) < b.hy + FOOT && z < b.z + b.hz - EPS && z + BODY > b.z - b.hz) return b;
+  }
+  return null;
 }
 
 // Опора під габаритом не нижче за z − drop: {z (верх опори)} або null. Рідина — не опора (liq — опора: поверхневий
@@ -72,6 +81,11 @@ export function support(P, x, y, z, drop = 40, liq = false) {
     if (over(o, x, y) && o.z1 <= z + EPS && o.z1 >= z - drop && (!best || o.z1 > best.z)) best = { z: o.z1 };
     return false;
   });
+  // верх тіла (ширяючий камінь): на нього можна стати
+  if (P.bodies) for (const b of P.bodies(x, y)) {
+    const top = b.z + b.hz;
+    if (Math.abs(x - b.x) < b.hx + FOOT && Math.abs(y - b.y) < b.hy + FOOT && top <= z + EPS && top >= z - drop && (!best || top > best.z)) best = { z: top, body: b };
+  }
   return best;
 }
 
@@ -174,7 +188,8 @@ export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
       // пружний ґрунт: після падіння відскакуєш (слабкий удар — ні)
       if (ph.bounce && p.vz < -5 && s2 === null) { p.vz = -p.vz * ph.bounce; p.ground = false; p.bounced = true; }
       else { p.vz = 0; p.ground = true; }
-    } else p.ground = false;
+      p.onBody = g.body || null;
+    } else { p.ground = false; p.onBody = null; }
   } else if (hits(P, p.x, p.y, nz)) { nz = p.z; p.vz = 0; }   // стеля
   else p.ground = false;
   p.z = nz;
