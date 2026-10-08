@@ -7,11 +7,12 @@ import { landing, landingChunks, createDevice, CHARGE, HISTORY } from '../js/dev
 import { serialize, deserialize } from '../js/save.js';
 import { B_AIR, B_LIQ, B_GRASS, B_STONE } from '../js/gen/chunk.js';
 
-// Світ з рядків: символ — стовпець. Цифра або буква a…z — висота суходолу в блоках (0…35; 'T' — висота 2 з деревом);
-// 'w' — водойма: дно на 2, рідина до 6 (де можна плавати чи ні — liquid); поза мапою — не згенеровано (−1)
+// Світ з рядків: символ — стовпець. Цифра або буква a…z — висота суходолу в блоках (0…35; 'T' — висота 2 з деревом,
+// 'R' — висота 2 з каменем 0,4 заввишки); 'w' — водойма: дно на 2, рідина до 6 (тримає чи ні — liquid);
+// поза мапою — не згенеровано (−1)
 const SEA = 6;
-function world(rows, liquid = { swim: true, why: '' }) {
-  const hOf = (ch) => ch === 'T' ? 2 : /[0-9]/.test(ch) ? +ch : ch.charCodeAt(0) - 87;
+function world(rows, liquid = { swim: true, danger: '', density: 1 }) {
+  const hOf = (ch) => ch === 'T' || ch === 'R' ? 2 : /[0-9]/.test(ch) ? +ch : ch.charCodeAt(0) - 87;
   return {
     liquid,
     block(x, y, k) {
@@ -21,12 +22,16 @@ function world(rows, liquid = { swim: true, why: '' }) {
       if (ch === 'w') return k < 2 ? B_STONE : k < SEA ? B_LIQ : B_AIR;
       return k < hOf(ch) ? B_GRASS : B_AIR;
     },
-    obj: (x, y) => rows[y] && rows[y][x] === 'T' ? 2 : -1,
+    obj: (x, y) => {
+      const ch = rows[y] && rows[y][x];
+      return ch === 'T' ? { cx: x + 0.5, cy: y + 0.5, z0: LEVEL * 2, z1: LEVEL * 2 + 2, r: 0.18 }
+        : ch === 'R' ? { cx: x + 0.5, cy: y + 0.5, z0: LEVEL * 2, z1: LEVEL * 2 + 0.4, r: 0.4 } : null;
+    },
   };
 }
 const at = (P, x, y) => { let k = 40; while (k > 0 && P.block(Math.floor(x), Math.floor(y), k - 1) === B_AIR) k--; return k * LEVEL; };
 const man = (P, x, y) => ({ x, y, z: at(P, x, y), vz: 0, ground: true });
-const run = (p, ix, iy, n, P, ph, jump = false) => { for (let i = 0; i < n; i++) step(p, ix, iy, jump && i === 0, 1 / 60, P, ph); };
+const run = (p, ix, iy, n, P, ph, jump = false, mb) => { for (let i = 0; i < n; i++) step(p, ix, iy, jump && i === 0, 1 / 60, P, ph, mb); };
 
 test('ізометрія: ромб 2:1, екран ↔ площина туди й назад', () => {
   const [ax, ay] = toScreen(1, 0, 0), [bx, by] = toScreen(0, 1, 0);
@@ -61,15 +66,27 @@ test('рух: «праворуч» на екрані — уздовж (1, −1) 
   assert.ok(Math.abs(p.x - (10.5 + d)) < 1e-9 && Math.abs(p.y - (10.5 - d)) < 1e-9 && p.ground);
 });
 
-test('рух: на уступ в 1 блок — сам, на 2 — ні; униз пішки — на 1 блок, на 2 — ні (сторожа)', () => {
-  const P = world(['444444', '444566', '444444', '442444']);
+test('рух: на уступ в 1 блок — сам, на 2 — ні; з обриву будь-якої висоти — падаєш', () => {
+  const P = world(['444444', '444566', '444444', '440444']);
   const p = man(P, 2.5, 1.5);
   run(p, 1, 1, 40, P);                                      // +x: 4 → 5 (крок), далі 5 → 6 (крок)
   assert.ok(p.x > 4.3 && Math.abs(p.z - 6 * LEVEL) < 1e-9, `на уступи: ${p.x} ${p.z}`);
+  const w = man(world(['444444', '444466', '444444']), 2.5, 1.5);
+  run(w, 1, 1, 40, world(['444444', '444466', '444444']));  // 4 → 6 — стіна
+  assert.ok(w.x < 3.8 && Math.abs(w.z - 4 * LEVEL) < 1e-9, `стіна: ${w.x}`);
   const q = man(P, 2.5, 1.5);
-  run(q, -1, 1, 60, P);                                     // +y: 4 → 4 → 2 (униз на 2) — сторожа не пускає
-  assert.ok(q.y < 3 + 0.25 && Math.abs(q.z - 4 * LEVEL) < 1e-9, `сторожа: ${q.y} ${q.z}`);
+  run(q, -1, 1, 60, P);                                     // +y: 4 → 4 → 0 (униз на 4) — падає
+  assert.ok(q.y > 3.3 && q.z === 0 && q.ground, `з обриву: ${q.y} ${q.z}`);
   assert.equal(hits(P, 10, 10, 0), true);                   // незгенероване — стіна
+});
+
+test('каміння: вище пів блоку — перешкода, на яку стаєш (крок чи стрибок); дерево — крізь не пройти', () => {
+  const P = world(['22222', '22R22', '22222']);
+  assert.equal(hits(P, 2.5, 1.5, LEVEL * 2), true);
+  assert.equal(support(P, 2.5, 1.5, LEVEL * 2 + 0.5).z, LEVEL * 2 + 0.4);     // верх каменя — опора
+  const p = man(P, 0.5, 1.5);
+  run(p, 1, 0, 30, P, PH1, false, [[1, 0], [0, 1]]);
+  assert.ok(p.x > 2 && Math.abs(p.z - (LEVEL * 2 + 0.4)) < 1e-9, `на камінь: ${p.x} ${p.z}`);
 });
 
 test('рух: між двома деревами по діагоналі можна пройти, крізь дерево — ні', () => {
@@ -92,15 +109,15 @@ test('печера: під стелею проходиш, у низький ла
   assert.ok(p.x > 5.2 && p.x < 6 && Math.abs(p.z - LEVEL * 2) < 1e-9, `${p.x} ${p.z}`);
 });
 
-test('легка гравітація: пішки на 2 блоки; приземлення рахує вихід за гравітацією', () => {
-  const light = { up: 2, down: 3, speed: 1, settle: 8, g: 0.5 };
+test('легка гравітація: пішки на 2 блоки; приземлення шукає місце з виходом', () => {
+  const light = { up: 2, speed: 1, settle: 8, g: 0.5 };
   const P = world(['444444', '444688', '444444']);
   const p = man(P, 2.5, 1.5), q = man(P, 2.5, 1.5);
   run(p, 1, 1, 40, P);                                      // при 1 g: 4 → 6 — ні
   run(q, 1, 1, 40, P, light);                               // при 0,5 g — так, і далі 6 → 8
   assert.ok(p.x < 3.3 && q.x > 4.3 && Math.abs(q.z - 8 * LEVEL) < 1e-9, `${p.x} ${q.x} ${q.z}`);
-  const pillar = world(['000', '060', '000']);               // стовп 6 і сусіди 0: при 1 g не зійти
-  assert.equal(landing(pillar, 1.5, 1.5, 3, PH1)?.join(), '1.5,0.5,0');   // приземлиться поруч, на 0
+  const pit = world(['77777', '77777', '77077', '77777', '77777']);   // яма 7 блоків: з неї не вилізти
+  assert.notEqual(landing(pit, 2.5, 2.5, 0, PH1).join(), '2.5,2.5,0');
 });
 
 test('стрибок: висота й час у повітрі від гравітації; на уступ, з якого пішки не вилізти', () => {
@@ -132,21 +149,28 @@ test('падіння: зі стрибка — з будь-якої висоти;
   assert.equal(support(P, 3.5, 1.5, 4).z, 0);
 });
 
-test('приземлення: на місці, якщо можна; інакше найближче з виходом; ніде — null', () => {
-  const P = world(['44444', '4www4', '4www4', '4www4', '44444'], { swim: false, why: 'лава' });
+test('приземлення: на місці, якщо можна; інакше найближче з виходом; ніде стати — у рідині чи в повітрі, але завжди', () => {
+  const P = world(['44444', '4www4', '4www4', '4www4', '44444'], { swim: true, danger: '1100 °C', density: 2.8 });
   assert.deepEqual(landing(P, 0.5, 0.5, 2), [0.5, 0.5, 2]);
-  assert.deepEqual(landing(P, 2.5, 2.5, 2), [2.5, 0.5, 2]);                   // у лаву — ні, найближче на березі
-  assert.equal(landing(world(Array(30).fill('w'.repeat(30)), { swim: false }), 15, 15, 2), null);
+  assert.deepEqual(landing(P, 2.5, 2.5, 2), [2.5, 0.5, 2]);                   // у рідині — найближче на березі
+  const sea = world(Array(30).fill('w'.repeat(30)));
+  const at = landing(sea, 15.2, 15.7, 2.5);
+  assert.ok(at[0] === 15.2 && at[1] === 15.7 && !hits(sea, ...at), `у морі: ${at}`);    // пливе там само
+  const rock = world(Array(30).fill('z'.repeat(30)));                          // суцільна скеля вище за ноги
+  const up = landing(rock, 15.5, 15.5, 1);
+  assert.ok(up && !hits(rock, ...up) && up[2] >= 35 * LEVEL, `у скелі: ${up}`);
   assert.ok(landingChunks(0, 0, 16).length >= 4);
 });
 
 test('пристрій: заряджання, скасування повторним натисканням, історія', () => {
   const dev = createDevice([[0, 1]]);
-  assert.equal(dev.start(1), 'start');
+  assert.equal(dev.start([0, 2], 'next'), 'start');
   assert.equal(dev.update(CHARGE / 2), false);
-  assert.equal(dev.start(1), 'cancel');
+  assert.equal(dev.start([0, 2], 'next'), 'cancel');
   assert.equal(dev.charge, null);
-  dev.start(-1);
+  dev.start([0, 0], 'prev');
+  assert.equal(dev.start([3, 77], 'random'), 'start');                         // інша кнопка — новий заряд
+  assert.deepEqual(dev.charge.to, [3, 77]);
   assert.equal(dev.update(CHARGE), true);
   dev.done([0, 0]);
   assert.equal(dev.charge, null);
@@ -196,23 +220,40 @@ test('текстури: усі шари, шар 0 нейтральний, різ
   for (let i = 0; i < TEX * TEX * 4; i += 4) assert.equal(a[i], 128);   // шар 0 — нейтральний
 });
 
-test('плавання: з берега у воду й назад, у воді повільніше й без стрибка; у небезпечну рідину не пускає', () => {
+test('плавання: з берега у воду й назад, у воді повільніше; з поверхні — вистрибнути; у небезпечну рідину — можна', () => {
   const rows = ['77777', '7www7', '7www7', '77777'];
-  const P = world(rows), H = world(rows, { swim: false, why: 'лава' });
+  const P = world(rows), H = world(rows, { swim: true, danger: '1100 °C', density: 2.8 }), M = world(rows, { swim: false, danger: 'тонеш', density: 0.42 });
   const p = man(P, 0.5, 1.5);
   run(p, 1, 1, 40, P);                                      // +x: з берега (7) у воду
   run(p, 0, 0, 90, P);
   const surf = SEA * LEVEL - 0.15;
-  assert.ok(p.swim && Math.abs(p.z - (surf - FLOAT_Z)) < 0.03, `пливе? ${p.swim} z ${p.z}`);
+  assert.ok(p.swim && p.wet && Math.abs(p.z - (surf - FLOAT_Z)) < 0.03, `пливе? ${p.swim} z ${p.z}`);
   const x0 = p.x;
-  step(p, 1, 1, true, 1 / 60, P);
-  assert.ok(p.vz < 2, 'з води стрибнув');
+  step(p, 1, 1, false, 1 / 60, P);
   assert.ok(p.x - x0 < SPEED * 0.6 * Math.SQRT2 / 60, 'у воді не повільніше');
+  step(p, 0, 0, true, 1 / 60, P);
+  assert.ok(p.vz > 4, `з води не вистрибнув: ${p.vz}`);
+  run(p, 0, 0, 120, P);
   run(p, 1, 1, 120, P);                                     // далі — на берег (7 блоків)
   assert.ok(p.x > 4 && Math.abs(p.z - 7 * LEVEL) < 1e-9 && p.ground, `вийшов? ${p.x} ${p.z}`);
   const q = man(H, 0.5, 1.5);
-  run(q, 1, 1, 60, H);
-  assert.ok(q.x < 1.3 && q.why === 'лава', `у лаву: ${q.x} ${q.why}`);   // край берега — ноги ще над ним
+  run(q, 1, 1, 60, H);                                      // у лаву — можна (густа: тримає вище)
+  run(q, 0, 0, 90, H);
+  assert.ok(q.x > 1.3 && q.swim && q.z > surf - FLOAT_Z + 0.2, `у лаву: ${q.x} ${q.z}`);
+  const m = man(M, 0.5, 1.5);
+  run(m, 1, 1, 30, M);                                      // метан не тримає: на дно
+  run(m, 0, 0, 120, M);
+  assert.ok(m.wet && !m.swim && m.ground && Math.abs(m.z - 2 * LEVEL) < 1e-9, `у метані: ${m.z}`);
+  run(m, 1, 1, 200, M);                                     // по дну — і на берег (з дна 5 блоків угору: до 2 над поверхнею)
+  assert.ok(m.x > 4 && Math.abs(m.z - 7 * LEVEL) < 1e-9, `з метану: ${m.x} ${m.z}`);
+});
+
+test('з води на берег: мілко (1 блок) — на 2 блоки над поверхнею виходиш кроком', () => {
+  const P = world(['8888', '5558', '5558', '8888'].map((r) => r.replace(/5/g, 'w')), { swim: true, danger: '', density: 1 });
+  const p = { x: 1.5, y: 1.5, z: 2 * LEVEL, vz: 0, ground: true };
+  run(p, 0, 0, 30, P);
+  run(p, 1, 0, 120, P, PH1, false, [[1, 0], [0, 1]]);
+  assert.ok(p.x > 3 && Math.abs(p.z - 8 * LEVEL) < 1e-9, `не вийшов: ${p.x} ${p.z}`);
 });
 
 test('біг і політ: Shift — швидше; у польоті без гравітації, крізь стіну — ні, униз до землі — політ скінчився', () => {

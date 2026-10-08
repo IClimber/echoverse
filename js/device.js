@@ -1,8 +1,8 @@
-// device.js — пристрій для стрибків між сусідніми всесвітами (номер ±1 на тій самій глибині). Без DOM.
-// Стрибків скільки завгодно, але кожен — CHARGE с заряджання (повторне натискання скасовує).
-// Координати зберігаються; якщо там, куди потрапиш, не можна стояти, — найближча клітинка, де можна,
-// у радіусі LAND_R; такої немає — стрибок не відбувається.
-import { standable } from './player.js';
+// device.js — пристрій для стрибків між всесвітами (номер ±1 на тій самій глибині; для перевірок — будь-яка адреса).
+// Без DOM. Стрибків скільки завгодно, але кожен — CHARGE с заряджання (повторне натискання скасовує).
+// Координати зберігаються; якщо там, куди потрапиш, не можна стояти, — найближча клітинка, де можна, у радіусі
+// LAND_R; такої немає — вільне місце в тому самому стовпці (у рідині — пливеш, у повітрі — падаєш). Стрибок вдається завжди.
+import { standable, hits } from './player.js';
 import { LEVEL } from './iso.js';
 
 export const CHARGE = 1.0;
@@ -15,26 +15,30 @@ for (let dy = -LAND_R; dy <= LAND_R; dy++) for (let dx = -LAND_R; dx <= LAND_R; 
   if (dx * dx + dy * dy <= LAND_R * LAND_R) OFFS.push([dx, dy]);
 OFFS.sort((a, b) => (a[0] * a[0] + a[1] * a[1]) - (b[0] * b[0] + b[1] * b[1]) || a[1] - b[1] || a[0] - b[0]);
 
-// Найближче місце, де можна стояти, від ніг (x, y, z): P — «щуп» світу (player.js), ph — рух від гравітації.
-// Шукаємо по стовпцях від найближчих, у кожному — висоту, найближчу до z (не вище +8 і не нижче −16 блоків).
-// Хоч на одного сусіда має бути можна зійти — щоб не приземлитися на стовп. Повертає [x, y, z] або null
-export function landing(P, x, y, z, ph = { up: 1, down: 1 }) {
-  const fx = Math.floor(x), fy = Math.floor(y), kp = Math.round(z / LEVEL);
+// Куди стати після стрибка, ноги були в (x, y, z): P — «щуп» світу (player.js), ph — рух від гравітації.
+// Спершу — найближче місце, де можна стояти: по стовпцях від найближчих, у кожному — висота, найближча до z
+// (не вище +8 і не нижче −16 блоків), і хоч на одного сусіда можна перейти (не стовп у ямі). Немає — вільне місце
+// в тому самому стовпці, найближче до z (рідина, повітря над урвищем), зрештою — над стовпцем. Повертає [x, y, z]
+export function landing(P, x, y, z, ph = { up: 1 }) {
+  const fx = Math.floor(x), fy = Math.floor(y), kp = Math.max(0, Math.round(z / LEVEL));
+  const exit = (cx, cy, zz) => [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([ax, ay]) => {
+    for (let q = -16; q <= ph.up; q++) if (standable(P, cx + ax, cy + ay, zz + q * LEVEL)) return true;
+    return false;
+  });
+  if (standable(P, x, y, kp * LEVEL) && exit(x, y, kp * LEVEL)) return [x, y, kp * LEVEL];
   for (const [dx, dy] of OFFS) {
     const cx = fx + dx + 0.5, cy = fy + dy + 0.5;
     for (let s = 0; s <= 16; s++) for (const k of s ? [kp + s, kp - s] : [kp]) {
       if (k < kp - 16 || k > kp + 8 || k < 0) continue;
-      const zz = k * LEVEL;
-      if (!standable(P, cx, cy, zz)) continue;
-      const exit = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([ax, ay]) => {
-        for (let q = -ph.down; q <= ph.up; q++) if (standable(P, cx + ax, cy + ay, zz + q * LEVEL)) return true;
-        return false;
-      });
-      if (exit) return [cx, cy, zz];
+      if (standable(P, cx, cy, k * LEVEL) && exit(cx, cy, k * LEVEL)) return [cx, cy, k * LEVEL];
     }
   }
-  return null;
+  for (let s = 0; s <= TOP; s++) for (const k of s ? [kp + s, kp - s] : [kp]) {
+    if (k >= 0 && k <= TOP && !hits(P, x, y, k * LEVEL)) return [x, y, k * LEVEL];
+  }
+  return [x, y, TOP * LEVEL];
 }
+const TOP = 100;                     // вище світу (96 блоків) завжди вільно
 
 // Чанки, які мають бути готові до приземлення: усі, яких торкається коло LAND_R (+1 на сусідів)
 export function landingChunks(x, y, cs) {
@@ -46,11 +50,12 @@ export function landingChunks(x, y, cs) {
 
 export function createDevice(history = []) {
   return {
-    charge: null,                    // {dir, t} — заряджається
+    charge: null,                    // {to: [d, n] — куди, tag — яка кнопка, t} — заряджається
     history: history.slice(-HISTORY),
-    start(dir) {
-      if (this.charge && this.charge.dir === dir) { this.charge = null; return 'cancel'; }
-      this.charge = { dir, t: 0 };
+    // Почати заряджання стрибка в to; та сама кнопка вдруге (tag) — скасувати
+    start(to, tag = to.join()) {
+      if (this.charge && this.charge.tag === tag) { this.charge = null; return 'cancel'; }
+      this.charge = { to, tag, t: 0 };
       return 'start';
     },
     // dt → true, коли заряд повний (стрибок можна виконувати, щойно готові чанки)

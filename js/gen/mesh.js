@@ -5,7 +5,7 @@
 import { CS, ci, bi, H, O_TREE, O_FLOAT, O_COVER, solidB, B_AIR, B_LIQ, B_ICE, B_SAND, B_GRASS, B_DRY, B_DESERT, B_SNOW, B_ROCK, B_BED, B_MUD, B_SOIL, B_STONE, B_SANDSTONE } from './chunk.js';
 import { L_LAVA, SEA } from '../universe.js';
 import { LEVEL } from '../iso.js';
-import { template, place } from './plants.js';
+import { template, place, footprint } from './plants.js';
 import { groundTint } from './flora.js';
 import { M_FLAT, M_ROCK, M_CLIFF, M_WATER, M_LAVA, M_ICE, M_SAND, M_LUSH, M_DRY, M_DESERT, M_SNOW, M_BED, M_MUD, M_SOIL, M_SANDSIDE, M_LIP } from './materials.js';
 
@@ -155,27 +155,42 @@ export function chunkMesh(C, L) {
     }
   }
   // Поверхня рідини: верхній блок рідини під повітрям (трохи нижче за край блоку)
+  // і бічні грані там, де рідина межує з повітрям (печера біля водойми): об'єм рідини завжди замкнений
+  const LM = lavaish ? M_LAVA : M_WATER;
   for (let y = 0; y < CS; y++) for (let x = 0; x < CS; x++) for (let k = 0; k < H; k++) {
-    if (B[bi(x, y, k)] !== B_LIQ || B[bi(x, y, k + 1)] !== B_AIR) continue;
-    const z = (k + 1) * LEVEL - 0.15, c = mixc(P.liquid, P.liquidDeep, Math.min(1, C.v[ci(x, y)] / 160));
-    W.quad([x, y, z], [x + 1, y, z], [x + 1, y + 1, z], [x, y + 1, z], 0, 0, 1, c, lavaish ? M_LAVA : M_WATER);
+    if (B[bi(x, y, k)] !== B_LIQ) continue;
+    const open = B[bi(x, y, k + 1)] === B_AIR, top = (k + 1) * LEVEL - (open ? 0.15 : 0), z0 = k * LEVEL;
+    const c = mixc(P.liquid, P.liquidDeep, Math.min(1, C.v[ci(x, y)] / 160));
+    if (open) W.quad([x, y, top], [x + 1, y, top], [x + 1, y + 1, top], [x, y + 1, top], 0, 0, 1, c, LM);
+    for (let d = 0; d < 4; d++) {
+      const [dx, dy] = DIRS[d];
+      if (B[bi(x + dx, y + dy, k)] !== B_AIR) continue;
+      const sc = shade(c, 0.85);
+      if (dx) { const X = dx > 0 ? x + 1 : x; W.quad([X, y, top], [X, y + 1, top], [X, y + 1, z0], [X, y, z0], dx, 0, 0, sc, LM); }
+      else { const Y = dy > 0 ? y + 1 : y; W.quad([x, Y, top], [x + 1, Y, top], [x + 1, Y, z0], [x, Y, z0], 0, dy, 0, sc, LM); }
+    }
   }
-  // Рослини й каміння: шаблон виду (варіант будови — від хешу) з поворотом, віком, нахилом і розкидом кольору
+  // Рослини й каміння: шаблон виду (варіант будови — від хешу) з поворотом, віком, нахилом і розкидом кольору.
+  // Перешкоди для зіткнень (у самі дані чанка: o.cx, o.cy — центр, o.r — півширина, o.top — висота над основою):
+  // дерево — основа стовбура з корінням; камінь — уся брила, лише вищий за пів блоку (нижчий — переступаєш)
   const F = new Mesh(), Ff = new Mesh();
   for (const o of C.obj) {
     const z = o.z * LEVEL, v = o.v, g = C.sp[o.s];
     const cx = o.x + 0.5 + ((v & 15) / 15 - 0.5) * 0.24, cy = o.y + 0.5 + ((v >> 4 & 15) / 15 - 0.5) * 0.24;
     const rot = (v >> 8 & 255) / 256 * Math.PI * 2, age = (v >> 12 & 15) / 15, k = 0.92 + 0.16 * ((v >> 3 & 7) / 7);
     const cj = [k * (0.97 + 0.06 * (v >> 6 & 3) / 3), k, k * (0.97 + 0.06 * (v >> 1 & 3) / 3)];
+    o.cx = cx; o.cy = cy; o.r = 0; o.top = 0;
     if (o.k === O_TREE) {
-      const s = 0.6 + 0.8 * age, tl = ((v >> 2 & 7) / 7) * 0.1;
-      place(F, template(g, v % 3, 0), cx, cy, z, rot, s, tl, cj);
+      const s = 0.6 + 0.8 * age, tl = ((v >> 2 & 7) / 7) * 0.1, T = template(g, v % 3, 0), fp = footprint(T);
+      place(F, T, cx, cy, z, rot, s, tl, cj);
       place(Ff, template(g, 0, 1), cx, cy, z, rot, s, tl, cj);
+      o.r = Math.min(3.5, Math.max(0.12, fp.r * s * 0.8)); o.top = Math.max(2, fp.top * s);
     } else if (o.k === O_COVER) place(F, template(g, v & 1, 0), cx, cy, z, rot, 0.6 + 0.8 * age, 0, cj);
     else if (o.k === O_FLOAT) { floater(F, cx, cy, z, g.leaf, v); floater(Ff, cx, cy, z, g.leaf, v); }
     else {
-      const T = template(g, v & 3, 0, styleOf(g, v));
-      place(F, T, cx, cy, z, rot, 0.8 + 0.4 * age, 0, cj); place(Ff, T, cx, cy, z, rot, 0.8 + 0.4 * age, 0, cj);
+      const T = template(g, v & 3, 0, styleOf(g, v)), s = 0.8 + 0.4 * age, fp = footprint(T);
+      place(F, T, cx, cy, z, rot, s, 0, cj); place(Ff, T, cx, cy, z, rot, s, 0, cj);
+      if (fp.top * s > LEVEL / 2) { o.r = Math.min(0.5, fp.r * s * 0.8); o.top = fp.top * s; }
     }
   }
   return { solid: M.finish(), liquid: W.n ? W.finish() : null, flora: F.n ? F.finish() : null, far: Ff.n ? Ff.finish() : null };

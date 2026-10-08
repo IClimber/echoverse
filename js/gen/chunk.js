@@ -34,11 +34,11 @@ export function elevation(L, x, y) {
   return clamp01(0.5 + L.contrast * (L.wc * c + L.wh * h + L.wd * f) / (L.wc + L.wh + L.wd));
 }
 
-// Чи r клітинки (x, y) — найменший серед сусідів (дерева не стоять впритул: між стовбурами завжди прохід);
-// dense — лише сусіди навхрест (густіше)
-function lonely(L, x, y, r, dense) {
-  for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) {
-    if ((!i && !j) || (dense && i && j)) continue;
+// Чи r клітинки (x, y) — найменший серед сусідів у радіусі rs (дерева не стоять впритул: між стовбурами завжди прохід;
+// великі — рідше); dense — лише сусіди навхрест (густіше, лише при rs = 1)
+function lonely(L, x, y, r, dense, rs) {
+  for (let j = -rs; j <= rs; j++) for (let i = -rs; i <= rs; i++) {
+    if ((!i && !j) || (dense && rs === 1 && i && j)) continue;
     if (unit(hash3(L.sO, x + i, y + j)) < r) return false;
   }
   return true;
@@ -50,13 +50,13 @@ export function tile(L, x, y, out = {}) {
   const px = x + 0.5, py = y + 0.5;           // центр клітинки: не на вузлах ґратки шуму
   const e = elevation(L, px, py);
   const T0 = L.temp + 0.6 * fbm3(L.sT, px / 300, py / 300, L.n * 0.03, 3);   // кілька октав: межі кліматів не прямі
-  out.o = 0; out.ov = 0; out.os = 0; out.v = 0; out.bm = 0;
+  out.o = 0; out.ov = 0; out.os = 0; out.v = 0; out.bm = 0; out.cold = T0 < -0.6;
   if (e < L.seaE) {
     // Дно: що далі від берега (нижче рівня моря), то глибше; біля берега — мілина (рівень SEA − 1)
-    out.h = Math.max(0, SEA - 1 - Math.floor((L.seaE - e) * 22));
+    out.h = Math.max(1, SEA - 1 - Math.floor((L.seaE - e) * 22));   // дно — щонайменше 1 блок (під водою не порожнеча)
     out.v = Math.min(255, Math.floor((L.seaE - e) * 1200));
     const k = L.liquid.kind;
-    out.t = k === L_DRY ? T_BED : k === L_WATER && T0 < -0.6 ? T_ICE : T_WATER;
+    out.t = k === L_DRY ? T_BED : k === L_WATER && out.cold ? T_ICE : T_WATER;
     out.bed = out.h;
     if (out.t === T_ICE) out.h = SEA;
     return out;
@@ -81,7 +81,7 @@ export function tile(L, x, y, out = {}) {
   // Тож у сусідніх всесвітах ліс той самий, лише рідший чи густіший. Дерево — лише там, де r найменший серед сусідів
   const r = unit(hash3(L.sO, x, y));
   const patch = 0.3 + 1.4 * clamp01(0.5 + noise3(L.sF, px / 24, py / 24, L.n * 0.06));
-  if (Bm.trees && unit(hash3(L.sO ^ 0x2545f491, x, y)) < L.flora * 6 * Bm.trees * patch && lonely(L, x, y, r, Bm.dense)) out.o = O_TREE;
+  if (Bm.trees && unit(hash3(L.sO ^ 0x2545f491, x, y)) < L.flora * 6 * Bm.trees * patch && lonely(L, x, y, r, Bm.dense, L.treeH < 1.5 ? 1 : L.treeH < 3 ? 2 : 3)) out.o = O_TREE;
   else if (r > 1 - L.rocks * Bm.rocks) out.o = O_ROCK;
   else if (Bm.small.length && unit(hash3(L.sCv, x, y)) < Bm.cover * (0.35 + 1.3 * clamp01(0.5 + noise3(L.sCv, px / 14, py / 14, L.n * 0.06)))) out.o = O_COVER;
   if (out.o) { out.ov = hash3(L.sO, y, x) & 0xffff; out.os = hash3(L.sM, x, y); }
@@ -153,12 +153,19 @@ function column(L, Lt, x, y, c, B, o) {
     }
     // Матеріали зверху вниз: шар, що починається біля поверхні (чи на острові), — верхній блок поверхні, 2 блоки
     // підґрунтя, далі камінь; стеля й дно печер — камінь
-    let depth = 0, surf = false;
+    let depth = 0, surf = false, sky = -1;
     for (let k = H - 1; k >= 0; k--) {
       if (B[o + k] === B_AIR) { depth = 0; continue; }
       if (depth === 0) surf = k >= c.h - 7;
+      if (sky < 0 && k < ISL0) sky = k;
       B[o + k] = surf ? (depth === 0 ? top : depth < 3 ? sub : B_STONE) : B_STONE;
       depth++;
+    }
+    // Нависання біля берега прогризає суходіл нижче рівня моря: відкрита небу западина — під рідиною, як водойма
+    // (дно — глина; холодна вода — лід зверху). Інакше рідина обривалася б стінкою над сухою ямою
+    if (sky < SEA - 1 && L.liquid.kind !== L_DRY) {
+      if (sky >= 0) B[o + sky] = B_BED;
+      for (let k = sky + 1; k < SEA; k++) B[o + k] = c.cold && L.liquid.kind === L_WATER && k === SEA - 1 ? B_ICE : B_LIQ;
     }
   }
 }

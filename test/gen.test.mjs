@@ -136,7 +136,7 @@ test('гравітація: межі, ≈ 1 g біля старту, легкі 
   }
   assert.ok(lo !== null && hi !== null, 'немає легких чи важких всесвітів');
   const pl = physOf(lawsOf(seed, 0, lo)), ph = physOf(lawsOf(seed, 0, hi));
-  assert.ok(pl.up >= ph.up && pl.down >= ph.down && pl.speed > ph.speed);
+  assert.ok(pl.up >= ph.up && pl.speed > ph.speed);
   // ширяюче каміння в легкому всесвіті: є, і не заважає ходити
   let floats = 0;
   for (let cx = 0; cx < 12 && !floats; cx++) {
@@ -146,7 +146,7 @@ test('гравітація: межі, ≈ 1 g біля старту, легкі 
   assert.ok(floats > 0, 'у легкому всесвіті немає ширяючого каміння');
 });
 
-test('рідини: біля старту — вода, де можна плавати; трапляються інші; сухий всесвіт — русла без рідини; гаряча — не плавати', async () => {
+test('рідини: біля старту — безпечна вода; трапляються інші; сухий всесвіт — русла без рідини; гаряча — небезпечна; дно — не порожнеча', async () => {
   const { L_WATER, L_DRY, HOT } = await import('../js/universe.js');
   const { T_BED, T_ICE } = await import('../js/gen/chunk.js');
   const seed = hashStr('рідини'), kinds = new Set();
@@ -154,10 +154,11 @@ test('рідини: біля старту — вода, де можна плав
   for (let n = -600; n <= 600; n++) {
     const q = lawsOf(seed, 0, n).liquid;
     kinds.add(q.kind);
-    if (Math.abs(n) <= 8) assert.ok(q.kind === L_WATER && q.swim, `біля старту ${n}`);
+    if (Math.abs(n) <= 8) assert.ok(q.kind === L_WATER && q.swim && !q.danger, `біля старту ${n}`);
     if (q.kind === L_DRY && dry === null) dry = n;
     if (q.kind === L_WATER && q.tC > HOT && hot === null) hot = n;
-    if (q.swim) assert.equal(q.why, ''); else if (q.kind !== L_DRY) assert.ok(q.why.length > 0);
+    if (q.kind !== L_WATER && q.kind !== L_DRY) assert.ok(q.danger.length > 0);
+    assert.equal(q.swim, q.kind !== L_DRY && q.density >= 0.8);
   }
   assert.ok(kinds.size >= 4, `видів рідин лише ${kinds.size}`);
   if (dry !== null) {
@@ -165,11 +166,11 @@ test('рідини: біля старту — вода, де можна плав
     let beds = 0;
     for (let cx = 0; cx < 6; cx++) for (const t of genChunk(L, cx, 0).t) { assert.notEqual(t, T_WATER); assert.notEqual(t, T_ICE); beds += t === T_BED; }
   }
-  if (hot !== null) assert.equal(lawsOf(seed, 0, hot).liquid.swim, false);
+  if (hot !== null) assert.ok(lawsOf(seed, 0, hot).liquid.danger.length > 0);
   // дно водойми — нижче поверхні, біля берега мілко
   const L = lawsOf(seed, 0, 0), c = {};
   let found = 0;
-  for (let x = 0; x < 400 && found < 50; x++) { tile(L, x, 7, c); if (c.t === T_WATER) { found++; assert.ok(c.h >= 0 && c.h < 6); } }
+  for (let x = 0; x < 400 && found < 50; x++) { tile(L, x, 7, c); if (c.t === T_WATER) { found++; assert.ok(c.h >= 1 && c.h < 6); } }
 });
 
 test('вокселі: стовпець окремо = стовпець у чанку; рамки сусідніх чанків збігаються; печери й острови трапляються', async () => {

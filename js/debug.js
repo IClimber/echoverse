@@ -23,7 +23,7 @@ export function debugText(g, perf, meshCount, cam) {
     `зерно      «${rec.seedText}» (${rec.seed})  генератор v${rec.gen}`,
     `адреса     глибина ${g.d}, всесвіт ${fmtN(g.n)}`,
     `позиція    ${me.x.toFixed(2)}, ${me.y.toFixed(2)}  z ${me.z.toFixed(2)}${me.air ? '  у повітрі' : ''}`,
-    `гравітація ${L.grav.toFixed(2)} g: стрибок ${(jumpHeight(L.grav) / LEVEL).toFixed(1)} рівня, пішки вгору ${ph.up} / униз ${ph.down}, хода ×${ph.speed.toFixed(2)}`,
+    `гравітація ${L.grav.toFixed(2)} g: стрибок ${(jumpHeight(L.grav) / LEVEL).toFixed(1)} рівня, крок угору ${ph.up}, хода ×${ph.speed.toFixed(2)}`,
     `клітинка   ${c ? `поверхня ${c.h}, ${TYPE_NAMES[c.t]}; під ногами — ${under >= 0 ? BLOCK_NAMES[under] : '—'} (блок ${kf - 1})${me.ground ? '' : me.swim ? ', пливе' : ', у повітрі'}` : '—'}`,
     `чанк       ${cx}, ${cy}  відбиток ${C ? digest(C) : '—'}`,
     `закони     море ${L.seaE.toFixed(2)}, рельєф ${L.amp}, t ${L.temp.toFixed(2)}, вологість ${L.wet.toFixed(2)}`,

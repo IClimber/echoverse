@@ -511,6 +511,21 @@ export function template(g, variant, lod, style) {
   return T;
 }
 
+// Перешкода, яку дає шаблон (для зіткнень): r — радіус основи (стовбур з корінням, стебло, камінь) на висоті тіла
+// гравця, top — верх твердих частин (кора, стебла, кристали, камінь; листя й квіти — ні). Кеш у шаблоні
+const SOFT = new Set([M_LEAF, M_PETAL, M_BLADE]);
+export function footprint(T) {
+  if (T.foot) return T.foot;
+  let r = 0, top = 0;
+  for (let i = 0, j = 0; i < T.verts; i++, j += 3) {
+    if (SOFT.has(T.m[i])) continue;
+    const z = T.p[j + 2];
+    if (z > top) top = z;
+    if (z < 1) r = Math.max(r, Math.hypot(T.p[j], T.p[j + 1]));
+  }
+  return (T.foot = { r, top });
+}
+
 // Шаблон T у меш M (gen/mesh.js Mesh) у точці (x, y, z): поворот rot навколо вертикалі, нахил tl, масштаб s,
 // множники кольору cj [r, g, b]
 export function place(M, T, x, y, z, rot, s, tl, cj) {

@@ -3,7 +3,7 @@
 import { createRenderer } from './render.js';
 import { createWorld, findSpawn, ckey } from './world.js';
 import { createDevice, landing, landingChunks, CHARGE } from './device.js';
-import { step, standable, support, SPRINT } from './player.js';
+import { step, support, SPRINT } from './player.js';
 import { initInput, moveAxis, turnAxis, sprintHeld, vertAxis, takeActions, takeWheel, takeDrag, clearInput, lockPointer, unlockPointer, locked } from './input.js';
 import { listWorlds, putWorld, deleteWorld, serialize, deserialize, newId } from './save.js';
 import { hashStr } from './rng.js';
@@ -151,41 +151,44 @@ function boot() {
   // Усі чанки кола приземлення (d, n) навколо (x, y) згенеровано?
   const ready = (d, n, x, y) => landingChunks(x, y, CS).every(([cx, cy]) => g.world.has(ckey(d, n, cx, cy)));
 
-  // Поставити гравця у всесвіті (d, n) біля ніг (x, y, z): там, де стоїть, або на найближчому місці, де можна стояти
-  // (z невідомий — від поверхні клітинки). [x, y, z] — куди; null — ніде стати; undefined — чанки ще генеруються
+  // Поставити гравця у всесвіті (d, n) біля ніг (x, y, z): там, де стоїть, найближче місце, де можна стояти, або
+  // вільне місце в тому самому стовпці (z невідомий — від поверхні клітинки). [x, y, z]; undefined — чанки ще генеруються
   function placeIn(d, n, x, y, z) {
     if (!ready(d, n, x, y)) return undefined;
     const P = g.world.probe(d, n), ph = physOf(g.world.laws(d, n));
     if (z === undefined) { const c = g.world.column(d, n, Math.floor(x), Math.floor(y)); z = (c ? c.h : 8) * LEVEL; }
-    if (standable(P, x, y, z)) return [x, y, z];
     return landing(P, x, y, z, ph);
   }
   const gStr = (L) => L.grav.toFixed(2).replace('.', ',') + ' g';
+  const liqStr = (lq) => lq.name + (lq.danger ? ` (${lq.danger})` : '');
+  const addrStr = (d, n) => d === g.d ? `всесвіт ${fmtN(n)}` : `глибина ${d}, всесвіт ${fmtN(n)}`;
 
-  // Іде в рідину, куди не можна (кислота, лава, гаряча вода, метан…), — пояснити чому (не частіше ніж раз на 3 с)
-  let warnedAt = 0;
-  function warnLiquid(ix, iy, now) {
-    if ((!ix && !iy) || now - warnedAt < 3000) return;
-    const [r, d] = moveBasis(camera), me = g.me;
-    const vx = ix * r[0] + iy * d[0], vy = ix * r[1] + iy * d[1], l = Math.hypot(vx, vy);
-    if (me.why) { warnedAt = now; toast(`Сюди не можна: ${me.why}`); }
+  // Зайшов у небезпечну рідину — сказати, що це й чим небезпечна (заходити можна: здоров'я ще немає)
+  let wasWet = false;
+  function warnLiquid() {
+    const lq = g.world.laws(g.d, g.n).liquid, wet = !!g.me.wet;
+    if (wet && !wasWet && lq.danger) toast(`${lq.name[0].toUpperCase() + lq.name.slice(1)}: ${lq.danger} — небезпечно`);
+    wasWet = wet;
   }
 
+  // Стрибок пристроєм: вдається завжди (там, де ніде стати, — вільне місце: пливеш чи падаєш)
   function tryJump() {
-    const dir = g.dev.charge.dir, n = g.n + dir, at = placeIn(g.d, n, g.me.x, g.me.y, g.me.z);
+    const [d, n] = g.dev.charge.to, at = placeIn(d, n, g.me.x, g.me.y, g.me.z);
     if (at === undefined) return;                               // ще генерується — стрибок трохи зачекає
-    if (!at) { g.dev.charge = null; toast(`Всесвіт ${fmtN(n)}: тут ніде стати — стрибок не вдався`); return; }
-    const P = g.world.laws(g.d, g.n), was = P.grav, L = g.world.laws(g.d, n);
+    const P = g.world.laws(g.d, g.n), was = P.grav, L = g.world.laws(d, n), depth = d !== g.d;
     g.dev.done([g.d, g.n]);
-    g.n = n; g.me.x = at[0]; g.me.y = at[1]; g.me.z = at[2]; g.me.vz = 0; g.me.ground = true; g.me.stepOff = 0;
+    g.d = d; g.n = n; g.me.x = at[0]; g.me.y = at[1]; g.me.z = at[2]; g.me.vz = 0; g.me.ground = false; g.me.stepOff = 0; g.me.fly = false;
     const msg = [];
+    if (depth) msg.push(`глибина ${d}`);
     if (Math.abs(L.grav - was) >= 0.12) msg.push(`гравітація ${gStr(L)} — ${L.grav < was ? 'легше' : 'важче'}`);
     const lq = L.liquid;
-    if (lq.kind !== P.liquid.kind || lq.swim !== P.liquid.swim) msg.push(`у водоймах — ${lq.kind === 0 && !lq.swim ? lq.why : lq.name}`);
+    if (lq.kind !== P.liquid.kind || lq.danger !== P.liquid.danger) msg.push(`у водоймах — ${liqStr(lq)}`);
     if (msg.length) toast(msg.join(' · ').replace(/^./, (c) => c.toUpperCase()));
     $('flash').classList.add('on');
     requestAnimationFrame(() => requestAnimationFrame(() => $('flash').classList.remove('on')));
   }
+  // Випадкова адреса (для перевірок): номер — у межах ±100 000, з глибиною — 0…12
+  const rnd = (k) => { const a = new Uint32Array(1); crypto.getRandomValues(a); return a[0] % k; };
 
   let spaceAt = 0;                           // коли востаннє натиснули пробіл: двічі поспіль — політ
   function update(dt, now) {
@@ -213,7 +216,11 @@ function boot() {
         toast(camera.mode === ISO ? 'Камера: згори' : 'Камера: третя особа');
         $('mouseHint').hidden = !(camera.mode === THIRD && !locked());
       }
-      else if (a === 'jumpPrev' || a === 'jumpNext') { if (g.dev.start(a === 'jumpNext' ? 1 : -1) === 'cancel') toast('Стрибок скасовано'); }
+      else if (a === 'jumpPrev' || a === 'jumpNext') { if (g.dev.start([g.d, g.n + (a === 'jumpNext' ? 1 : -1)], a) === 'cancel') toast('Стрибок скасовано'); }
+      else if (a === 'jumpRandom' || a === 'jumpRandomDepth') {
+        const to = [a === 'jumpRandomDepth' ? (g.d + 1 + rnd(12)) % 13 : g.d, rnd(200001) - 100000];
+        if (g.dev.start(to, a) === 'cancel') toast('Стрибок скасовано');
+      }
     }
     if (!$('menu').hidden) return;                              // меню — пауза
     const w = takeWheel(), [mx, my] = takeDrag(), turn = turnAxis();
@@ -224,9 +231,8 @@ function boot() {
     if (!me.placed) {
       const at = placeIn(g.d, g.n, me.x, me.y, me.z);
       if (at !== undefined) {
-        if (at) { me.x = at[0]; me.y = at[1]; me.z = at[2]; }
-        else { toast('Тут ніде стати — спробуй стрибнути в сусідній всесвіт'); if (me.z === undefined) me.z = 20; }
-        me.ground = true; me.stepOff = 0; me.vis = me.z;
+        me.x = at[0]; me.y = at[1]; me.z = at[2];
+        me.ground = false; me.stepOff = 0; me.vis = me.z;
         g.cam = [me.x, me.y, me.z]; me.placed = true;
         $('loading').hidden = true;
         $('mouseHint').hidden = camera.mode !== THIRD || locked();
@@ -237,7 +243,7 @@ function boot() {
       step(me, ix, iy, jump, dt, g.world.probe(g.d, g.n), physOf(g.world.laws(g.d, g.n)), moveBasis(camera), { sprint, vert: vertAxis() });
       me.run = sprint && me.moving && !me.fly;
       if (camera.mode === THIRD) me.yaw = facing(camera);                 // спиною до камери; S — задкує
-      warnLiquid(ix, iy, now);
+      warnLiquid();
       if (g.dev.update(dt)) tryJump();
     }
     // Ціль камери: гравець (у третій особі — його голова); плавно, по висоті — повільніше (стрибок не трусить камеру)
@@ -264,9 +270,13 @@ function boot() {
     for (const v of vis) want(g.d, g.n, v.cx, v.cy, v.dist2);
     for (const [cx, cy] of landingChunks(g.me.x, g.me.y, CS)) want(g.d, g.n, cx, cy, -3e6);   // під ногами — завжди першими
     for (const dir of [-1, 1]) {
-      const hot = ch && ch.dir === dir;
+      const hot = ch && ch.to[0] === g.d && ch.to[1] === g.n + dir;
       for (const [cx, cy] of landingChunks(g.me.x, g.me.y, CS)) want(g.d, g.n + dir, cx, cy, hot ? -2e6 : 1e5);
       if (hot) for (const v of vis) want(g.d, g.n + dir, v.cx, v.cy, -1e6 + v.dist2);
+    }
+    if (ch && (ch.to[0] !== g.d || Math.abs(ch.to[1] - g.n) !== 1)) {          // далекий стрибок (R)
+      for (const [cx, cy] of landingChunks(g.me.x, g.me.y, CS)) want(ch.to[0], ch.to[1], cx, cy, -2e6);
+      for (const v of vis) want(ch.to[0], ch.to[1], v.cx, v.cy, -1e6 + v.dist2);
     }
     W.gen.keepOnly(keys);
     W.gen.tick();
@@ -283,10 +293,10 @@ function boot() {
       me: me.placed ? { x: me.x, y: me.y, z: me.vis ?? me.z, gz: under ? under.z : me.z, yaw: me.yaw, swim: me.swim, fly: me.fly, tint: [1 + a * 0.4, 1 + a, 1 + a * 1.3], anim } : null,
     });
     setText('addr', `Глибина ${g.d} · всесвіт ${fmtN(g.n)}`);
-    setText('coords', `x ${Math.floor(me.x)} · y ${Math.floor(me.y)} · гравітація ${gStr(L)}`);
+    setText('coords', `x ${Math.floor(me.x)} · y ${Math.floor(me.y)} · гравітація ${gStr(L)}${me.wet ? ` · у рідині: ${liqStr(L.liquid)}${L.liquid.danger ? ' — небезпечно' : ''}` : ''}`);
     $('charge').hidden = !ch;
     if (ch) {
-      setText('chargeTxt', ch.t < CHARGE ? `Стрибок → всесвіт ${fmtN(g.n + ch.dir)}` : 'Стабілізація…');
+      setText('chargeTxt', ch.t < CHARGE ? `Стрибок → ${addrStr(ch.to[0], ch.to[1])}` : 'Стабілізація…');
       $('chargeBar').style.width = (ch.t / CHARGE * 100).toFixed(1) + '%';
     }
     if (toastUntil && now > toastUntil) { $('toast').hidden = true; toastUntil = 0; }

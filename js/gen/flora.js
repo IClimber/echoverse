@@ -27,7 +27,7 @@ export const FORMS = {
 };
 const BIG = Object.keys(FORMS).filter((f) => FORMS[f].big), SMALL = Object.keys(FORMS).filter((f) => !FORMS[f].big);
 export const STONES = ['boulder', 'slabs', 'spire', 'cairn', 'geode', 'log'];
-export const GENES = 24;           // 0–8 — кольори, 9 — висота, 10 — поширеність, 15 — форма, решта — будова
+export const GENES = 25;           // 0–8 — кольори, 9 — висота, 10 — поширеність, 15 — форма, 24 — розмір, решта — будова
 
 // Колір поверхні kind ('lush' — трава, 'dry' — степ, 'desert' — пустеля) у біомі bm: палітра всесвіту з відтінком біому
 export function groundTint(L, kind, bm) {
@@ -77,7 +77,8 @@ function genome(L, bm, slot, big, reg, mut) {
   const pool = big ? Bm.big : Bm.small, odd = unit(hash3(id, 7, 99)) < 0.03 + 0.12 * L.weird;
   const form = odd ? (big ? BIG : SMALL)[hash2(id, 3) % (big ? BIG.length : SMALL.length)] : pickW(pool, p[15]);
   const F = FORMS[form], H = L.hue, t = Bm.tint, wide = 1 + L.weird;
-  const h = (F.h[0] + (F.h[1] - F.h[0]) * p[9]) * (F.big ? L.treeH : 0.6 + 0.4 * L.treeH);
+  // висота: діапазон форми × розмір виду (×0,55…1,85, великі — рідко) × розмір рослин усесвіту (малим — обмежено)
+  const h = (F.h[0] + (F.h[1] - F.h[0]) * p[9]) * (F.big ? L.treeH * (0.55 + 1.3 * p[24] * p[24]) : 0.6 + 0.4 * Math.min(2.5, L.treeH));
   // кольори: листя — від трави всесвіту й біому; кора; акцент (квіти, плоди, кінчики) — будь-який відтінок
   let leaf = hsl(H.g + t[0] * 0.7 + (p[0] - 0.5) * 0.16 * wide, H.sat * t[1] * (0.75 + 0.55 * p[1]), 0.24 + 0.2 * p[2]);
   let bark = hsl(0.05 + 0.08 * (p[3] - 0.5) * wide, 0.2 + 0.25 * p[4], 0.17 + 0.25 * p[5]);

@@ -11,22 +11,36 @@ const KEEP = 600;                  // скільки чанків даних т�
 
 export function createWorld(seed, onMesh) {
   const lawsMap = new Map(), chunks = new Map();
-  let genMs = 0, genN = 0;
+  let genMs = 0, genN = 0, objR = 0.5;      // objR — найбільша півширина перешкоди серед завантажених
   const gen = createGen(seed, (key, c, m, ms) => {
-    // основи предметів, що заважають ходити: блок, на якому стоять (−1 — немає)
-    c.objk = new Int16Array(CS * CS).fill(-1);
-    for (const o of c.obj) if (blocks(o.k)) c.objk[o.y * CS + o.x] = o.z;
+    // перешкоди-предмети за клітинкою (світові координати; меш порахував розмір — o.r, o.top)
+    c.obst = new Array(CS * CS).fill(null);
+    for (const o of c.obj) if (o.r > 0) {
+      const z0 = o.z * LEVEL;
+      c.obst[o.y * CS + o.x] = { cx: c.cx * CS + o.cx, cy: c.cy * CS + o.cy, z0, z1: z0 + o.top, r: o.r };
+      if (o.r > objR) objR = o.r;
+    }
     c.used = performance.now();
+    const was = chunks.get(key);
+    if (was) was.dead = true;
     chunks.set(key, c);
     genMs += ms; genN++;
     onMesh(key, c, m);
     if (chunks.size > KEEP) {
       const old = [...chunks].sort((a, b) => a[1].used - b[1].used).slice(0, chunks.size - KEEP * 0.9);
-      for (const [k] of old) chunks.delete(k);
+      for (const [k, o] of old) { o.dead = true; chunks.delete(k); }
     }
   });
 
-  const chunkOf = (d, n, x, y) => chunks.get(ckey(d, n, Math.floor(x / CS), Math.floor(y / CS)));
+  // Чанк клітинки; останній знайдений пам'ятаємо (фізика питає сусідні клітинки підряд — без складання рядків-ключів)
+  let lastC = null;
+  const chunkOf = (d, n, x, y) => {
+    const cx = Math.floor(x / CS), cy = Math.floor(y / CS);
+    if (lastC && lastC.cx === cx && lastC.cy === cy && lastC.d === d && lastC.n === n && !lastC.dead) return lastC;
+    const key = ckey(d, n, cx, cy), C = chunks.get(key);
+    if (C) lastC = C;
+    return C;
+  };
 
   const W = {
     seed, gen,
@@ -49,10 +63,10 @@ export function createWorld(seed, onMesh) {
       const C = chunkOf(d, n, x, y);
       return C ? C.b[bi(x - C.cx * CS, y - C.cy * CS, k)] : -1;
     },
-    // Блок, на якому стоїть предмет, що заважає ходити, у клітинці (x, y); −1 — немає
-    objk(d, n, x, y) {
+    // Перешкода-предмет, що росте в клітинці (x, y): {cx, cy, z0, z1, r} або null
+    obst(d, n, x, y) {
       const C = chunkOf(d, n, x, y);
-      return C ? C.objk[(y - C.cy * CS) * CS + x - C.cx * CS] : -1;
+      return C ? C.obst[(y - C.cy * CS) * CS + x - C.cx * CS] : null;
     },
     // Поверхня клітинки (для F3): {h, t, v, bm} або null
     column(d, n, x, y) {
@@ -63,7 +77,7 @@ export function createWorld(seed, onMesh) {
     },
     // «Щуп» для фізики гравця у всесвіті (d, n) — див. player.js
     probe(d, n) {
-      return { liquid: W.laws(d, n).liquid, block: (x, y, k) => W.block(d, n, x, y, k), obj: (x, y) => W.objk(d, n, x, y) };
+      return { liquid: W.laws(d, n).liquid, block: (x, y, k) => W.block(d, n, x, y, k), obj: (x, y) => W.obst(d, n, x, y), get objR() { return objR; } };
     },
     want(d, n, cx, cy, pri) { gen.want(ckey(d, n, cx, cy), d, n, cx, cy, pri); },
     stats: () => ({ chunks: chunks.size, genMs: genN ? genMs / genN : 0, pending: gen.pending }),
@@ -81,7 +95,8 @@ export function findSpawn(seed, d = 0, n = 0, maxR = 200) {
   const P = {
     liquid: L.liquid,
     block: (x, y, k) => k < 0 ? B_STONE : k >= H ? B_AIR : col(x, y).B[k],
-    obj: (x, y) => { const c = col(x, y); return blocks(c.c.o) ? surfaceK(c.B, 0, c.c.h + 7) + 1 : -1; },
+    obj: (x, y) => { const c = col(x, y); if (!blocks(c.c.o)) return null; const z0 = (surfaceK(c.B, 0, c.c.h + 7) + 1) * LEVEL; return { cx: x + 0.5, cy: y + 0.5, z0, z1: z0 + 2, r: 0.4 }; },
+    objR: 0.5,
   };
   for (let r = 0; r <= maxR; r++) {
     for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx += (dy === -r || dy === r || dx === r) ? 1 : 2 * r) {
@@ -91,7 +106,7 @@ export function findSpawn(seed, d = 0, n = 0, maxR = 200) {
       if (!standable(P, x, y, z)) continue;
       let exits = 0;
       for (const [ax, ay] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        for (let s = -ph.down; s <= ph.up; s++) if (standable(P, x + ax, y + ay, z + s * LEVEL)) { exits++; break; }
+        for (let s = -16; s <= ph.up; s++) if (standable(P, x + ax, y + ay, z + s * LEVEL)) { exits++; break; }
       }
       if (exits >= 2) return [x, y, z];
     }

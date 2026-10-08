@@ -6,14 +6,14 @@ const pressed = [];                 // дії, що сталися з минул
 let wheel = 0, dragX = 0, dragY = 0, dragging = false;
 
 const ACTIONS = {
-  Space: 'jump', KeyQ: 'jumpPrev', KeyE: 'jumpNext', KeyV: 'camera', Escape: 'menu', F3: 'debug', KeyH: 'help',
+  Space: 'jump', KeyQ: 'jumpPrev', KeyE: 'jumpNext', KeyR: 'jumpRandom', KeyV: 'camera', Escape: 'menu', F3: 'debug', KeyH: 'help',
 };
 
 export function initInput(target = window) {
   target.addEventListener('keydown', (e) => {
     if (e.target instanceof HTMLInputElement) return;
     held.add(e.code);
-    const a = ACTIONS[e.code];
+    const a = ACTIONS[e.code] && (e.shiftKey && e.code === 'KeyR' ? 'jumpRandomDepth' : ACTIONS[e.code]);
     if (a && !e.repeat) pressed.push(a);
     if (a || /^(Key[WASD]|Arrow)/.test(e.code)) e.preventDefault();
   });
@@ -47,7 +47,8 @@ export const vertAxis = () => (held.has('Space') ? 1 : 0) - (sprintHeld() ? 1 : 
 export const turnAxis = () => (held.has('KeyC') ? 1 : 0) - (held.has('KeyZ') ? 1 : 0);
 // Зсув миші з правою кнопкою з минулого кадру, px
 export function takeDrag() { const d = [dragX, dragY]; dragX = dragY = 0; return d; }
-// Дії з минулого кадру (кожну — один раз): jump — стрибок, jumpPrev / jumpNext — пристрій (номер −1 / +1), camera — вигляд
+// Дії з минулого кадру (кожну — один раз): jump — стрибок, jumpPrev / jumpNext — пристрій (номер −1 / +1),
+// jumpRandom — у випадковий всесвіт (для перевірок), jumpRandomDepth (Shift+R) — і на іншу глибину, camera — вигляд
 export function takeActions() { return pressed.splice(0); }
 export function takeWheel() { const w = wheel; wheel = 0; return w; }
 export function clearInput() { held.clear(); pressed.length = 0; wheel = 0; dragX = dragY = 0; dragging = false; }
