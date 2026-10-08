@@ -1,7 +1,7 @@
 // main.js — запуск: меню світів, ігровий цикл (рух, стрибки, камера, підвантаження чанків), HUD, автозбереження.
 // ?strip — замість гри стенд «смуга всесвітів» (js/strip.js), ?flora — галерея видів рослин (js/flora-stand.js).
 import { createRenderer } from './render.js';
-import { createWorld, findSpawn, ckey, skey } from './world.js';
+import { createWorld, findSpawn, ck, skey } from './world.js';
 import { createDevice, landing, landingChunks, CHARGE } from './device.js';
 import { step, support, windShelter, SPRINT, GRAVITY, FOOT } from './player.js';
 import { stepBody, windMoves, push, rayBody, PLAYER_MASS, HIT_IMPULSE } from './bodies.js';
@@ -145,6 +145,7 @@ function boot() {
       d: p.d, n: p.n, me: { x: p.x, y: p.y, z: p.z, vz: 0, air: false, ground: true, yaw: Math.PI * 0.75, moving: false, placed: false },
       cam: [p.x, p.y, p.z || 0], lastSave: performance.now(), vis: [], view: null, clock: rec.clock || 0,
     };
+    g.world.setCurrent(g.d, g.n);
     if (camera.mode === THIRD) setYaw(camera, g.me.yaw + Math.PI);
     putWorld(snapshot());
     hideMenu();
@@ -179,7 +180,7 @@ function boot() {
       const C = g.world.col(d, n, cx, cy);
       if (!C) return false;
       // ті самі секції, що замовляє stream (поверхня й біля ніг); між ними — невідомо, landing вважає це стіною
-      const has = (cz) => g.world.hasSec(skey(d, n, cx, cy, cz));
+      const has = (cz) => g.world.hasSec(d, n, cx, cy, cz);
       for (let cz = C.czLo; cz <= C.czHi; cz++) if (!has(cz)) return false;
       for (let cz = czMe - 1; cz <= czMe + 1; cz++) if (!has(cz)) return false;
       return true;
@@ -215,7 +216,7 @@ function boot() {
     if (at === undefined) return;                               // ще генерується — стрибок трохи зачекає
     const P = g.world.laws(g.d, g.n), was = P.grav, L = g.world.laws(d, n), depth = d !== g.d;
     g.dev.done([g.d, g.n]);
-    g.d = d; g.n = n; g.me.x = at[0]; g.me.y = at[1]; g.me.z = at[2]; g.me.vz = 0; g.me.vx = 0; g.me.vy = 0; g.me.ground = false; g.me.stepOff = 0; g.me.fly = false;
+    g.d = d; g.n = n; g.world.setCurrent(d, n); g.me.x = at[0]; g.me.y = at[1]; g.me.z = at[2]; g.me.vz = 0; g.me.vx = 0; g.me.vy = 0; g.me.ground = false; g.me.stepOff = 0; g.me.fly = false;
     const msg = [];
     if (depth) msg.push(`глибина ${d}`);
     if (Math.abs(L.grav - was) >= 0.12) msg.push(`гравітація ${gStr(L)} — ${L.grav < was ? 'легше' : 'важче'}`);
@@ -358,17 +359,15 @@ function boot() {
     const keys = new Set(), W = g.world, me = g.me, t = g.cam, m = g.view.m;
     const kMe = Math.floor((me.z ?? 0) / LEVEL), czMe = Math.floor(kMe / SEC);
     const col = (d, n, cx, cy, pri) => {
-      const C = W.col(d, n, cx, cy);
-      if (!C) keys.add(W.wantCol(d, n, cx, cy, pri));
-      else keys.add('c' + ckey(d, n, cx, cy));
+      const C = W.touchCol(d, n, cx, cy);
+      keys.add(C ? `c${d}:${n}:${cx}:${cy}` : W.wantCol(d, n, cx, cy, pri));
       return C;
     };
     const sec = (d, n, cx, cy, cz, pri) => {
       const key = skey(d, n, cx, cy, cz);
       keys.add(key);
-      const S = W.sec(key);                                    // меш могли звільнити з GPU — тоді наново
+      const S = W.touchSec(d, n, cx, cy, cz);                 // меш могли звільнити з GPU — тоді наново
       if (!S || (!S.empty && !renderer.has(key))) W.wantSec(d, n, cx, cy, cz, pri);
-      else S.used = performance.now();
       return key;
     };
     // секції стовпця, що видно: поверхня й острови в піраміді; поруч з гравцем — ±2 секції від його висоти;
@@ -392,7 +391,7 @@ function boot() {
     for (const [cx, cy] of nearCols) { const C = col(g.d, g.n, cx, cy, -3e6); if (C) visSecs(g.d, g.n, C, -3e6, true, null); }   // під ногами — першими
     for (const v of vis) { const C = col(g.d, g.n, v.cx, v.cy, v.dist2 - 1e5); if (C) visSecs(g.d, g.n, C, v.dist2, Math.abs(v.cx * CS + 8 - me.x) < 24 && Math.abs(v.cy * CS + 8 - me.y) < 24, out); }
     g.vis = out;
-    g.visCols = vis.map((v) => ckey(g.d, g.n, v.cx, v.cy));
+    g.visCols = vis.map((v) => ck(v.cx, v.cy));
     const other = (d, n, hot) => {
       for (const [cx, cy] of nearCols) { const C = col(d, n, cx, cy, hot ? -2e6 : 1e5); if (C) visSecs(d, n, C, hot ? -2e6 : 1e5, true, null); }
       if (hot) for (const v of vis) { const C = col(d, n, v.cx, v.cy, -1e6 + v.dist2); if (C) visSecs(d, n, C, -1e6 + v.dist2, false, null); }
@@ -452,7 +451,7 @@ function boot() {
     const anim = animate(me, dt, now, physOf(L).speed * (me.run ? SPRINT * 0.85 : 1));
     if (!g.view) return;
     const sk = renderer.draw({
-      camera, target: g.cam, view: g.view, laws: L, keys: g.vis, far: g.far, clock: g.clock, bodies: g.world.bodiesIn(g.visCols || []), weather: { W: loc.W, loc }, rain: me.placed && loc.type ? rainMap(now) : null,
+      camera, target: g.cam, view: g.view, laws: L, keys: g.vis, far: g.far, clock: g.clock, bodies: g.world.bodiesIn(g.d, g.n, g.visCols || []), weather: { W: loc.W, loc }, rain: me.placed && loc.type ? rainMap(now) : null,
       me: me.placed ? { x: me.x, y: me.y, z: me.vis ?? me.z, gz: under ? under.z : me.z, yaw: me.yaw, swim: me.swim, fly: me.fly, tint: [1 + a * 0.4, 1 + a, 1 + a * 1.3], anim } : null,
     });
     setText('addr', `Глибина ${g.d} · всесвіт ${fmtN(g.n)} · ${clockStr(sk.phase)}${L.sky.lock ? ' (вічно)' : ''}`);

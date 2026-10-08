@@ -10,22 +10,47 @@ import { floatPose } from './gen/mesh.js';
 import { footprint } from './gen/plants.js';
 import { makeBody } from './bodies.js';
 
-export const ckey = (d, n, cx, cy) => `${d}:${n}:${cx}:${cy}`;
+// Числові ключі: стовпець (|cx|, |cy| < 2^20 — точно, < 2^42) і секція (cz ∈ −512…511, < 2^52)
+export const ck = (cx, cy) => (cx + 0x100000) * 0x200000 + (cy + 0x100000);
+export const sk = (cx, cy, cz) => ck(cx, cy) * 1024 + (cz + 512);
+// Рядкові ключі робіт генератора й мешів рендера
 export const skey = (d, n, cx, cy, cz) => `${d}:${n}:${cx}:${cy}:${cz}`;
 const KEEP_COLS = 1500, KEEP_SECS = 5000, KEEP_FARS = 1200;   // скільки тримати в пам'яті (секція ~6 КБ)
 
 export function createWorld(seed, onMesh) {
-  const lawsMap = new Map(), cols = new Map(), secs = new Map(), fars = new Map();
-  let genMs = 0, genN = 0, objR = 0.5;
-  const colTimes = [];                       // мітки часу готових стовпців за останню секунду (F3: стовпців/с)      // objR — найбільша півширина перешкоди серед завантажених
-  const evict = (map, keep) => {
-    if (map.size <= keep) return;
-    const old = [...map].sort((a, b) => a[1].used - b[1].used).slice(0, map.size - keep * 0.9);
-    for (const [k, o] of old) { o.dead = true; map.delete(k); }
+  const lawsMap = new Map(), fars = new Map();
+  // Всесвіти: 'd:n' → {d, n, cols: Map(ck → стовпець), secs: Map(sk → секція), at — коли був поточним}. Порядок Map —
+  // давність (touch* переставляє в кінець), тож витіснення бере з початку
+  const unis = new Map();
+  let genMs = 0, genN = 0, objR = 0.5, nCols = 0, nSecs = 0, cur = null, lastU = null;   // objR — найбільша півширина перешкоди серед завантажених
+  const colTimes = [];                       // мітки часу готових стовпців за останню секунду (F3: стовпців/с)
+  const uni = (d, n, make) => {
+    if (lastU && lastU.d === d && lastU.n === n) return lastU;
+    let U = unis.get(`${d}:${n}`);
+    if (!U && make) { U = { d, n, cols: new Map(), secs: new Map(), at: 0 }; unis.set(`${d}:${n}`, U); }
+    if (U) lastU = U;
+    return U;
   };
+  // Витіснити найдавніше понад keep (до 0,9·keep): спершу всесвіти, що давно не були поточними, потім поточний
+  const trim = (kind, total, keep) => {
+    if (total <= keep) return total;
+    const order = [...unis.values()].filter((U) => U !== cur).sort((a, b) => a.at - b.at);
+    if (cur) order.push(cur);
+    for (const U of order) {
+      const map = U[kind];
+      for (const [k, o] of map) {
+        if (total <= keep * 0.9) break;
+        o.dead = true; map.delete(k); total--;
+      }
+      if (!U.cols.size && !U.secs.size && U !== cur) { unis.delete(`${U.d}:${U.n}`); if (lastU === U) lastU = null; }
+      if (total <= keep * 0.9) break;
+    }
+    return total;
+  };
+  const touch = (map, k) => { const o = map.get(k); if (o) { map.delete(k); map.set(k, o); } return o; };
 
   // Стовпець прийшов: перешкоди-предмети за клітинкою (світові координати; розмір — o.r, o.top), тіла (ширяюче каміння)
-  function addCol(key, c) {
+  function addCol(c) {
     c.obst = new Array(CS * CS).fill(null);
     for (const o of c.obj) if (o.r > 0) {
       const z0 = o.z * LEVEL;
@@ -33,7 +58,7 @@ export function createWorld(seed, onMesh) {
       if (o.r > objR) objR = o.r;
     }
     c.bodies = [];
-    const L = W.laws(c.d, c.n);
+    const L = W.laws(c.d, c.n), key = ck(c.cx, c.cy);
     for (const o of c.obj) if (o.k === O_FLOAT) {
       const pose = floatPose(L, c.sp[o.s], o, o.x + 0.5, o.y + 0.5, o.z * LEVEL), fp = footprint(pose.T), st = L.stones[(o.st || 1) - 1];
       const h = Math.max(0.08, fp.r * pose.s * 0.75), hz = Math.max(0.06, fp.top * pose.s * 0.5);
@@ -44,36 +69,38 @@ export function createWorld(seed, onMesh) {
     }
     // верх стовпця з предметами й поверхнею (у блоках): вище — повітря, навіть якщо секцію не завантажено
     c.kTop = (c.czHi + 1) * SEC;
-    c.used = performance.now();
-    const was = cols.get(key);
-    if (was) was.dead = true;
-    cols.set(key, c);
-    evict(cols, KEEP_COLS);
+    const U = uni(c.d, c.n, true), was = U.cols.get(key);
+    if (was) { was.dead = true; U.cols.delete(key); } else nCols++;
+    U.cols.set(key, c);
+    nCols = trim('cols', nCols, KEEP_COLS);
   }
   const gen = createGen(seed, (key, q, data, mesh, ms) => {
     genMs += ms; genN++;
-    if (q.type === 'col') { colTimes.push(performance.now()); addCol(ckey(q.d, q.n, q.cx, q.cy), data); return; }
-    if (q.type === 'far') { data.used = performance.now(); fars.set(key, data); onMesh(key, data, mesh); evict(fars, KEEP_FARS); return; }
-    data.used = performance.now();
-    const was = secs.get(key);
-    if (was) was.dead = true;
-    secs.set(key, data);
+    if (q.type === 'col') { colTimes.push(performance.now()); addCol(data); return; }
+    if (q.type === 'far') {
+      fars.delete(key); fars.set(key, data); onMesh(key, data, mesh);
+      if (fars.size > KEEP_FARS) for (const k of fars.keys()) { if (fars.size <= KEEP_FARS * 0.9) break; fars.delete(k); }
+      return;
+    }
+    const U = uni(q.d, q.n, true), k = sk(q.cx, q.cy, q.cz), was = U.secs.get(k);
+    if (was) { was.dead = true; U.secs.delete(k); } else nSecs++;
+    U.secs.set(k, data);
     if (mesh) onMesh(key, data, mesh);
-    evict(secs, KEEP_SECS);
+    nSecs = trim('secs', nSecs, KEEP_SECS);
   });
 
-  // Стовпець і секція точки; останні знайдені пам'ятаємо (фізика питає сусідні блоки підряд — без складання рядків)
+  // Стовпець і секція точки; останні знайдені пам'ятаємо (фізика питає сусідні блоки підряд)
   let lastC = null, lastS = null;
   const colOf = (d, n, x, y) => {
     const cx = Math.floor(x / CS), cy = Math.floor(y / CS);
     if (lastC && lastC.cx === cx && lastC.cy === cy && lastC.d === d && lastC.n === n && !lastC.dead) return lastC;
-    const C = cols.get(ckey(d, n, cx, cy));
+    const U = uni(d, n), C = U && U.cols.get(ck(cx, cy));
     if (C) lastC = C;
     return C;
   };
   const secOf = (d, n, cx, cy, cz) => {
     if (lastS && lastS.cz === cz && lastS.cx === cx && lastS.cy === cy && lastS.d === d && lastS.n === n && !lastS.s.dead) return lastS.s;
-    const S = secs.get(skey(d, n, cx, cy, cz));
+    const U = uni(d, n), S = U && U.secs.get(sk(cx, cy, cz));
     if (S) lastS = { d, n, cx, cy, cz, s: S };
     return S;
   };
@@ -86,10 +113,15 @@ export function createWorld(seed, onMesh) {
       if (!L) { if (lawsMap.size > 256) lawsMap.clear(); L = lawsOf(seed, d, n); lawsMap.set(k, L); }
       return L;
     },
-    col(d, n, cx, cy) { const C = cols.get(ckey(d, n, cx, cy)); if (C) C.used = performance.now(); return C; },
-    hasCol: (d, n, cx, cy) => cols.has(ckey(d, n, cx, cy)),
-    hasSec: (key) => secs.has(key),
-    sec: (key) => secs.get(key),
+    col(d, n, cx, cy) { const U = uni(d, n); return U && U.cols.get(ck(cx, cy)); },
+    sec(d, n, cx, cy, cz) { const U = uni(d, n); return U && U.secs.get(sk(cx, cy, cz)); },
+    hasCol(d, n, cx, cy) { const U = uni(d, n); return !!U && U.cols.has(ck(cx, cy)); },
+    hasSec(d, n, cx, cy, cz) { const U = uni(d, n); return !!U && U.secs.has(sk(cx, cy, cz)); },
+    // Давність для витіснення (кличе стрімінг для потрібного)
+    touchCol(d, n, cx, cy) { const U = uni(d, n); return U && touch(U.cols, ck(cx, cy)); },
+    touchSec(d, n, cx, cy, cz) { const U = uni(d, n); return U && touch(U.secs, sk(cx, cy, cz)); },
+    // Поточний всесвіт (витісняється останнім)
+    setCurrent(d, n) { cur = uni(d, n, true); cur.at = performance.now(); },
     // Вид блоку (цілі x, y, k); −1 — ще не згенеровано. Нижче світу — камінь, вище — повітря; вище за предмети й поверхню
     // стовпця (поза смугою островів) — повітря, навіть без секції
     block(d, n, x, y, k) {
@@ -121,16 +153,18 @@ export function createWorld(seed, onMesh) {
     // Тіла стовпців навколо (x, y) у радіусі r клітинок
     bodiesNear(d, n, x, y, r = 3) {
       const out = [];
+      const U = uni(d, n);
+      if (!U) return out;
       for (let cy = Math.floor((y - r) / CS); cy <= Math.floor((y + r) / CS); cy++) for (let cx = Math.floor((x - r) / CS); cx <= Math.floor((x + r) / CS); cx++) {
-        const C = cols.get(ckey(d, n, cx, cy));
+        const C = U.cols.get(ck(cx, cy));
         if (C) for (const b of C.bodies) if (Math.abs(b.x - x) < r + b.hx && Math.abs(b.y - y) < r + b.hy) out.push(b);
       }
       return out;
     },
-    // Тіла стовпців з ключами keys (видимі) — для малювання
-    bodiesIn(keys) {
-      const out = [];
-      for (const k of keys) { const C = cols.get(k); if (C && C.bodies) for (const b of C.bodies) out.push(b); }
+    // Тіла стовпців з ключами keys (ck видимих) — для малювання
+    bodiesIn(d, n, keys) {
+      const out = [], U = uni(d, n);
+      if (U) for (const k of keys) { const C = U.cols.get(k); if (C && C.bodies) for (const b of C.bodies) out.push(b); }
       return out;
     },
     // «Щуп» для фізики гравця у всесвіті (d, n) — див. player.js
@@ -140,15 +174,15 @@ export function createWorld(seed, onMesh) {
         bodies: (x, y) => W.bodiesNear(d, n, x, y, 2),
       };
     },
-    wantCol(d, n, cx, cy, pri) { gen.want('c' + ckey(d, n, cx, cy), { type: 'col', d, n, cx, cy }, pri); return 'c' + ckey(d, n, cx, cy); },
+    wantCol(d, n, cx, cy, pri) { const key = `c${d}:${n}:${cx}:${cy}`; gen.want(key, { type: 'col', d, n, cx, cy }, pri); return key; },
     // Плитка далечі (крок s): запит (готова — far(key): zmin, zmax; меш — у рендері), ключ
     wantFar(d, n, tx, ty, s, pri) { const key = `f${d}:${n}:${tx}:${ty}:${s}`; gen.want(key, { type: 'far', d, n, tx, ty, s }, pri); return key; },
-    far: (key) => { const F = fars.get(key); if (F) F.used = performance.now(); return F; },
+    far: (key) => touch(fars, key),
     wantSec(d, n, cx, cy, cz, pri) { const key = skey(d, n, cx, cy, cz); gen.want(key, { type: 'sec', d, n, cx, cy, cz }, pri); return key; },
     stats: () => {
       const now = performance.now();
       while (colTimes.length && now - colTimes[0] > 1000) colTimes.shift();
-      return { cols: cols.size, secs: secs.size, genMs: genN ? genMs / genN : 0, pending: gen.pending, colsPerSec: colTimes.length, workers: gen.stats().workers };
+      return { cols: nCols, secs: nSecs, genMs: genN ? genMs / genN : 0, pending: gen.pending, colsPerSec: colTimes.length, workers: gen.stats().workers };
     },
     stop() { gen.stop(); },
   };
