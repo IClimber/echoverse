@@ -7,7 +7,7 @@ import { step, support, SPRINT } from './player.js';
 import { initInput, moveAxis, turnAxis, sprintHeld, vertAxis, takeActions, takeWheel, takeDrag, clearInput, lockPointer, unlockPointer, locked } from './input.js';
 import { listWorlds, putWorld, deleteWorld, serialize, deserialize, newId } from './save.js';
 import { hashStr } from './rng.js';
-import { GEN, physOf } from './universe.js';
+import { GEN, physOf, physAt } from './universe.js';
 import { CS, solidB, B_LIQ, B_MAGMA } from './gen/chunk.js';
 import { LEVEL } from './iso.js';
 import { debugText, fmtN } from './debug.js';
@@ -252,7 +252,9 @@ function boot() {
     } else {
       const [ix, iy] = moveAxis();
       const sprint = sprintHeld();
-      step(me, ix, iy, jump, dt, g.world.probe(g.d, g.n), physOf(g.world.laws(g.d, g.n)), moveBasis(camera), { sprint, vert: vertAxis() });
+      const L = g.world.laws(g.d, g.n), W = weatherAt(L, g.clock), wk = Math.sqrt(Math.min(3, L.air.pressure));   // вітер як сила: густіше повітря — сильніше
+      g.ph = physAt(L, me.x, me.y);
+      step(me, ix, iy, jump, dt, g.world.probe(g.d, g.n), g.ph, moveBasis(camera), { sprint, vert: vertAxis(), wind: [W.wind[0] * wk, W.wind[1] * wk] });
       me.run = sprint && me.moving && !me.fly;
       if (camera.mode === THIRD) me.yaw = facing(camera);                 // спиною до камери; S — задкує
       warnLiquid();
@@ -318,7 +320,8 @@ function boot() {
       me: me.placed ? { x: me.x, y: me.y, z: me.vis ?? me.z, gz: under ? under.z : me.z, yaw: me.yaw, swim: me.swim, fly: me.fly, tint: [1 + a * 0.4, 1 + a, 1 + a * 1.3], anim } : null,
     });
     setText('addr', `Глибина ${g.d} · всесвіт ${fmtN(g.n)} · ${clockStr(sk.phase)}${L.sky.lock ? ' (вічно)' : ''}`);
-    setText('coords', `x ${Math.floor(me.x)} · y ${Math.floor(me.y)} · гравітація ${gStr(L)}${me.wet ? ` · у рідині: ${liqStr(L.liquid)}${L.liquid.danger ? ' — небезпечно' : ''}` : ''}`);
+    const an = g.ph && g.ph.anom ? ` · аномалія ×${g.ph.anom.toFixed(1).replace('.', ',')}` : '';
+    setText('coords', `x ${Math.floor(me.x)} · y ${Math.floor(me.y)} · гравітація ${gStr(L)}${an}${me.wet ? ` · у рідині: ${liqStr(L.liquid)}${L.liquid.danger ? ' — небезпечно' : ''}` : ''}`);
     const A = L.air;
     setText('env', `${loc.name}${W.windK > 0.3 ? ` · вітер ${(W.windK * 1.8).toFixed(0)} м/с` : ''}${A.breath ? '' : ` · повітря ${A.gasName}`}${A.rad > 0.3 ? ` · радіація ${A.rad > 0.65 ? 'висока' : 'помірна'}` : ''}`);
     $('charge').hidden = !ch;

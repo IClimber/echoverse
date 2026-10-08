@@ -6,7 +6,7 @@ import { hash2, hash3, unit } from './rng.js';
 import { noise2 } from './noise.js';
 import { BIOMES, BIOME_IN_ZONE, ZONES } from './gen/biomes.js';
 
-export const GEN = 7;        // версія генератора; зберігається у світі (змінений генератор — інші незмінені чанки)
+export const GEN = 8;        // версія генератора; зберігається у світі (змінений генератор — інші незмінені чанки)
                              // 2 — гравітація (07.10.2026): рельєф, рослини, ширяюче каміння
                              // 3 — рідини (07.10.2026): дно водойм, вид рідини, сухі русла
                              // 4 — вокселі (07.10.2026): блоки-півблоки, печери, нависання, ширяючі острови
@@ -14,6 +14,8 @@ export const GEN = 7;        // версія генератора; зберіг�
                              // 6 — правки (08.10.2026): западини нижче моря — під рідиною, дно ≥ 1, розмір рослин від
                              //     гравітації (велетні), ген розміру виду, рідші великі дерева
                              // 7 — форми рельєфу (08.10.2026): річки, каньйони, кратери, вулкани, шпилі, тераси, дюни
+                             // 8 — левітуючі породи (08.10.2026): ширяюче каміння й острови — з породи всесвіту (умова
+                             //     левітації, місцева аномалія гравітації), острови рідше
 export const WORLD_H = 96;   // висота світу в блоках (блок — 1×1×LEVEL)
 export const SEA = 6;        // рівень поверхні рідини в рівнях висоти; дно — нижче (0…SEA−1), суходіл — від SEA + 1
 
@@ -23,7 +25,7 @@ export const LIQUID_NAMES = ['вода', 'кислота', 'рідкий мет�
 export const SINK = 0.8;            // густина відносно води, нижче якої не тримає
 export const HOT = 45, COLD = 5;    // межі температури безпечної води (°C)
 export const MAX_AMP = 24;   // найбільша амплітуда рельєфу в рівнях (легка гравітація — вищі гори)
-export const FLOAT_G = 0.6;  // гравітація, нижче якої частина каміння ширяє в повітрі
+export const FLOAT_G = 0.6;  // гравітація, нижче якої крок угору — 2 рівні
 
 const clamp01 = (v) => v < 0 ? 0 : v > 1 ? 1 : v;
 const frac = (v) => v - Math.floor(v);
@@ -113,6 +115,9 @@ export function lawsOf(seed, d, n) {
     danger: kind === L_WATER ? (tC > HOT ? `гаряча, ${tC} °C` : tC < COLD ? `крижана, ${tC} °C` : '')
       : kind === L_ACID ? 'роз\'їдає' : kind === L_METHANE ? `${tC} °C, густина ${density} — не тримає, тонеш` : kind === L_LAVA ? `${tC} °C` : '',
     alpha: [0.72, 0.82, 0.55, 1, 0][kind],
+    // в'язкість (1 — як вода; більша — повільніше плаваєш і тонеш) і рідко — поверхневий натяг: на бігу тримає як підлога
+    visc: mild < 0.6 ? 1 : kind === L_LAVA ? 5 + 3 * U(220, 30) : kind === L_METHANE ? 0.6 + 0.4 * U(220, 30) : 1 + (kind === L_ACID ? 1.5 : 0) + 3 * U(220, 30) * U(220, 30) * U(220, 30),
+    tension: mild >= 0.6 && (kind === L_WATER || kind === L_METHANE) && U(221, 40) > 0.9 && U(222, 30) > 0.5,
   };
   pal.liquid = kind === L_WATER ? (tC > HOT ? hsl(hW - 0.05, 0.45, 0.6) : pal.water) : [pal.water, hsl(0.22 + 0.05 * L(52, 20), 0.85, 0.45), hsl(0.55, 0.25, 0.78), hsl(0.04 + 0.03 * L(53, 20), 0.95, 0.52), pal.water][kind];
   pal.liquidDeep = kind === L_WATER ? pal.deep : [pal.deep, hsl(0.25, 0.8, 0.28), hsl(0.58, 0.3, 0.6), hsl(0.01, 0.9, 0.35), pal.deep][kind];
@@ -133,7 +138,29 @@ export function lawsOf(seed, d, n) {
   // легка гравітація — частіше). Біля старту — помірно
   const caves = 0.15 + 0.7 * U(54, 40) * (0.5 + 0.5 * mild), caveW = 0.05 + 0.06 * U(55, 30);
   const overhang = U(56, 35) * (0.3 + 0.7 * mild);
-  const islands = Math.min(1, Math.max(0, (U(57, 45) - 0.55) * 2.2 * mild + (grav < 0.75 ? (0.75 - grav) * 1.6 : 0)));
+  // магнітне поле (сила 0…1, нахил магнітного полюса від географічного, відтінок сяйв): від нього — полярні сяйва,
+  // умова левітації деяких порід, пізніше — компас
+  const mag = { k: mild < 0.6 ? 0.2 + 0.25 * U(210, 40) : U(210, 40), tilt: 0.6 * L(211, 30), hue: 0.33 + 0.2 * L(212, 25) + (U(213, 30) > 0.8 ? 0.5 : 0) };
+  // Левітуючі породи: 0–3 на всесвіт (біля старту — жодної); умова — завжди / лише g < поріг / лише g > поріг / лише
+  // в сильному магнітному полі; підйомна сила lift (> 1 — висить над ґрунтом, < 1 — лише легша); частка каміння з цієї
+  // породи; рідко — з неї ширяючі острови. active — чи левітує тут (за всесвітньою g; місцева аномалія — у floats)
+  const nStone = mild < 0.6 ? 0 : cat(U(214, 50), 4);
+  const stones = [];
+  for (let i = 0; i < nStone; i++) {
+    const b = 230 + i * 6, cond = cat(U(b, 40), 4), thr = cond === 1 ? 0.45 + 0.5 * U(b + 1, 30) : cond === 2 ? 1.15 + 0.6 * U(b + 1, 30) : cond === 3 ? 0.35 + 0.5 * U(b + 1, 30) : 0;
+    const st = {
+      cond, thr, lift: 0.5 + 1.6 * U(b + 2, 30), share: 0.15 + 0.6 * U(b + 3, 30),
+      col: hsl(U(b + 4, 40) * (1 + weird), 0.2 + 0.5 * U(b + 5, 30), 0.45 + 0.25 * U(b + 2, 30)), islands: false,
+    };
+    st.active = floats(st, grav, mag.k);
+    st.islands = st.active && st.lift > 1 && U(b + 5, 50) > 0.8;
+    stones.push(st);
+  }
+  // ширяючі острови — лише з левітуючої породи, яка тут левітує (рішення 08.10.2026: «забагато островів»)
+  const islandStone = stones.findIndex((st) => st.islands);
+  const islands = islandStone < 0 ? 0 : 0.2 + 0.6 * U(57, 45);
+  // Аномалії гравітації: рідкі плями (розмір 60–200 клітинок) з іншою силою тяжіння (×0,3…2,5), зрідка — з нахилом
+  const anom = { freq: mild < 0.6 ? 0 : U(215, 40) * U(215, 40), S: 60 + 140 * U(216, 30), tilt: U(217, 40) > 0.8 ? 0.15 + 0.3 * U(218, 30) : 0 };
   // Світло (лише вигляд): зсув азимута в радіанах, колір, частка розсіяного
   const light = {
     az: 0.5 * L(30, 40),
@@ -236,11 +263,41 @@ export function lawsOf(seed, d, n) {
     seaE, amp, wc, wh, wd, contrast, temp, wet,
     flora, treeH, rocks, biomes, bioS, regS, pal,
     hue: { g: hG, s: hS, w: hW, r: hR, sat, gl: 0.42 + 0.08 * U(22, 20) }, light, sky, air, phys, relief, tex, liquid, caves, caveW, overhang, islands,
+    mag, stones, islandStone, anom,
     // зерна шумів (спільні для глибини: так рельєф сусідніх номерів зв'язаний)
     sA: hash2(ds, 1), sB: hash2(ds, 2), sC: hash2(ds, 3), sT: hash2(ds, 4), sW: hash2(ds, 5),
     sF: hash2(ds, 6), sM: hash2(ds, 7), sO: hash2(ds, 8), sK: hash2(ds, 9), sK2: hash2(ds, 10), sV: hash2(ds, 11), sI: hash2(ds, 12),
     sBv: hash2(ds, 13), sRg: hash2(ds, 14), sCv: hash2(ds, 15), sRv: hash2(ds, 16), sCy: hash2(ds, 17), sTr: hash2(ds, 18), sDn: hash2(ds, 19), sFt: hash2(ds, 20),
+    sAn: hash2(ds, 21), sAn2: hash2(ds, 22),
   };
+}
+
+// Чи левітує порода st за гравітації g (у g) і магнітного поля m (0…1)
+export function floats(st, g, m) {
+  return st.cond === 0 || (st.cond === 1 && g < st.thr) || (st.cond === 2 && g > st.thr) || (st.cond === 3 && m > st.thr);
+}
+
+// Місцева гравітація (аномалії): {k — множник сили, tx, ty — горизонтальна складова (частка g)}. Точна арифметика
+// (від неї залежить генерація: левітація каміння в плямі). Поза плямами — {k: 1, tx: 0, ty: 0}
+const NO_ANOM = { k: 1, tx: 0, ty: 0 };
+export function gravityAt(L, x, y) {
+  const A = L.anom;
+  if (!A || A.freq < 0.02) return NO_ANOM;
+  const a = noise2(L.sAn, x / A.S, y / A.S), thr = 0.62 - 0.32 * A.freq;
+  if (a <= thr) return NO_ANOM;
+  const s = Math.min(1, (a - thr) / 0.12), b = noise2(L.sAn2, x / (A.S * 2), y / (A.S * 2));
+  const target = b > 0 ? 1 + 1.5 * Math.min(1, b * 2.5) : 1 - 0.7 * Math.min(1, -b * 2.5);
+  const k = 1 + (target - 1) * s;
+  if (!A.tilt) return { k, tx: 0, ty: 0 };
+  const tx = noise2(L.sAn ^ 0x5151, x / A.S, y / A.S), ty = noise2(L.sAn ^ 0x7373, x / A.S, y / A.S);
+  return { k, tx: tx * A.tilt * s * 1.5, ty: ty * A.tilt * s * 1.5 };
+}
+
+// Рух у точці (x, y): physOf з місцевою гравітацією (аномалії) і нахилом тяжіння tilt [x, y] (частка g)
+export function physAt(L, x, y) {
+  const a = gravityAt(L, x, y);
+  if (a.k === 1 && !a.tx && !a.ty) return physOf(L);
+  return { ...physOf({ ...L, grav: L.grav * a.k }), tilt: [a.tx, a.ty], anom: a.k };
 }
 
 // Рух у всесвіті: на скільки рівнів можна піднятися кроком (up), множник швидкості ходи, як швидко ноги наздоганяють

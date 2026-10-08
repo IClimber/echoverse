@@ -162,13 +162,38 @@ test('гравітація: межі, ≈ 1 g біля старту, легкі 
   assert.ok(lo !== null && hi !== null, 'немає легких чи важких всесвітів');
   const pl = physOf(lawsOf(seed, 0, lo)), ph = physOf(lawsOf(seed, 0, hi));
   assert.ok(pl.up >= ph.up && pl.speed > ph.speed);
-  // ширяюче каміння в легкому всесвіті: є, і не заважає ходити
-  let floats = 0;
-  for (let cx = 0; cx < 12 && !floats; cx++) {
-    const C = genChunk(lawsOf(seed, 0, lo), cx, 0), m = solidMask(C);
-    for (const o of C.obj) if (o.k === O_FLOAT) { floats++; assert.equal(m[o.y * CS + o.x], 0); }
+});
+
+test('левітуючі породи: біля старту немає; трапляються з різними умовами; ширяюче каміння — лише з такої породи, де вона левітує; острови — з неї ж', async () => {
+  const { floats, gravityAt } = await import('../js/universe.js');
+  const { solidMask, O_FLOAT, B_FLOAT } = await import('../js/gen/chunk.js');
+  const seed = hashStr('гравітація'), conds = new Set();
+  let withFloat = null, islands = 0, anomU = null;
+  for (let n = -800; n <= 800; n++) {
+    const L = lawsOf(seed, 0, n);
+    if (Math.abs(n) <= 8) assert.equal(L.stones.length, 0);
+    for (const st of L.stones) { conds.add(st.cond); assert.equal(st.active, floats(st, L.grav, L.mag.k)); }
+    if (withFloat === null && L.stones.some((st) => st.active && st.lift > 1)) withFloat = n;
+    if (L.islandStone >= 0) { islands++; assert.ok(L.stones[L.islandStone].active && L.islands > 0); } else assert.equal(L.islands, 0);
+    if (anomU === null && L.anom.freq > 0.3) anomU = n;
   }
-  assert.ok(floats > 0, 'у легкому всесвіті немає ширяючого каміння');
+  assert.ok(conds.size === 4 && withFloat !== null && islands > 10 && islands < 300, `умов ${conds.size}, островів ${islands}`);
+  let floatsN = 0;
+  const L = lawsOf(seed, 0, withFloat);
+  for (let cx = 0; cx < 12; cx++) {
+    const C = genChunk(L, cx, 0), m = solidMask(C);
+    for (const o of C.obj) if (o.k === O_FLOAT) {
+      floatsN++; assert.equal(m[o.y * CS + o.x], 0);
+      const st = L.stones[o.st - 1];
+      assert.ok(st && st.lift > 1 && floats(st, L.grav * gravityAt(L, cx * CS + o.x + 0.5, o.y + 0.5).k, L.mag.k));
+    }
+  }
+  assert.ok(floatsN > 0, 'немає ширяючого каміння');
+  // аномалії гравітації: плями з іншою силою; поза ними — 1
+  const A = lawsOf(seed, 0, anomU), ks = new Set();
+  for (let y = 0; y < 3000; y += 7) for (let x = 0; x < 3000; x += 7) ks.add(Math.round(gravityAt(A, x, y).k * 10));
+  assert.ok(ks.has(10) && ks.size > 3, `аномалій немає: ${[...ks]}`);
+  assert.ok(B_FLOAT > 0);
 });
 
 test('рідини: біля старту — безпечна вода; трапляються інші; сухий всесвіт — русла без рідини; гаряча — небезпечна; дно — не порожнеча', async () => {

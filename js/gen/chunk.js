@@ -4,7 +4,7 @@
 // грубій ґратці 4×4×4 блоки з трилінійною інтерполяцією). Рельєф — шум від (x, y, n): сусідні номери схожі.
 import { hash2, hash3, unit } from '../rng.js';
 import { noise2, noise3, fbm3 } from '../noise.js';
-import { SEA, FLOAT_G, L_WATER, L_DRY, WORLD_H } from '../universe.js';
+import { SEA, L_WATER, L_DRY, WORLD_H, floats, gravityAt } from '../universe.js';
 import { LEVEL } from '../iso.js';
 import { BIOMES, pickBiome, Z_TEMP, Z_COLD, Z_HOT, Z_WET, Z_DRY, Z_DESERT, Z_SNOW, Z_PEAK, Z_BEACH } from './biomes.js';
 import { regionAt, speciesOf, pickSpecies } from './flora.js';
@@ -185,7 +185,23 @@ export function tile(L, x, y, out = {}) {
   else if (r > 1 - L.rocks * Bm.rocks) out.o = O_ROCK;
   else if (Bm.small.length && unit(hash3(L.sCv, x, y)) < Bm.cover * (0.35 + 1.3 * clamp01(0.5 + noise3(L.sCv, px / 14, py / 14, L.n * 0.06)))) out.o = O_COVER;
   if (out.o) { out.ov = hash3(L.sO, y, x) & 0xffff; out.os = hash3(L.sM, x, y); }
-  if (out.o === O_ROCK && L.grav < FLOAT_G && out.ov & 3) out.o = O_FLOAT;   // три чверті каміння ширяє
+  // Порода каменю: з левітуючих порід всесвіту (частка кожної), інакше звичайна. Левітує — якщо умова породи виконана
+  // за місцевої гравітації (аномалії) і підйомна сила більша за вагу. Левітуючі породи дають ще й окреме ширяюче каміння
+  out.st = 0;
+  if (L.stones.length && (out.o === O_ROCK || !out.o)) {
+    let sum = 0;
+    for (const st of L.stones) sum += st.share;
+    const k = sum > 1 ? 1 / sum : 1, u = unit(hash3(L.sO ^ 0x51f1, x, y));
+    let acc = 0, pick = -1;
+    for (let i = 0; i < L.stones.length; i++) { acc += L.stones[i].share * k; if (u < acc) { pick = i; break; } }
+    const extra = !out.o && unit(hash3(L.sO ^ 0x77e1, x, y)) < 0.006;
+    if (pick >= 0 && (out.o === O_ROCK || extra)) {
+      const st = L.stones[pick], g = L.grav * gravityAt(L, px, py).k;
+      if (st.lift > 1 && floats(st, g, L.mag.k)) { out.o = O_FLOAT; out.st = pick + 1; }
+      else if (out.o === O_ROCK) out.st = pick + 1;
+      if (extra && out.o) { out.ov = hash3(L.sO, y, x) & 0xffff; out.os = hash3(L.sM, x, y); }
+    }
+  }
   if (out.magma) out.o = 0;                     // у жерлі — нічого не росте
   return out;
 }
@@ -193,8 +209,8 @@ export function tile(L, x, y, out = {}) {
 // ================= Блоки =================
 export const H = WORLD_H;
 export const B_AIR = 0, B_LIQ = 1, B_ICE = 2, B_SAND = 3, B_GRASS = 4, B_DRY = 5, B_DESERT = 6, B_SNOW = 7, B_ROCK = 8,
-  B_BED = 9, B_MUD = 10, B_SOIL = 11, B_STONE = 12, B_SANDSTONE = 13, B_MAGMA = 14;
-export const BLOCK_NAMES = ['повітря', 'рідина', 'лід', 'пісок', 'трава', 'степ', 'пустеля', 'сніг', 'скеля', 'дно', 'глина', 'ґрунт', 'камінь', 'пісковик', 'розпечена лава'];
+  B_BED = 9, B_MUD = 10, B_SOIL = 11, B_STONE = 12, B_SANDSTONE = 13, B_MAGMA = 14, B_FLOAT = 15;
+export const BLOCK_NAMES = ['повітря', 'рідина', 'лід', 'пісок', 'трава', 'степ', 'пустеля', 'сніг', 'скеля', 'дно', 'глина', 'ґрунт', 'камінь', 'пісковик', 'розпечена лава', 'левітуюча порода'];
 export const solidB = (b) => b >= B_ICE;                 // тверде (лід теж); рідина й повітря — ні
 const TOP_BLOCK = [B_BED, B_ICE, B_SAND, B_GRASS, B_DRY, B_DESERT, B_SNOW, B_ROCK, B_MUD];   // за типом поверхні T_*
 const SUB_BLOCK = [B_SOIL, B_SOIL, B_SANDSTONE, B_SOIL, B_SOIL, B_SANDSTONE, B_SOIL, B_STONE, B_SOIL];
@@ -249,7 +265,7 @@ function column(L, Lt, x, y, c, B, o) {
       const thr = 0.66 - 0.3 * L.islands;
       for (let k = ISL0; k <= ISL1; k++) {
         const dz = (k - ISLC) / 15;
-        if (sample(Lt, 3, px, py, k) - dz * dz > thr) B[o + k] = B_STONE;
+        if (B[o + k] === B_AIR && sample(Lt, 3, px, py, k) - dz * dz > thr) B[o + k] = B_FLOAT;
       }
     }
     // Матеріали зверху вниз: шар, що починається біля поверхні (чи на острові), — верхній блок поверхні, 2 блоки
@@ -259,7 +275,8 @@ function column(L, Lt, x, y, c, B, o) {
       if (B[o + k] === B_AIR) { depth = 0; continue; }
       if (depth === 0) surf = k >= c.h - 7;
       if (sky < 0 && k < ISL0) sky = k;
-      B[o + k] = surf ? (depth === 0 ? top : depth < 3 ? sub : B_STONE) : B_STONE;
+      const deep = B[o + k] === B_FLOAT ? B_FLOAT : B_STONE;   // острів — з левітуючої породи
+      B[o + k] = surf ? (depth === 0 ? top : depth < 3 ? sub : deep) : deep;
       depth++;
     }
     // Нависання біля берега прогризає суходіл нижче рівня моря: відкрита небу западина — під рідиною, як водойма
@@ -302,7 +319,7 @@ export function genChunk(L, cx, cy) {
       const S = speciesOf(L, regionAt(L, x0 + x, y0 + y), c.bm);
       const g = c.o === O_TREE ? S.big.length && pickSpecies(S.big, c.os) : c.o === O_COVER ? pickSpecies(S.small, c.os) : S.stone;
       if (!g) continue;
-      obj.push({ x, y, k: c.o, v: c.ov, s: spIndex(g), z: k + 1 });
+      obj.push({ x, y, k: c.o, v: c.ov, s: spIndex(g), z: k + 1, st: c.st });
     }
   }
   return { d: L.d, n: L.n, cx, cy, h, t, v, bm, b, obj, sp };
@@ -324,6 +341,6 @@ export function digest(C) {
     add(C.h[i]); add(C.t[i]); add(C.v[i]);
     for (let k = 0; k < H; k++) add(C.b[o + k]);
   }
-  for (const o of C.obj) { add(o.x | o.y << 4); add(o.k); add(o.v); add(C.sp[o.s].id); add(o.z); }
+  for (const o of C.obj) { add(o.x | o.y << 4); add(o.k); add(o.v); add(C.sp[o.s].id); add(o.z); add(o.st || 0); }
   return (a >>> 0).toString(16).padStart(8, '0');
 }

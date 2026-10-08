@@ -374,3 +374,21 @@ test('інша фізика: ковзкий ґрунт — інерція; оп�
   const L0 = lawsOf(seed, 0, 0);
   assert.ok(physOf({ ...L0, air: { ...L0.air, pressure: 2.5 } }).vT < physOf({ ...L0, air: { ...L0.air, pressure: 0.3 } }).vT);
 });
+
+test('нові сили: вітер зносить у стрибку, в\'язка рідина повільніша, поверхневий натяг тримає на бігу, нахил тяжіння штовхає', () => {
+  const P = world(Array(40).fill('4'.repeat(40)));
+  const a = man(P, 20.5, 20.5), b = man(P, 20.5, 20.5);
+  for (let i = 0; i < 40; i++) { step(a, 0, 0, i === 0, 1 / 60, P, PH1); step(b, 0, 0, i === 0, 1 / 60, P, PH1, undefined, { wind: [6, 0] }); }
+  assert.ok(Math.abs(a.x - 20.5) < 1e-9 && b.x > 21, `вітер: ${b.x}`);
+  const rows = ['77777777', '7wwwwww7', '7wwwwww7', '77777777'];
+  const W1 = world(rows), W5 = world(rows, { swim: true, danger: '', density: 1, visc: 5 });
+  const s1 = { x: 2.5, y: 1.5, z: 2.25, vz: 0, ground: false }, s5 = { x: 2.5, y: 1.5, z: 2.25, vz: 0, ground: false };
+  for (let i = 0; i < 40; i++) { step(s1, 1, 0, false, 1 / 60, W1, PH1, [[1, 0], [0, 1]]); step(s5, 1, 0, false, 1 / 60, W5, PH1, [[1, 0], [0, 1]]); }
+  assert.ok(s5.x - 2.5 < (s1.x - 2.5) * 0.6, `в'язкість: ${s5.x} ${s1.x}`);
+  const T = world(rows, { swim: true, danger: '', density: 1, tension: true }), r = man(T, 0.5, 1.5);
+  for (let i = 0; i < 60; i++) step(r, 1, 0, false, 1 / 60, T, PH1, [[1, 0], [0, 1]], { sprint: true });
+  assert.ok(r.x > 4 && !r.wet && r.z > 2.8, `натяг: ${r.x} ${r.z} ${r.wet}`);
+  const q = man(P, 20.5, 20.5);
+  for (let i = 0; i < 30; i++) step(q, 0, 0, false, 1 / 60, P, { ...PH1, tilt: [0.3, 0] });
+  assert.ok(q.x > 21, `нахил: ${q.x}`);
+});

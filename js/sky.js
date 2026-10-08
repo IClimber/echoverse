@@ -77,10 +77,19 @@ export function skyState(L, clock) {
   const horizon = mix(mix(nH, dayH, day), S.dusk, dusk * 0.6), zenith = mix(mix(nZ, dayZ, day), S.dusk, dusk * 0.15);
   // зорі: обертання навколо полюса на годинний кут
   const cel = celMatrix(A, h0);
+  // полярне сяйво: у бік магнітного полюса (географічний північ, повернутий на нахил поля), лише вночі
+  const M = L.mag || { k: 0, tilt: 0, hue: 0.35 }, ct = Math.cos(M.tilt), stl = Math.sin(M.tilt);
+  const aurora = { dir: [A.nn[0] * ct - A.nn[1] * stl, A.nn[0] * stl + A.nn[1] * ct], k: Math.max(0, M.k - 0.25) * 1.6 * (1 - day), col: hsl3(M.hue), t: localTime(L, clock) };
   return {
     phase, day, dusk, suns, moons, main, light, lightK: [tint[0] * I, tint[1] * I, tint[2] * I], amb: L.light.amb,
-    zenith, horizon, fog: horizon, duskCol: S.dusk, stars: S.stars * (1 - day) * (1 - dusk * 0.5), starHue: S.starHue, rings: S.rings, pole: A.pole, cel,
+    aurora, zenith, horizon, fog: horizon, duskCol: S.dusk, stars: S.stars * (1 - day) * (1 - dusk * 0.5), starHue: S.starHue, rings: S.rings, pole: A.pole, cel,
   };
+}
+
+// Колір сяйва за відтінком (яскравий, насичений)
+function hsl3(h) {
+  const f = (n) => { const k = (n + h * 12) % 12; return 0.5 - 0.5 * Math.max(-1, Math.min(k - 3, 9 - k, 1)); };
+  return [f(0) * 255, f(8) * 255, f(4) * 255];
 }
 
 // Світ → небесна сфера (рядки матриці 3×3): вісь z — полюс, обертання навколо нього на −h
@@ -109,6 +118,7 @@ export function applyWeather(st, L, W, clock) {
   const cw = 0.0012 + 0.0004 * A.wind;
   st.cloud = vac ? null : { k: W.clouds, off: [clock * W.wind[0] * cw + 13.7, clock * W.wind[1] * cw + 5.1], dark: W.dim * 1.3, col: [255 * (0.18 + 0.82 * I), 255 * (0.18 + 0.82 * I), 255 * (0.2 + 0.8 * I)] };
   st.flash = W.flash;
+  if (st.aurora) st.aurora.k *= Math.min(1, A.pressure * 2) * (1 - W.clouds * 0.8);   // без повітря — без сяйв, хмари ховають
   st.visK = vac ? 1.15 : W.vis * (1 - 0.45 * A.haze);
   return st;
 }

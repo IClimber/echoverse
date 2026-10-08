@@ -2,8 +2,8 @@
 // позиції (float32 ×3), нормалі (int8 ×3), кольори (uint8 ×3), матеріали (uint8 — шар текстури), індекси.
 // Світло, туман і текстуру (за матеріалом, координати — проєкцією на площину грані) додає шейдер.
 // Земля — з блоків: грань лише між твердим і порожнім.
-import { CS, ci, bi, H, O_TREE, O_FLOAT, O_COVER, solidB, B_AIR, B_LIQ, B_ICE, B_SAND, B_GRASS, B_DRY, B_DESERT, B_SNOW, B_ROCK, B_BED, B_MUD, B_SOIL, B_STONE, B_SANDSTONE, B_MAGMA } from './chunk.js';
-import { L_LAVA, SEA } from '../universe.js';
+import { CS, ci, bi, H, O_TREE, O_FLOAT, O_COVER, solidB, B_AIR, B_LIQ, B_ICE, B_SAND, B_GRASS, B_DRY, B_DESERT, B_SNOW, B_ROCK, B_BED, B_MUD, B_SOIL, B_STONE, B_SANDSTONE, B_MAGMA, B_FLOAT } from './chunk.js';
+import { L_LAVA, SEA, gravityAt } from '../universe.js';
 import { LEVEL } from '../iso.js';
 import { template, place, footprint } from './plants.js';
 import { groundTint } from './flora.js';
@@ -76,10 +76,11 @@ export function chunkMesh(C, L) {
   COL[B_ICE] = P.ice; COL[B_SAND] = P.sand; COL[B_GRASS] = P.lush; COL[B_DRY] = P.dry; COL[B_DESERT] = P.desert; COL[B_SNOW] = P.snow;
   COL[B_ROCK] = P.rock; COL[B_BED] = P.bed; COL[B_MUD] = shade(P.bed, 1.15); COL[B_SOIL] = P.soil; COL[B_STONE] = shade(P.rock, 0.82);
   COL[B_SANDSTONE] = shade(P.sand, 0.82); COL[B_MAGMA] = [255, 120, 40];
+  COL[B_FLOAT] = L.islandStone >= 0 ? L.stones[L.islandStone].col : P.rock;
   TOPM[B_ICE] = M_ICE; TOPM[B_SAND] = M_SAND; TOPM[B_GRASS] = M_LUSH; TOPM[B_DRY] = M_DRY; TOPM[B_DESERT] = M_DESERT; TOPM[B_SNOW] = M_SNOW;
-  TOPM[B_ROCK] = M_ROCK; TOPM[B_BED] = M_BED; TOPM[B_MUD] = M_MUD; TOPM[B_SOIL] = M_SOIL; TOPM[B_STONE] = M_CLIFF; TOPM[B_SANDSTONE] = M_SANDSIDE; TOPM[B_MAGMA] = M_LAVA;
+  TOPM[B_ROCK] = M_ROCK; TOPM[B_BED] = M_BED; TOPM[B_MUD] = M_MUD; TOPM[B_SOIL] = M_SOIL; TOPM[B_STONE] = M_CLIFF; TOPM[B_SANDSTONE] = M_SANDSIDE; TOPM[B_MAGMA] = M_LAVA; TOPM[B_FLOAT] = M_ROCK;
   SIDEM[B_ICE] = M_ICE; SIDEM[B_SAND] = M_SANDSIDE; SIDEM[B_GRASS] = M_SOIL; SIDEM[B_DRY] = M_SOIL; SIDEM[B_DESERT] = M_SANDSIDE; SIDEM[B_SNOW] = M_SNOW;
-  SIDEM[B_ROCK] = M_CLIFF; SIDEM[B_BED] = M_SOIL; SIDEM[B_MUD] = M_SOIL; SIDEM[B_SOIL] = M_SOIL; SIDEM[B_STONE] = M_CLIFF; SIDEM[B_SANDSTONE] = M_SANDSIDE; SIDEM[B_MAGMA] = M_LAVA;
+  SIDEM[B_ROCK] = M_CLIFF; SIDEM[B_BED] = M_SOIL; SIDEM[B_MUD] = M_SOIL; SIDEM[B_SOIL] = M_SOIL; SIDEM[B_STONE] = M_CLIFF; SIDEM[B_SANDSTONE] = M_SANDSIDE; SIDEM[B_MAGMA] = M_LAVA; SIDEM[B_FLOAT] = M_CLIFF;
   const LIP = new Set([B_GRASS, B_DRY, B_SNOW]);
   const lavaish = L.liquid.kind === L_LAVA;
   // Відтінок біому: колір блоку b у біомі bm; у клітинці — середнє по сусідах 3×3 (округлене: однакові зливаються)
@@ -251,15 +252,14 @@ export function chunkMesh(C, L) {
     const rot = (v >> 8 & 255) / 256 * Math.PI * 2, age = (v >> 12 & 15) / 15, k = 0.92 + 0.16 * ((v >> 3 & 7) / 7);
     const cj = [k * (0.97 + 0.06 * (v >> 6 & 3) / 3), k, k * (0.97 + 0.06 * (v >> 1 & 3) / 3)];
     o.cx = cx; o.cy = cy; o.r = 0; o.top = 0;
+    // у плямі аномалії гравітації рослини вищі (слабша) чи нижчі (сильніша)
+    const ga = gravityAt(L, C.cx * CS + cx, C.cy * CS + cy).k, gs = ga === 1 ? 1 : Math.min(2.2, Math.max(0.5, Math.pow(ga, -0.6)));
     if (o.k === O_TREE) {
-      const s = 0.6 + 0.8 * age, tl = ((v >> 2 & 7) / 7) * 0.1, T = template(g, v % 3, 0), fp = footprint(T);
-      place(F, T, cx, cy, z, rot, s, tl, cj);
-      place(Ff, template(g, 0, 1), cx, cy, z, rot, s, tl, cj);
-      o.r = Math.min(3.5, Math.max(0.12, fp.r * s * 0.8)); o.top = Math.max(2, fp.top * s);
-    } else if (o.k === O_COVER) place(F, template(g, v & 1, 0), cx, cy, z, rot, 0.6 + 0.8 * age, 0, cj);
-    else if (o.k === O_FLOAT) { floater(F, cx, cy, z, g.leaf, v); floater(Ff, cx, cy, z, g.leaf, v); }
+      const s = (0.6 + 0.8 * age) * gs, tl = ((v >> 2 & 7) / 7) * 0.1, T = template(g, v % 3, 0), fp = footprint(T);
+    } else if (o.k === O_COVER) place(F, template(g, v & 1, 0), cx, cy, z, rot, (0.6 + 0.8 * age) * Math.sqrt(gs), 0, cj);
+    else if (o.k === O_FLOAT) { const fl = floatPose(L, g, o, cx, cy, z); place(F, fl.T, fl.x, fl.y, fl.z, rot, fl.s, fl.tilt, cj); place(Ff, fl.T, fl.x, fl.y, fl.z, rot, fl.s, fl.tilt, cj); }
     else {
-      const T = template(g, v & 3, 0, styleOf(g, v)), s = 0.8 + 0.4 * age, fp = footprint(T);
+      const T = template(o.st ? stoneGenome(L, g, o.st) : g, v & 3, 0, styleOf(g, v)), s = 0.8 + 0.4 * age, fp = footprint(T);
       place(F, T, cx, cy, z, rot, s, 0, cj); place(Ff, T, cx, cy, z, rot, s, 0, cj);
       if (fp.top * s > LEVEL / 2) { o.r = Math.min(0.5, fp.r * s * 0.8); o.top = fp.top * s; }
     }
@@ -276,12 +276,21 @@ function styleOf(g, v) {
   return g.styles[0][0];
 }
 
-// Ширяючий камінь (легка гравітація): брила з вістрям донизу, на висоті 1,2…2,6 над землею — вище за гравця
-function floater(M, cx, cy, z, rockCol, v) {
-  const f = (v >> 8 & 255) / 255, r = 0.18 + 0.2 * f, c = shade(rockCol, 0.9 + 0.2 * ((v >> 4 & 15) / 15));
-  const base = z + 1.2 + 1.4 * ((v >> 6 & 15) / 15), top = base + 0.12 + 0.2 * f;
-  M.box(cx - r, cy - r, base, cx + r, cy + r, top, c, M_ROCK);
-  M.spike(cx, cy, base, r, 0.25 + 0.35 * f, shade(c, 0.85), M_CLIFF);
+// Геном каменю з левітуючої породи st (1…): стилі області, колір породи
+const SG = new Map();
+function stoneGenome(L, g, st) {
+  const key = g.key + ':st' + st;
+  let r = SG.get(key);
+  if (!r) { if (SG.size > 500) SG.clear(); const S = L.stones[st - 1]; r = { ...g, key, id: g.id ^ (st * 0x9e3779b9), leaf: S.col, acc: shade(S.col, 1.3) }; SG.set(key, r); }
+  return r;
+}
+// Ширяючий камінь: шаблон каміння області в кольорі породи, розмір 0,3–3 блоки (масштаб шаблону), висота ширяння —
+// від підйомної сили породи (більша — вище), нахил. Повертає {T, x, y, z, s, tilt}
+export function floatPose(L, g, o, cx, cy, z) {
+  const v = o.v, S = L.stones[(o.st || 1) - 1] || { lift: 1.3 }, u = ((v * 2654435761) >>> 0) / 4294967296, w = ((v * 40503 + 7) & 0xffff) / 65535;
+  const T = template(stoneGenome(L, g, o.st || 1), v & 3, 0, styleOf(g, v));
+  const s = 0.7 + 4.5 * u * u, lift = Math.min(1.5, S.lift - 1);
+  return { T, x: cx, y: cy, z: z + 0.9 + lift * (2 + 5 * w) + s * 0.15, s, tilt: (w - 0.5) * 0.8 };
 }
 
 // ================= Фігура гравця =================

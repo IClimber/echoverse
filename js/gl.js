@@ -107,6 +107,8 @@ uniform vec3 uRingCol, uPole;
 uniform vec4 uCloud;         // хмарність 0…1, зсув x, y (вітер), темність
 uniform vec3 uCloudCol;
 uniform float uFlash;        // спалах блискавки
+uniform vec4 uAur;           // сяйво: напрям на магнітний полюс (x, y), сила, час
+uniform vec3 uAurCol;
 out vec4 o;
 float hash(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 45.164))) * 43758.5453); }
 float vnoise(vec2 p) {
@@ -162,6 +164,15 @@ void main() {
       float lit = smoothstep(-0.05, 0.15, dot(n, uMain));
       c = mix(c, uMoonCol[i] * (0.14 + 0.86 * lit), smoothstep(1.0, 0.9, l2) * above * (1.0 - 0.45 * uDay));
     }
+  }
+  if (uAur.z > 0.01 && up > 0.0) {                             // полярне сяйво: завіси над обрієм у бік полюса
+    vec2 h = normalize(d.xy + 1e-5);
+    float face = smoothstep(-0.2, 0.7, dot(h, uAur.xy)), ang = atan(h.y, h.x);
+    float band = smoothstep(0.05, 0.2, up) * (1.0 - smoothstep(0.35, 0.75, up));
+    float wave = fbm(vec2(ang * 3.0 + uAur.w * 0.02, up * 1.5 + uAur.w * 0.01));
+    float rays = 0.55 + 0.45 * sin(ang * 70.0 + fbm(vec2(ang * 9.0, uAur.w * 0.05)) * 12.0);
+    float a = face * band * smoothstep(0.42, 0.75, wave) * rays * uAur.z;
+    c += mix(uAurCol, uAurCol.bgr, smoothstep(0.2, 0.6, up)) * a * 0.9;
   }
   float cover = 0.0;
   if (uCloud.x > 0.01 && up > 0.0) {                           // хмари: шар над головою, вітер їх зсуває
@@ -255,7 +266,7 @@ export function createGL(canvas) {
   gl.linkProgram(sky);
   if (!gl.getProgramParameter(sky, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(sky));
   const SU = {};
-  for (const k of ['uInv', 'uZen', 'uHor', 'uMain', 'uDusk', 'uSun', 'uSunCol', 'uMoon', 'uMoonCol', 'uNSun', 'uNMoon', 'uDay', 'uStars', 'uCel', 'uRing', 'uRingCol', 'uPole', 'uCloud', 'uCloudCol', 'uFlash']) SU[k] = gl.getUniformLocation(sky, k);
+  for (const k of ['uInv', 'uZen', 'uHor', 'uMain', 'uDusk', 'uSun', 'uSunCol', 'uMoon', 'uMoonCol', 'uNSun', 'uNMoon', 'uDay', 'uStars', 'uCel', 'uRing', 'uRingCol', 'uPole', 'uCloud', 'uCloudCol', 'uFlash', 'uAur', 'uAurCol']) SU[k] = gl.getUniformLocation(sky, k);
   const skyVao = gl.createVertexArray();
   const part = gl.createProgram();
   gl.attachShader(part, compile(gl, gl.VERTEX_SHADER, PART_VS));
@@ -366,6 +377,8 @@ export function createGL(canvas) {
       gl.uniform3fv(SU.uRingCol, rg ? c(rg.col) : [0, 0, 0]); gl.uniform3fv(SU.uPole, st.pole);
       const cl = st.cloud || { k: 0, off: [0, 0], dark: 0, col: [255, 255, 255] };
       gl.uniform4f(SU.uCloud, cl.k, cl.off[0], cl.off[1], cl.dark); gl.uniform3fv(SU.uCloudCol, c(cl.col)); gl.uniform1f(SU.uFlash, st.flash || 0);
+      const au = st.aurora || { dir: [0, 1], k: 0, t: 0, col: [0, 0, 0] };
+      gl.uniform4f(SU.uAur, au.dir[0], au.dir[1], au.k, au.t % 10000); gl.uniform3fv(SU.uAurCol, c(au.col));
       gl.bindVertexArray(skyVao);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       gl.enable(gl.DEPTH_TEST); gl.depthMask(true);

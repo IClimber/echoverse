@@ -50,16 +50,18 @@ export function hits(P, x, y, z) {
   return objsNear(P, x, y, (o) => over(o, x, y) && z < o.z1 - EPS && z + BODY > o.z0);
 }
 
-// Опора під габаритом не нижче за z − drop: {z (верх опори)} або null. Рідина — не опора
-export function support(P, x, y, z, drop = 40) {
+// Опора під габаритом не нижче за z − drop: {z (верх опори)} або null. Рідина — не опора (liq — опора: поверхневий
+// натяг на бігу)
+export function support(P, x, y, z, drop = 40, liq = false) {
   const kTop = Math.floor(z / LEVEL + EPS) - 1, kBot = Math.max(-1, Math.floor((z - drop) / LEVEL));   // нижче світу — камінь
   let best = null;
   for (const [ox, oy] of [[-FOOT, -FOOT], [FOOT, -FOOT], [-FOOT, FOOT], [FOOT, FOOT]]) {
     const tx = Math.floor(x + ox), ty = Math.floor(y + oy);
-    for (let k = kTop; k >= kBot; k--) {
+    for (let k = liq ? kTop + 1 : kTop; k >= kBot; k--) {
       const b = P.block(tx, ty, k);
-      if (b === -1 || solidB(b)) {
-        const top = (k + 1) * LEVEL;
+      if (k > kTop && (b !== B_LIQ || (k + 1) * LEVEL - 0.15 > z + EPS)) continue;   // поверхня рідини — нижче краю блоку
+      if (b === -1 || solidB(b) || (liq && b === B_LIQ)) {
+        const top = (k + 1) * LEVEL - (b === B_LIQ ? 0.15 : 0);
         if (!best || top > best.z) best = { z: top };
         break;
       }
@@ -83,14 +85,15 @@ export function liquidAt(P, x, y, z) {
 }
 
 // Крок: ix, iy — напрям на екрані (праворуч, униз); jump — стрибок; mb — [праворуч, униз] на землі від камери;
-// ctl — {sprint (біг), vert (політ: 1 — угору, −1 — униз)}. p.fly — летить (як у Minecraft: без гравітації, торкнувся
+// ctl — {sprint (біг), vert (політ: 1 — угору, −1 — униз), wind [x, y] (вітер, клітинок/с)}. ph.tilt — нахил тяжіння
+// (аномалія), P.liquid.visc — в'язкість, P.liquid.tension — поверхневий натяг (на бігу рідина тримає). p.fly — летить (як у Minecraft: без гравітації, торкнувся
 // землі — політ скінчився). p.wet — тіло в рідині, p.swim — пливе (рідина тримає, дна немає), p.air — у повітрі,
 // p.vis — висота для малювання
 export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
   if (p.stepOff === undefined) p.stepOff = 0;
   if (p.fly) return fly(p, ix, iy, dt, P, ph, mb, ctl.vert || 0);
   p.leap = Math.max(0, (p.leap || 0) - dt);
-  const surf = liquidAt(P, p.x, p.y, p.z), buoy = P.liquid.swim;
+  const surf = liquidAt(P, p.x, p.y, p.z), buoy = P.liquid.swim, visc = P.liquid.visc || 1, vs = 1 / Math.sqrt(visc);
   const deep = surf !== null && !p.ground;
   // Горизонтальна швидкість наздоганяє бажану з прискоренням від тертя: звичайний ґрунт — одразу, ковзкий (закон
   // всесвіту, лід) — розганяєшся й гальмуєш повільно; у повітрі керування не гірше за половину звичайного
@@ -98,10 +101,17 @@ export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
   if (ix || iy) {
     let vx = ix * mb[0][0] + iy * mb[1][0], vy = ix * mb[0][1] + iy * mb[1][1];
     const run = ctl.sprint ? (surf === null ? SPRINT : 1 + (SPRINT - 1) / 2) : 1;
-    const l = Math.hypot(vx, vy), sp = SPEED * ph.speed * run * (surf === null ? 1 : deep || !buoy ? 0.5 : 0.7);
+    const l = Math.hypot(vx, vy), sp = SPEED * ph.speed * run * (surf === null ? 1 : (deep || !buoy ? 0.5 : 0.7) * vs);
     tvx = vx / l * sp; tvy = vy / l * sp;
     p.yaw = Math.atan2(vy, vx);
   }
+  // вітер зносить у повітрі (ширяння — майже з вітром), на землі — лише сильний; нахил тяжіння (аномалія) — як схил
+  const wind = ctl.wind;
+  if (wind && surf === null) {
+    const wk = p.ground ? Math.max(0, Math.hypot(wind[0], wind[1]) - 5) * 0.06 : p.glide ? 0.7 : 0.25;
+    tvx += wind[0] * wk; tvy += wind[1] * wk;
+  }
+  if (ph.tilt) { tvx += ph.tilt[0] * 9 * ph.g; tvy += ph.tilt[1] * 9 * ph.g; }
   const under = p.ground ? P.block(Math.floor(p.x), Math.floor(p.y), Math.floor(p.z / LEVEL + EPS) - 1) : 0;
   let fr = surf !== null ? 1 : under === B_ICE ? 0.15 : ph.friction ?? 1;
   if (!p.ground && surf === null) fr = Math.max(fr, 0.5);
@@ -141,8 +151,8 @@ export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
   // Вертикаль: у рідині, що тримає, — виштовхує до поверхні (м'яка пружина); у рідкій, що не тримає, — повільно
   // тонеш (опір); інакше — гравітація
   const s2 = liquidAt(P, p.x, p.y, p.z);
-  if (s2 !== null && buoy && !p.ground && !p.leap) p.vz += ((s2 - floatZ(P) - p.z) * 22 - p.vz * 7) * dt;
-  else if (s2 !== null && !buoy) p.vz += (-GRAVITY * ph.g * 0.35 - p.vz * 4) * dt;
+  if (s2 !== null && buoy && !p.ground && !p.leap) p.vz += ((s2 - floatZ(P) - p.z) * 22 / visc - p.vz * 7 * Math.sqrt(visc)) * dt;
+  else if (s2 !== null && !buoy) p.vz += (-GRAVITY * ph.g * 0.35 / visc - p.vz * 4 * visc) * dt;
   else {
     // опір повітря: падіння не швидше за vT; пробіл під час падіння — ширяння (у густому повітрі помітно):
     // межу досягнуто — далі не швидше; уже швидше за межу (почав ширяти) — плавно гальмуєш до неї
@@ -156,8 +166,9 @@ export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
     else if (s2 !== null && buoy && p.z > s2 - floatZ(P) - 0.25) { p.vz = JUMP_V * 0.8; p.leap = LEAP; }   // з поверхні — вистрибнути
   }
   let nz = p.z + p.vz * dt;
+  const onLiq = !!P.liquid.tension && !!ctl.sprint && p.moving && s2 === null;   // поверхневий натяг: на бігу рідина тримає
   if (p.vz <= 0) {
-    const g = support(P, p.x, p.y, p.z + EPS, p.z - nz + 0.05);
+    const g = support(P, p.x, p.y, p.z + EPS, p.z - nz + 0.05, onLiq);
     if (g && nz <= g.z + EPS) {
       nz = g.z;
       // пружний ґрунт: після падіння відскакуєш (слабкий удар — ні)
