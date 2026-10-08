@@ -7,7 +7,7 @@ import { CS, SEC } from './gen/chunk.js';
 import { WORLD_H, SEA, MAX_AMP } from './universe.js';
 import { figureParts, Mesh } from './gen/mesh.js';
 import { poseMatrices } from './anim.js';
-import { chain, translate, scale, invert, rotZ, rotX } from './mat.js';
+import { chain, translate, scale, invert } from './mat.js';
 import { skyState, applyWeather } from './sky.js';
 import { ISO, VIEW_R, FAR_R, SEAM, viewProj, chunksInView, isoRadius, project, basis, aabbInView, aabbInside } from './camera.js';
 import { regionOf, RS, RW, RH } from './gen/pack.js';
@@ -19,6 +19,11 @@ const ZR = [-200, 2100];                       // висоти для пірам
 const ZR_ISO = [0, (SEA + MAX_AMP) * LEVEL + 6]; // згори радіус — по рельєфу з деревами (інакше чанків набагато більше)
 const KEEP_FAR = 1500;                         // плиток далечі в GPU
 const ARENA0 = 32768, ARENA_MAX = 4194304;     // ємність арени регіону (вершин): початкова, найбільша
+const UP_BYTES = 4 << 20, UP_ITEMS = 64;       // завантажень у GPU за кадр: байтів, мешів
+const BODY_R = 200;                            // тіла ближче — малюються (main.js)
+export { BODY_R };
+// Бюджет пам'яті GPU за замовчуванням — від дальності (секцій у колі × 2,2 непорожніх × ~110 КБ)
+export const budgetFor = (viewR) => Math.min(1.5e9, Math.max(256e6, Math.ceil(Math.PI * (viewR / 16 + 1) ** 2) * 2.2 * 110e3));
 // Частинки за типом опадів: шейдерний тип, коробка (півширина, висота), падіння (од/с), довжина риски, розмір,
 // частка частинок, колір
 const PART = {
@@ -40,9 +45,15 @@ export function createRenderer(canvas) {
   // Регіон G = {rx, ry, rz, op, liq, fl (арени, ліниво), secs: Map(sk → slot), fls: Map(ck → fslot), bb, seg}
   const unis = new Map(), fars = new Map();     // плитки далечі: ключ → {mesh, used}
   let frame = 0, texFor = null, nSlots = 0;     // для якого всесвіту зараз текстури
+  let budget = budgetFor(VIEW_R), over = false;
+  // Черга завантажень у GPU (у порядку надходження — генератор віддає ближчі першими): [kind, d, n, k, q, data, mesh];
+  // pend — ключі в черзі (щоб стрімінг не замовляв їх удруге)
+  const upQ = [], pend = new Set();
+  let upHead = 0;
+  const pkey = (kind, d, n, k) => `${kind}${d}:${n}:${k}`;
   const P = {
     plain: R.program('PACKED'), cut: R.program('PACKED CUT'), ring: R.program('PACKED RING'), flora: R.program('PACKED FADE CUTF'),
-    lPlain: R.program(''), lRing: R.program('RING'), lFlora: R.program('FADE CUTF'),
+    lPlain: R.program(''), lRing: R.program('RING'), inst: R.program('INST FADE CUTF'),
   };
   const fig = Object.fromEntries(Object.entries(figureParts([226, 92, 70])).map(([k, m]) => [k, R.upload(m)]));
   const shadow = (() => { const M = new Mesh(); M.quad([-0.3, -0.3, 0.02], [0.3, -0.3, 0.02], [0.3, 0.3, 0.02], [-0.3, 0.3, 0.02], 0, 0, 1, [0, 0, 0]); return R.upload(M.finish()); })();
@@ -116,6 +127,81 @@ export function createRenderer(canvas) {
   };
   const dropUni = (U) => { for (const G of [...U.regions.values()]) dropRegion(U, G); unis.delete(`${U.d}:${U.n}`); };
 
+  // Секція в арени свого регіону (заміна — старі діапазони звільнити); без меша — порожня
+  function putSection(d, n, k, q, mesh) {
+    const U = uni(d, n, true);
+    removeSlot(U, k);
+    if (!mesh) return;
+    const [rx, ry, rz] = regionOf(q.cx, q.cy, q.cz), G = region(U, rx, ry, rz);
+    const sl = { cx: q.cx, cy: q.cy, cz: q.cz, off: -1, ns: mesh.ns, nf: mesh.nf, loff: -1, nl: mesh.nl, bb: mesh.bb, lbb: mesh.lbb };
+    if (mesh.ns + mesh.nf) sl.off = put(G, 'op', mesh.op, mesh.ns + mesh.nf);
+    if (mesh.nl) sl.loff = put(G, 'liq', mesh.liq, mesh.nl);
+    if (sl.off < 0) sl.ns = sl.nf = 0;
+    if (sl.loff < 0) sl.nl = 0;
+    grow(G.bb, mesh.bb); grow(G.bb, mesh.lbb);
+    G.secs.set(k, sl); U.slots.set(k, G); nSlots++;
+    U.added = frame; U.at = performance.now();
+  }
+  // Рослини зблизька стовпця; порожні — позначка null (є, малювати нічого)
+  function putFlora(d, n, k, q, data, mesh) {
+    const U = uni(d, n, true);
+    removeFlora(U, k);
+    if (!mesh.n) { U.flora.set(k, null); return; }
+    const [rx, ry] = regionOf(q.cx, q.cy, 0), G = region(U, rx, ry, data.rz);
+    const off = put(G, 'fl', mesh.fl, mesh.n);
+    G.fls.set(k, { cx: q.cx, cy: q.cy, off, n: off < 0 ? 0 : mesh.n, bb: mesh.bb });
+    grow(G.bb, mesh.bb);
+    U.flora.set(k, G);
+    U.added = frame; U.at = performance.now();
+  }
+
+  // ---- пам'ять: звільнення, бюджет, стиснення арен (раз на 60 кадрів) ----
+  const horiz = (G, t) => {
+    const ox = G.rx * RW - t[0], oy = G.ry * RW - t[1];
+    return Math.hypot(ox > 0 ? ox : ox + RW < 0 ? -(ox + RW) : 0, oy > 0 ? oy : oy + RW < 0 ? -(oy + RW) : 0);
+  };
+  const used = () => {
+    let b = 0;
+    for (const U of unis.values()) for (const G of U.regions.values()) for (const A of [G.op, G.liq, G.fl]) if (A) b += A.a.used * 16;
+    R.stats.arenaUsed = b;
+    return b + R.stats.gpuBytes;
+  };
+  // Арена зайнята менш ніж на чверть — у менший буфер, живі діапазони копією на GPU
+  const compact = (G) => {
+    for (const kind of ['op', 'liq', 'fl']) {
+      const A = G[kind];
+      if (!A || A.a.cap <= 65536 || A.a.used >= A.a.cap / 4) continue;
+      let cap2 = 65536;
+      while (cap2 < A.a.used * 1.5) cap2 *= 2;
+      const live = [];
+      if (kind === 'op') for (const sl of G.secs.values()) { if (sl.off >= 0) live.push([sl, 'off', sl.ns + sl.nf]); }
+      else if (kind === 'liq') for (const sl of G.secs.values()) { if (sl.loff >= 0) live.push([sl, 'loff', sl.nl]); }
+      else for (const f of G.fls.values()) if (f.off >= 0) live.push([f, 'off', f.n]);
+      G[kind] = R.repack(A, cap2, live);
+    }
+  };
+  function maintain(U, t, rad, laws) {
+    // поточний всесвіт: регіони далеко за видимим; рослини зблизька, що вже не зблизька
+    if (U) {
+      for (const G of [...U.regions.values()]) if (horiz(G, t) > rad + 256) dropRegion(U, G);
+      for (const [k2, G] of U.flora) if (G) { const f = G.fls.get(k2); if (Math.hypot(f.cx * CS + 8 - t[0], f.cy * CS + 8 - t[1]) > NEAR + 96) removeFlora(U, k2); }
+    }
+    // інші всесвіти, які давно не малювали й не наповнювали (сусіди ±1 — коло приземлення — лишаються)
+    for (const V of [...unis.values()]) if (V !== U && !(V.d === laws.d && Math.abs(V.n - laws.n) <= 1) && frame - Math.max(V.drawn, V.added) > 600) dropUni(V);
+    // бюджет: (1) цілі всесвіти, яких не чіпали 2 с, найдавніші першими; (2) регіони поточного, не мальовані ≥ 240 кадрів, найдальші першими
+    let b = used();
+    if (b > budget) {
+      const now = performance.now();
+      for (const V of [...unis.values()].filter((V) => V !== U && now - V.at > 2000).sort((a, c) => a.at - c.at)) { if (b <= budget) break; dropUni(V); b = used(); }
+      if (b > budget && U) for (const G of [...U.regions.values()].filter((G) => frame - (G.drawn || 0) >= 240).sort((a, c) => horiz(c, t) - horiz(a, t))) {
+        if (b <= budget) break;
+        dropRegion(U, G); b = used();
+      }
+    }
+    over = R.stats.over = b > budget;
+    for (const V of unis.values()) for (const G of V.regions.values()) compact(G);
+  }
+
   // ---- кадр: діапазони за списками, без виділень ----
   const LF = Array.from({ length: NL }, () => new Int32Array(4096)), LC = Array.from({ length: NL }, () => new Int32Array(4096)), LN = new Int32Array(NL);
   const pushR = (j, segStart, off, n) => {
@@ -124,7 +210,8 @@ export function createRenderer(canvas) {
     if (i >= LF[j].length) { const f = new Int32Array(i * 2), c = new Int32Array(i * 2); f.set(LF[j]); c.set(LC[j]); LF[j] = f; LC[j] = c; }
     LF[j][i] = off; LC[j][i] = n; LN[j] = i + 1;
   };
-  const visRegs = [];
+  const visRegs = [], groups = new Map();
+  let instData = new Float32Array(6 * 256);
   const cutHit = (m, cut, x0, y0, z0, x1, y1, z1) => {
     let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity, dz = Infinity;
     for (let k = 0; k < 8; k++) {
@@ -140,33 +227,25 @@ export function createRenderer(canvas) {
   return {
     R,
     resize: () => R.resize(),
-    // Секція (k — sk): меш {op (тверде + nf далеких рослин), ns, nf, bb, liq, nl, lbb} у кадрі регіону; без меша — порожня
-    addSection(d, n, k, q, mesh) {
-      const U = uni(d, n, true);
-      removeSlot(U, k);
-      if (!mesh) return;
-      const [rx, ry, rz] = regionOf(q.cx, q.cy, q.cz), G = region(U, rx, ry, rz);
-      const sl = { cx: q.cx, cy: q.cy, cz: q.cz, off: -1, ns: mesh.ns, nf: mesh.nf, loff: -1, nl: mesh.nl, bb: mesh.bb, lbb: mesh.lbb };
-      if (mesh.ns + mesh.nf) sl.off = put(G, 'op', mesh.op, mesh.ns + mesh.nf);
-      if (mesh.nl) sl.loff = put(G, 'liq', mesh.liq, mesh.nl);
-      if (sl.off < 0) sl.ns = sl.nf = 0;
-      if (sl.loff < 0) sl.nl = 0;
-      grow(G.bb, mesh.bb); grow(G.bb, mesh.lbb);
-      G.secs.set(k, sl); U.slots.set(k, G); nSlots++;
-      U.added = frame;
+    // Секція (k — sk): меш {op (тверде + nf далеких рослин), ns, nf, bb, liq, nl, lbb} у кадрі регіону; без меша — порожня.
+    // Рослини зблизька (k — ck): меш {fl, n, bb}, регіон — (rx, ry) стовпця й data.rz. Обидва — через чергу завантажень
+    addSection(d, n, k, q, mesh) { pend.add(pkey('s', d, n, k)); upQ.push(['s', d, n, k, q, null, mesh]); },
+    addFlora(d, n, k, q, data, mesh) { pend.add(pkey('f', d, n, k)); upQ.push(['f', d, n, k, q, data, mesh]); },
+    // Завантажити з черги до bytes байтів і UP_ITEMS мешів (щокадру)
+    pump(bytes = UP_BYTES) {
+      let b = 0, i = 0;
+      while (upHead < upQ.length && b < bytes && i < UP_ITEMS) {
+        const [kind, d, n, k, q, data, mesh] = upQ[upHead];
+        upQ[upHead++] = null;
+        pend.delete(pkey(kind, d, n, k));
+        if (kind === 's') { putSection(d, n, k, q, mesh); b += mesh ? (mesh.ns + mesh.nf + mesh.nl) * 16 : 0; }
+        else { putFlora(d, n, k, q, data, mesh); b += mesh.n * 16; }
+        i++;
+      }
+      if (upHead === upQ.length) { upQ.length = 0; upHead = 0; } else if (upHead > 4096) { upQ.splice(0, upHead); upHead = 0; }
     },
-    // Рослини зблизька стовпця (k — ck): меш {fl, n, bb} у кадрі регіону (rx, ry зі стовпця, rz — data.rz)
-    addFlora(d, n, k, q, data, mesh) {
-      const U = uni(d, n, true);
-      removeFlora(U, k);
-      if (!mesh.n) { U.flora.set(k, null); return; }
-      const [rx, ry] = regionOf(q.cx, q.cy, 0), G = region(U, rx, ry, data.rz);
-      const off = put(G, 'fl', mesh.fl, mesh.n);
-      G.fls.set(k, { cx: q.cx, cy: q.cy, off, n: off < 0 ? 0 : mesh.n, bb: mesh.bb });
-      grow(G.bb, mesh.bb);
-      U.flora.set(k, G);
-      U.added = frame;
-    },
+    setBudget(bytes) { budget = bytes; },
+    get overBudget() { return over; },
     addFar(key, data, mesh) {
       const e = fars.get(key);
       if (e) R.free(e.mesh);
@@ -176,10 +255,11 @@ export function createRenderer(canvas) {
         for (const [k2, e2] of old) { R.free(e2.mesh); fars.delete(k2); }
       }
     },
-    hasSection(d, n, k) { const U = uni(d, n); return !!U && U.slots.has(k); },
-    hasFlora(d, n, k) { const U = uni(d, n); return !!U && U.flora.has(k); },
+    hasSection(d, n, k) { const U = uni(d, n); return (!!U && U.slots.has(k)) || pend.has(pkey('s', d, n, k)); },
+    hasFlora(d, n, k) { const U = uni(d, n); return (!!U && U.flora.has(k)) || pend.has(pkey('f', d, n, k)); },
     hasFar: (key) => fars.has(key),
     clear() {
+      upQ.length = 0; upHead = 0; pend.clear();
       for (const U of [...unis.values()]) dropUni(U);
       for (const e of fars.values()) R.free(e.mesh);
       fars.clear();
@@ -236,7 +316,7 @@ export function createRenderer(canvas) {
       const farOn = !!(st.far && st.far.length), rad = view.rad, U = uni(laws.d, laws.n);
       LN.fill(0); visRegs.length = 0;
       if (U) {
-        U.drawn = frame;
+        U.drawn = frame; U.at = performance.now();
         for (const G of U.regions.values()) {
           const ox = G.rx * RW - t[0], oy = G.ry * RW - t[1], oz = G.rz * RH - t[2];
           const nx = ox > 0 ? ox : ox + RW < 0 ? -(ox + RW) : 0, ny = oy > 0 ? oy : oy + RW < 0 ? -(oy + RW) : 0;
@@ -245,7 +325,7 @@ export function createRenderer(canvas) {
           if (!(b[0] <= b[3]) || !aabbInView(m, ox + b[0], oy + b[1], oz + b[2], ox + b[3], oy + b[4], oz + b[5])) continue;
           const inside = aabbInside(m, ox + b[0], oy + b[1], oz + b[2], ox + b[3], oy + b[4], oz + b[5]);
           G.dist = Math.hypot(nx, ny); G.ox = ox; G.oy = oy; G.oz = oz;
-          visRegs.push(G);
+          visRegs.push(G); G.drawn = frame;
           for (let j = 0; j < NL; j++) G.seg[j * 2] = G.seg[j * 2 + 1] = 0;
           G.inside = inside;
         }
@@ -307,24 +387,34 @@ export function createRenderer(canvas) {
       // Рослини зблизька (розчинення біля ока, ширше «вікно»)
       pass(L_FL, P.flora, 'fl');
       // Тіла (ширяюче каміння): шаблон з поворотом, нахилом і масштабом; низ коробки — основа шаблону
+      // — екземплярами: групи за шаблоном, один буфер на кадр, виклик на групу
       if (st.bodies && st.bodies.length) {
-        R.use(P.lFlora);
-        for (const b of st.bodies) R.draw(tmplMesh(b.T), chain(translate(b.x - t[0], b.y - t[1], b.z - b.hz - t[2]), rotZ(b.yaw), rotX(b.tilt), scale(b.s, b.s, b.s)));
+        groups.clear();
+        let n = 0;
+        for (const b of st.bodies) {
+          const r = Math.max(b.hx, b.hy, b.hz) * 2, x = b.x - t[0], y = b.y - t[1], z = b.z - t[2];
+          if (!aabbInView(m, x - r, y - r, z - r, x + r, y + r, z + r)) continue;
+          let g = groups.get(b.T);
+          if (!g) groups.set(b.T, (g = []));
+          g.push(b); n++;
+        }
+        if (instData.length < n * 6) instData = new Float32Array(n * 12);
+        let i = 0;
+        for (const g of groups.values()) for (const b of g) {
+          instData[i++] = b.x - t[0]; instData[i++] = b.y - t[1]; instData[i++] = b.z - b.hz - t[2]; instData[i++] = b.yaw; instData[i++] = b.tilt; instData[i++] = b.s;
+        }
+        if (n) {
+          R.instances(instData, n);
+          R.use(P.inst);
+          let first = 0;
+          for (const [T, g] of groups) { R.drawInstanced(tmplMesh(T), first, g.length); first += g.length; }
+        }
       }
       // Поверхні рідин — після всього твердого, напівпрозоро (лава — непрозора); не вирізаємо (гравець у воді — під нею)
       R.beginAlpha();
       for (const [j, P0] of [[L_LIQ, P.plain], [L_LIQR, P.ring]]) { R.use(P0); R.alpha(laws.liquid.alpha); pass(j, P0, 'liq'); R.alpha(1); }
       R.endAlpha();
-      // Регіони: далекі від цілі в поточному всесвіті й давно не мальовані інші всесвіти — звільнити
-      if (frame % 60 === 0) {
-        if (U) for (const G of [...U.regions.values()]) {
-          const ox = G.rx * RW - t[0], oy = G.ry * RW - t[1];
-          const nx = ox > 0 ? ox : ox + RW < 0 ? -(ox + RW) : 0, ny = oy > 0 ? oy : oy + RW < 0 ? -(oy + RW) : 0;
-          if (Math.hypot(nx, ny) > rad + 256) dropRegion(U, G);
-        }
-        if (U) for (const [k2, G] of U.flora) if (G) { const f = G.fls.get(k2); if (Math.hypot(f.cx * CS + 8 - t[0], f.cy * CS + 8 - t[1]) > NEAR + 96) removeFlora(U, k2); }
-        for (const V of [...unis.values()]) if (V !== U && !(V.d === laws.d && Math.abs(V.n - laws.n) <= 1) && frame - Math.max(V.drawn, V.added) > 600) dropUni(V);   // сусіди ±1 — коло приземлення
-      }
+      if (frame % 60 === 0) maintain(U, t, rad, laws);
       // камера впритул (притиснута до стіни за спиною) — фігуру не малюємо, інакше око в голові
       if (me && (view.ortho || Math.hypot(...view.eye) > 0.7)) {
         R.use(P.lPlain);                            // власні грані гравця не вирізаємо

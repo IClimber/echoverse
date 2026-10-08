@@ -163,12 +163,6 @@ export function createWorld(seed, onMesh) {
       }
       return out;
     },
-    // Тіла стовпців з ключами keys (ck видимих) — для малювання
-    bodiesIn(d, n, keys) {
-      const out = [], U = uni(d, n);
-      if (U) for (const k of keys) { const C = U.cols.get(k); if (C && C.bodies) for (const b of C.bodies) out.push(b); }
-      return out;
-    },
     // «Щуп» для фізики гравця у всесвіті (d, n) — див. player.js
     probe(d, n) {
       return {

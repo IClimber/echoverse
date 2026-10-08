@@ -5,6 +5,7 @@
 import { createAlloc } from './arena.js';
 
 // Шейдер граней — один текст, варіанти через #define (кеш програм у createGL):
+// INST — екземпляри (тіла: шаблон з поворотом, нахилом, масштабом з атрибутів 4–5).
 // PACKED — щільна вершина регіону (pack.js: позиція u16 у 1/128 від кута регіону, uOrigin — кут відносно цілі),
 // інакше — float-позиції з матрицею моделі (фігура, тінь, плитки далечі, тіла). RING — малювати лише між uRing.x і
 // uRing.y від цілі по горизонталі (шов далечі); FADE — розчинення біля ока (рослини в третій особі); CUT / CUTF — «вікно»
@@ -28,6 +29,10 @@ layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec3 aNor;
 layout(location = 2) in vec3 aCol;
 layout(location = 3) in float aMat;  // матеріал — шар текстури
+#ifdef INST
+layout(location = 4) in vec4 iPos;   // (INST) екземпляр: основа відносно цілі, поворот навколо z
+layout(location = 5) in vec2 iTS;    // нахил (навколо x), масштаб
+#endif
 ${FRAME}
 uniform mat4 uModel;      // (не PACKED) локальні координати → світ відносно цілі (зсув, повороти, рівномірний масштаб)
 uniform vec3 uOrigin;     // (PACKED) кут регіону відносно цілі
@@ -49,8 +54,12 @@ void main() {
   vMat = aMat;
   if (aMat == 12.0 || aMat == 20.0 || aMat == 21.0)        // листя, пелюстки, трава гойдаються від вітру
     lp.xy += uWind.xy * (0.55 + 0.45 * sin(uWind.z * 1.9 + tp.x * 0.9 + tp.y * 1.3 + tp.z * 0.7));
-#ifdef PACKED
+#if defined(PACKED)
   vec3 p = lp + uOrigin, n = normalize(aNor);
+#elif defined(INST)
+  float c = cos(iPos.w), s = sin(iPos.w), ct = cos(iTS.x), st = sin(iTS.x);
+  mat3 Rm = mat3(c, s, 0.0, -s, c, 0.0, 0.0, 0.0, 1.0) * mat3(1.0, 0.0, 0.0, 0.0, ct, st, 0.0, -st, ct);   // rotZ · rotX (mat.js)
+  vec3 p = iPos.xyz + Rm * (lp * iTS.y), n = normalize(Rm * aNor);
 #else
   vec3 p = (uModel * vec4(lp, 1.0)).xyz, n = normalize(mat3(uModel) * aNor);
 #endif
@@ -357,6 +366,8 @@ export function createGL(canvas) {
   const tq = gl.getExtension('EXT_disjoint_timer_query_webgl2'), queries = [];
   let qOn = null;
   const multi = gl.getExtension('WEBGL_multi_draw');
+  const inst = gl.createBuffer();
+  let instCap = 0;
   // Щільна вершина (pack.js, 16 Б): позиція u16 ×3, нормаль i8 ×3 (нормовано), колір u8 ×3 (нормовано), матеріал u8
   const packedAttrs = (buf) => {
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
@@ -462,6 +473,19 @@ export function createGL(canvas) {
       A.drop = () => { gl.deleteBuffer(A.buf); gl.deleteVertexArray(A.vao); R.stats.arenaBytes -= A.a.cap * 16; };
       return A;
     },
+    // Стиснення: нова арена на cap2 вершин, живі діапазони (live — [власник, поле зсуву, вершин]) підряд копією на GPU;
+    // власникам — нові зсуви. Стара — геть
+    repack(A, cap2, live) {
+      const B = R.arena(cap2);
+      gl.bindBuffer(gl.COPY_READ_BUFFER, A.buf); gl.bindBuffer(gl.COPY_WRITE_BUFFER, B.buf);
+      for (const [o, f, n] of live) {
+        const off = B.a.alloc(n);
+        gl.copyBufferSubData(gl.COPY_READ_BUFFER, gl.COPY_WRITE_BUFFER, o[f] * 16, off * 16, n * 16);
+        o[f] = off;
+      }
+      A.drop();
+      return B;
+    },
     // Діапазони арени (first[i], count[i] вершин, i — від off, n штук) одним викликом (WEBGL_multi_draw) чи циклом
     drawRanges(A, first, count, off, n) {
       if (!n) return;
@@ -469,6 +493,22 @@ export function createGL(canvas) {
       if (multi) { multi.multiDrawArraysWEBGL(gl.TRIANGLES, first, off, count, off, n); R.stats.draws++; }
       else { for (let i = off; i < off + n; i++) gl.drawArrays(gl.TRIANGLES, first[i], count[i]); R.stats.draws += n; }
       for (let i = off; i < off + n; i++) R.stats.tris += count[i] / 3;
+    },
+    // Екземпляри: дані (Float32Array по 6 на екземпляр: x, y, z відносно цілі, поворот, нахил, масштаб) — один запис на кадр
+    instances(data, n) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, inst);
+      if (n * 24 > instCap) { instCap = Math.max(n * 24, instCap * 2); gl.bufferData(gl.ARRAY_BUFFER, instCap, gl.DYNAMIC_DRAW); }
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, data, 0, n * 6);
+      R.stats.upBytes += n * 24;
+    },
+    // Меш (з upload) k разів — екземпляри з first (номер у буфері instances)
+    drawInstanced(mesh, first, k) {
+      gl.bindVertexArray(mesh.vao);
+      gl.bindBuffer(gl.ARRAY_BUFFER, inst);
+      gl.enableVertexAttribArray(4); gl.vertexAttribPointer(4, 4, gl.FLOAT, false, 24, first * 24); gl.vertexAttribDivisor(4, 1);
+      gl.enableVertexAttribArray(5); gl.vertexAttribPointer(5, 2, gl.FLOAT, false, 24, first * 24 + 16); gl.vertexAttribDivisor(5, 1);
+      gl.drawElementsInstanced(gl.TRIANGLES, mesh.count, mesh.type, 0, k);
+      R.stats.draws++; R.stats.tris += mesh.count / 3 * k;
     },
     // Уніформи поточної програми
     origin(x, y, z, cx, cy, cz) { gl.uniform3f(cur.U.uOrigin, x, y, z); gl.uniform3f(cur.U.uCell, cx, cy, cz); },
