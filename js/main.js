@@ -219,7 +219,7 @@ function boot() {
 
   // Тіла біля гравця (ширяюче каміння): крок фізики; гравець, що стоїть на тілі, тисне його вагою й їде разом з ним;
   // тіло, у яке йде гравець, штовхається (легке — відкотиться, важке — ні)
-  function simBodies(dt, L, W, wk) {
+  function simBodies(dt, L, W) {
     const me = g.me, near = g.world.bodiesNear(g.d, g.n, me.x, me.y, 40), ob = me.ground ? me.onBody : null;
     const ox = ob && ob.x, oy = ob && ob.y;
     if (ob) { ob.vz -= PLAYER_MASS * GRAVITY * (g.ph ? g.ph.g : L.grav) * dt / ob.mass; ob.sleep = false; ob.calm = 0; }
@@ -232,7 +232,7 @@ function boot() {
       if (b.sleep) continue;
       const ph = physAt(L, b.x, b.y);
       const P = g.world.probe(g.d, g.n), lee = windShelter(P, b.x, b.y, b.z - b.hz, W.wind);
-      stepBody(b, dt, P, { g: ph.g, vT: ph.vT, bounce: L.phys.bounce, friction: L.phys.friction, wind: [W.wind[0] * wk * lee, W.wind[1] * wk * lee] });
+      stepBody(b, dt, P, { g: ph.g, vT: ph.vT, bounce: L.phys.bounce, friction: L.phys.friction, wind: [W.wind[0] * lee, W.wind[1] * lee] });
     }
     if (ob) { me.x += ob.x - ox; me.y += ob.y - oy; me.z = ob.z + ob.hz; }
   }
@@ -303,14 +303,14 @@ function boot() {
     } else {
       const [ix, iy] = moveAxis();
       const sprint = sprintHeld();
-      const L = g.world.laws(g.d, g.n), W = weatherAt(L, g.clock), wk = Math.sqrt(Math.min(3, L.air.pressure));   // вітер як сила: густіше повітря — сильніше
+      const L = g.world.laws(g.d, g.n), W = weatherAt(L, g.clock);   // вітер — сила опору (густина повітря — у vT)
       g.ph = physAt(L, me.x, me.y);
       const probe = g.world.probe(g.d, g.n);
       g.lee = windShelter(probe, me.x, me.y, me.z, W.wind);       // затишок: стіна, дерево чи камінь з навітряного боку, печера
-      step(me, ix, iy, jump, dt, probe, g.ph, moveBasis(camera), { sprint, vert: vertAxis(), wind: [W.wind[0] * wk * g.lee, W.wind[1] * wk * g.lee] });
+      step(me, ix, iy, jump, dt, probe, g.ph, moveBasis(camera), { sprint, vert: vertAxis(), wind: [W.wind[0] * g.lee, W.wind[1] * g.lee] });
       me.run = sprint && me.moving && !me.fly;
       if (camera.mode === THIRD) me.yaw = facing(camera);                 // спиною до камери; S — задкує
-      simBodies(dt, L, W, wk);
+      simBodies(dt, L, W);
       warnLiquid();
       if (g.dev.update(dt)) tryJump();
     }
@@ -451,7 +451,7 @@ function boot() {
     const an = g.ph && g.ph.anom ? ` · аномалія ×${g.ph.anom.toFixed(1).replace('.', ',')}` : '';
     setText('coords', `x ${Math.floor(me.x)} · y ${Math.floor(me.y)} · висота ${Math.floor(me.z / LEVEL) - SEA} · гравітація ${gStr(L)}${an}${me.wet ? ` · у рідині: ${liqStr(L.liquid)}${L.liquid.danger ? ' — небезпечно' : ''}` : ''}`);
     const A = L.air;
-    setText('env', `${loc.name}${W.windK > 0.3 ? ` · вітер ${(W.windK * 1.8).toFixed(0)} м/с${g.lee < 0.5 ? ' (затишок)' : ''}` : ''}${A.breath ? '' : ` · повітря ${A.gasName}`}${A.rad > 0.3 ? ` · радіація ${A.rad > 0.65 ? 'висока' : 'помірна'}` : ''}`);
+    setText('env', `${loc.name}${W.windK > 0.3 ? ` · вітер ${(W.windK * 1.8).toFixed(0)} м/с${g.lee < 0.5 ? ' (затишок)' : g.me.windPush ? ' (зносить)' : ''}` : ''}${A.breath ? '' : ` · повітря ${A.gasName}`}${A.rad > 0.3 ? ` · радіація ${A.rad > 0.65 ? 'висока' : 'помірна'}` : ''}`);
     $('charge').hidden = !ch;
     if (ch) {
       setText('chargeTxt', ch.t < CHARGE ? `Стрибок → ${addrStr(ch.to[0], ch.to[1])}` : 'Стабілізація…');

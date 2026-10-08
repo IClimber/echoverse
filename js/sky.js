@@ -115,8 +115,8 @@ export function applyWeather(st, L, W, clock) {
   const dimK = 1 - W.dim * 0.55, fl = W.flash * 1.6;
   st.lightK = [st.lightK[0] * dimK + fl, st.lightK[1] * dimK + fl, st.lightK[2] * dimK + fl * 1.1];
   st.fog = st.horizon;
-  const cw = 0.0012 + 0.0004 * A.wind;
-  st.cloud = vac ? null : { k: W.clouds, off: [clock * W.wind[0] * cw + 13.7, clock * W.wind[1] * cw + 5.1], dark: W.dim * 1.3, col: [255 * (0.18 + 0.82 * I), 255 * (0.18 + 0.82 * I), 255 * (0.2 + 0.8 * I)] };
+  const cw = 0.0012 + 0.0004 * Math.min(1, A.wind / 6);         // хмари пливуть за вітром (зсув текстури — проти)
+  st.cloud = vac ? null : { k: W.clouds, off: [13.7 - clock * W.wind[0] * cw, 5.1 - clock * W.wind[1] * cw], dark: W.dim * 1.3, col: [255 * (0.18 + 0.82 * I), 255 * (0.18 + 0.82 * I), 255 * (0.2 + 0.8 * I)] };
   st.flash = W.flash;
   if (st.aurora) st.aurora.k *= Math.min(1, A.pressure * 2) * (1 - W.clouds * 0.8);   // без повітря — без сяйв, хмари ховають
   st.visK = vac ? 1.15 : W.vis * (1 - 0.45 * A.haze);

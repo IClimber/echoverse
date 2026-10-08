@@ -34,7 +34,7 @@ export function weatherAt(L, clock) {
   const len = L.air.segMin * 60, f = clock / len, seg = Math.floor(f), u = f - seg;
   const a = kindOf(L, seg), b = kindOf(L, seg + 1), t = clamp01((u - 0.85) / 0.15), A = LOOK[a], B = LOOK[b];
   const m = (k) => A[k] + (B[k] - A[k]) * t;
-  const ws = L.air.wind * m('wind') * 4, az = L.air.windAz + 0.4 * Math.sin(clock * 0.05);
+  const ws = L.air.wind * m('wind'), az = L.air.windAz + 0.4 * Math.sin(clock * 0.05);
   // блискавка: у грозу — спалах раз на кілька секунд (за хешем секунди), гасне за 0,25 с
   let flash = 0;
   const storm = (a === W_STORM ? 1 - t : 0) + (b === W_STORM ? t : 0);

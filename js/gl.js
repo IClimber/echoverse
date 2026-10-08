@@ -224,7 +224,7 @@ void main() {
   if (hf(u + 3u) > uKind.y) return;
   float t = uMove.w, fall = uMove.z * (0.75 + 0.5 * hf(u + 4u));
   vec2 drift = uMove.xy * t * (uKind.x == 2.0 ? 1.0 : 0.6);
-  vec3 p = vec3(mod(hf(u) * 2.0 * B - uT.x - drift.x, 2.0 * B) - B, mod(hf(u + 1u) * 2.0 * B - uT.y - drift.y, 2.0 * B) - B, 0.0);
+  vec3 p = vec3(mod(hf(u) * 2.0 * B - uT.x + drift.x, 2.0 * B) - B, mod(hf(u + 1u) * 2.0 * B - uT.y + drift.y, 2.0 * B) - B, 0.0);   // летять за вітром
   p.z = mod(hf(u + 2u) * HZ - t * fall - uT.z, HZ) - HZ * (uKind.x == 2.0 ? 0.15 : 0.35);
   if (uKind.x == 1.0) p.xy += 0.3 * vec2(sin(t * 1.3 + hf(u) * 30.0), cos(t * 1.1 + hf(u + 1u) * 30.0));
   if (uKind.x == 2.0) p.z += 0.4 * sin(t * 2.0 + hf(u) * 20.0);

@@ -20,8 +20,6 @@ export const FLY_SPEED = 12;         // політ: клітинок за сек
 export const FLY_V = 8;              // політ: швидкість угору / униз
 const FLY_TOP = 2040;                // політ: вище цієї висоти не піднятися (майже верх світу)
 const CLIMB_OUT = 2;                 // з рідини можна вилізти на берег до 2 блоків над її поверхнею
-const WIND_G = 0.7;                  // вітер зносить лише при гравітації нижче (повністю — нижче 0,4 g)
-const WIND_MIN = 11;                 // і лише сильніший за 11 клітинок/с (~20 м/с), зносить надлишок
 const LEAP = 0.3;                    // стрибок з рідини: стільки секунд рідина не тягне назад
 export const PH1 = { up: 1, speed: 1, settle: 14, g: 1, vT: 1e9, friction: 1, bounce: 0 };
 const R2 = Math.SQRT1_2;
@@ -102,7 +100,7 @@ export function liquidAt(P, x, y, z) {
 }
 
 // Крок: ix, iy — напрям на екрані (праворуч, униз); jump — стрибок; mb — [праворуч, униз] на землі від камери;
-// ctl — {sprint (біг), vert (політ: 1 — угору, −1 — униз), wind [x, y] (вітер, клітинок/с)}. ph.tilt — нахил тяжіння
+// ctl — {sprint (біг), vert (політ: 1 — угору, −1 — униз), wind [x, y] (вітер, клітинок/с)}. p.windPush — вітер зносить на землі. ph.tilt — нахил тяжіння
 // (аномалія), P.liquid.visc — в'язкість, P.liquid.tension — поверхневий натяг (на бігу рідина тримає). p.fly — летить (як у Minecraft: без гравітації, торкнувся
 // землі — політ скінчився). p.wet — тіло в рідині, p.swim — пливе (рідина тримає, дна немає), p.air — у повітрі,
 // p.vis — висота для малювання, p.jumped — у повітрі після стрибка (інакше — падає)
@@ -113,33 +111,44 @@ export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
   p.leap = Math.max(0, (p.leap || 0) - dt);
   const surf = liquidAt(P, p.x, p.y, p.z), buoy = P.liquid.swim, visc = P.liquid.visc || 1, vs = 1 / Math.sqrt(visc);
   const deep = surf !== null && !p.ground;
-  // Горизонтальна швидкість наздоганяє бажану з прискоренням від тертя: звичайний ґрунт — одразу, ковзкий (закон
-  // всесвіту, лід) — розганяєшся й гальмуєш повільно; у повітрі керування не гірше за половину звичайного
-  let tvx = 0, tvy = 0;
-  if (ix || iy) {
-    let vx = ix * mb[0][0] + iy * mb[1][0], vy = ix * mb[0][1] + iy * mb[1][1];
-    const run = ctl.sprint ? (surf === null ? SPRINT : 1 + (SPRINT - 1) / 2) : 1;
-    const l = Math.hypot(vx, vy), sp = SPEED * ph.speed * run * (surf === null ? 1 : (deep || !buoy ? 0.5 : 0.7) * vs);
-    tvx = vx / l * sp; tvy = vy / l * sp;
-    p.yaw = Math.atan2(vy, vx);
-  }
-  // вітер зносить лише за низької гравітації (до WIND_G) і справді сильний (від WIND_MIN): на землі — понад поріг, у
-  // стрибку — помітніше; ширяння (пробіл у падінні) — майже з вітром за будь-якої гравітації. Нахил тяжіння (аномалія) — як схил
-  const wind = ctl.wind;
-  if (wind && surf === null) {
-    const ws = Math.hypot(wind[0], wind[1]), low = Math.min(1, Math.max(0, (WIND_G - ph.g) / 0.3));
-    const over = ws > 1e-9 ? Math.max(0, ws - WIND_MIN) / ws : 0;
-    const wk = p.glide ? 0.7 : low * over * (p.ground ? 0.35 : 0.6);
-    tvx += wind[0] * wk; tvy += wind[1] * wk;
-  }
-  if (ph.tilt) { tvx += ph.tilt[0] * 9 * ph.g; tvy += ph.tilt[1] * 9 * ph.g; }
-  const under = p.ground ? P.block(Math.floor(p.x), Math.floor(p.y), Math.floor(p.z / LEVEL + EPS) - 1) : 0;
-  let fr = surf !== null ? 1 : under === B_ICE ? 0.15 : ph.friction ?? 1;
-  if (!p.ground && surf === null) fr = Math.max(fr, 0.5);
-  const acc = fr >= 1 ? 1 : fr * 12 * dt;                    // тертя 1 — одразу; 0,15 — за ~0,5 с
+  // Горизонтальна швидкість. На землі й у рідині — наздоганяє бажану з прискоренням від тертя: звичайний ґрунт — одразу,
+  // ковзкий (закон всесвіту, лід) — розганяєшся й гальмуєш повільно. У повітрі — як у житті: не керуєш (розбіг перед
+  // стрибком важить), діють лише опір повітря з вітром і нахил тяжіння
   if (p.vx === undefined) { p.vx = 0; p.vy = 0; }
-  if (acc >= 1) { p.vx = tvx; p.vy = tvy; }
-  else { p.vx += (tvx - p.vx) * acc; p.vy += (tvy - p.vy) * acc; }
+  const wind = ctl.wind, vT = ph.vT ?? 1e9, gA = GRAVITY * ph.g;
+  if (!p.ground && surf === null) {
+    // опір ∝ густина × швидкість²: прискорення g·(v_відн / vT)² (vT — межа падіння; ширяння — більший опір)
+    if (wind) {
+      const rx = wind[0] - p.vx, ry = wind[1] - p.vy, rl = Math.hypot(rx, ry);
+      if (rl > 1e-6) {
+        const vTh = p.glide ? vT * 0.45 : vT, dv = Math.min(rl, gA * (rl / vTh) * (rl / vTh) * dt);
+        p.vx += rx / rl * dv; p.vy += ry / rl * dv;
+      }
+    }
+    if (ph.tilt) { p.vx += ph.tilt[0] * gA * dt; p.vy += ph.tilt[1] * gA * dt; }
+  } else {
+    let tvx = 0, tvy = 0;
+    if (ix || iy) {
+      let vx = ix * mb[0][0] + iy * mb[1][0], vy = ix * mb[0][1] + iy * mb[1][1];
+      const run = ctl.sprint ? (surf === null ? SPRINT : 1 + (SPRINT - 1) / 2) : 1;
+      const l = Math.hypot(vx, vy), sp = SPEED * ph.speed * run * (surf === null ? 1 : (deep || !buoy ? 0.5 : 0.7) * vs);
+      tvx = vx / l * sp; tvy = vy / l * sp;
+      p.yaw = Math.atan2(vy, vx);
+    }
+    const under = p.ground ? P.block(Math.floor(p.x), Math.floor(p.y), Math.floor(p.z / LEVEL + EPS) - 1) : 0;
+    const fr = surf !== null ? 1 : under === B_ICE ? 0.15 : ph.friction ?? 1;
+    // вітер на землі: зносить лише понад vT·√тертя (опір повітря сильніший за тертя; 1 g, 1 атм — ≈ 117 км/год);
+    // нахил тяжіння (аномалія) — як схил
+    if (wind && surf === null) {
+      const wl = Math.hypot(wind[0], wind[1]), th = vT * Math.sqrt(fr);
+      p.windPush = wl > th;
+      if (wl > th) { tvx += wind[0] / wl * (wl - th); tvy += wind[1] / wl * (wl - th); }
+    } else p.windPush = false;
+    if (ph.tilt) { tvx += ph.tilt[0] * 9 * ph.g; tvy += ph.tilt[1] * 9 * ph.g; }
+    const acc = fr >= 1 ? 1 : fr * 12 * dt;                  // тертя 1 — одразу; 0,15 — за ~0,5 с
+    if (acc >= 1) { p.vx = tvx; p.vy = tvy; }
+    else { p.vx += (tvx - p.vx) * acc; p.vy += (tvy - p.vy) * acc; }
+  }
   p.moving = !!(ix || iy) || Math.hypot(p.vx, p.vy) > 0.5;
   if (p.vx || p.vy) {
     const tryMove = (nx, ny) => {
@@ -240,8 +249,8 @@ function fly(p, ix, iy, dt, P, ph, mb, vert) {
   p.air = !p.ground;
 }
 
-// Затишок від вітру для тіла з ногами в (x, y, z): множник вітру 0…1. Перешкода з навітряного боку (блоки, стовбур,
-// камінь) ближче за 3 клітинки — вітру немає, до 4,5 — слабшає; під стелею (печера, навіс) — не дує, якщо з навітряного
+// Затишок від вітру для тіла з ногами в (x, y, z): множник вітру 0…1. Перешкода з навітряного боку вище за пояс (блоки,
+// стовбур, камінь) ближче за 3 клітинки — вітру немає, до 4,5 — слабшає; під стелею (печера, навіс) — не дує, якщо з навітряного
 // боку стіна ближче за 16 клітинок (у вхід печери, відкритий вітру, дує)
 const LEE = 3, LEE_FADE = 1.5, CAVE_LEE = 16, ROOF = 48;
 export function windShelter(P, x, y, z, wind) {
@@ -254,8 +263,8 @@ export function windShelter(P, x, y, z, wind) {
   for (let d = 0.4; d <= R; d += 0.25) {
     const px = x + ux * d, py = y + uy * d, tx = Math.floor(px), ty = Math.floor(py);
     let hit = false;
-    for (const dz of [0.3, 0.8]) { const b = P.block(tx, ty, Math.floor((z + dz) / LEVEL)); if (b !== -1 && solidB(b)) { hit = true; break; } }
-    if (!hit) hit = objsNear(P, px, py, (o) => Math.abs(px - o.cx) < o.r + 0.1 && Math.abs(py - o.cy) < o.r + 0.1 && z + 0.3 < o.z1 && z + 0.8 > o.z0);
+    for (const dz of [0.55, 0.9]) { const b = P.block(tx, ty, Math.floor((z + dz) / LEVEL)); if (b !== -1 && solidB(b)) { hit = true; break; } }   // вище за пояс: уступ у блок — не стіна
+    if (!hit) hit = objsNear(P, px, py, (o) => Math.abs(px - o.cx) < o.r + 0.1 && Math.abs(py - o.cy) < o.r + 0.1 && z + 0.55 < o.z1 && z + 0.9 > o.z0);
     if (hit) return roof || d <= LEE ? 0 : (d - LEE) / LEE_FADE;
   }
   return 1;

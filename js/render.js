@@ -88,7 +88,8 @@ export function createRenderer(canvas) {
       if (wt) applyWeather(sk, laws, wt.W, st.clock || 0);
       const [lx, ly, lz] = sk.light, amb = sk.amb, vk = sk.visK ?? 1;
       const fogR = st.camera.mode === ISO ? [view.fog[0] * Math.sqrt(vk), view.fog[1] * Math.sqrt(vk)] : [view.fog[0] * vk, view.fog[1] * vk];
-      const wind = wt ? [wt.W.wind[0] * 0.012, wt.W.wind[1] * 0.012] : [0, 0];
+      const wk = wt ? Math.min(0.012, 0.09 / (Math.hypot(wt.W.wind[0], wt.W.wind[1]) + 1e-6)) : 0;   // гойдання — не більше за ураганне
+      const wind = wt ? [wt.W.wind[0] * wk, wt.W.wind[1] * wk] : [0, 0];
       const k = 1 / (amb + (1 - amb) * REF_Z);
       const lightCol = [sk.lightK[0] * k, sk.lightK[1] * k, sk.lightK[2] * k];
       const me = st.me;

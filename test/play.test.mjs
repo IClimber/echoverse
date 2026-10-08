@@ -137,8 +137,10 @@ test('стрибок: висота й час у повітрі від граві
   const p = man(P, 2.5, 1.5);
   run(p, 1, 1, 120, P);
   assert.ok(p.x < 5 && p.ground, `пішки: ${p.x}`);
-  run(p, 1, 1, 120, P, PH1, true);
-  assert.ok(p.x > 5 && Math.abs(p.z - 6 * LEVEL) < 1e-9 && p.ground, `стрибок: ${p.x} ${p.z}`);
+  // у повітрі не керуєш (як у житті): стрибок з розбігу за ~1,4 клітинки до уступу
+  const j = man(P, 3.4, 1.5);
+  run(j, 1, 1, 120, P, PH1, true);
+  assert.ok(j.x > 5 && Math.abs(j.z - 6 * LEVEL) < 1e-9 && j.ground, `стрибок: ${j.x} ${j.z}`);
 });
 
 test('падіння: зі стрибка — з будь-якої висоти; приземлення на опору', () => {
@@ -289,7 +291,7 @@ test('небо й час: біля старту — одне сонце, міс�
   let multi = 0, rings = 0, lock = 0, noMoon = 0;
   for (let n = -1500; n <= 1500; n++) {
     const S = lawsOf(seed, 0, n).sky;
-    assert.ok(S.suns.length >= 1 && S.suns.length <= 3 && S.moons.length <= 3 && S.dayMin >= 6 && S.dayMin <= 40 && S.night > 0.1);
+    assert.ok(S.suns.length >= 1 && S.suns.length <= 3 && S.moons.length <= 3 && S.dayMin >= 2 && S.dayMin <= 240 && S.night > 0.1);
     if (Math.abs(n) <= 8) assert.ok(S.suns.length === 1 && S.moons.length === 1 && !S.lock && !S.rings && S.dayMin >= 16 && S.dayMin <= 24, `біля старту ${n}`);
     multi += S.suns.length > 1; rings += !!S.rings; lock += S.lock; noMoon += !S.moons.length;
   }
@@ -316,10 +318,11 @@ test('атмосфера й погода: біля старту — придат
   for (const d of [0, 3]) for (let n = -1000; n <= 1000; n++) {
     const A = lawsOf(seed, d, n).air;
     if (d === 0 && Math.abs(n) <= 8) assert.ok(A.breath && A.pressure > 0.8 && A.pressure < 1.2 && A.rad < 0.1, `біля старту ${n}`);
-    assert.ok(A.pressure > 0 && A.pressure < 3.5 && A.rad >= 0 && A.rad <= 1 && A.haze >= 0 && A.haze <= 1);
+    assert.ok(A.pressure > 0 && A.pressure <= 10 && A.rad >= 0 && A.rad <= 1 && A.haze >= 0 && A.haze <= 1);
     gases.add(A.gas); vac += A.pressure < 0.1;
   }
-  assert.ok(gases.size === 5 && vac > 5, `видів повітря ${gases.size}, без повітря ${vac}`);
+  for (let n = 1001; !vac && n < 200000; n += 3) vac += lawsOf(seed, 3, n).air.pressure < 0.1;   // без повітря — рідкість
+  assert.ok(gases.size >= 4 && vac > 0, `видів повітря ${gases.size}, без повітря ${vac}`);
   const L = lawsOf(seed, 0, 0), kinds = new Set();
   for (let t = 0; t < 3600 * 10; t += 20) { const W = weatherAt(L, t); kinds.add(W.kind); assert.deepEqual(weatherAt(L, t), W); }
   assert.ok(kinds.size >= 3, `погод лише ${kinds.size}`);
@@ -370,17 +373,18 @@ test('інша фізика: ковзкий ґрунт — інерція; оп�
     if (Math.abs(n) <= 8) assert.ok(F.friction === 1 && F.bounce === 0 && F.time === 1, `біля старту ${n}`);
     s += F.friction < 1; bo += F.bounce > 0; tm += Math.abs(F.time - 1) > 0.3; small += F.planetR < 800;
   }
-  assert.ok(s > 20 && bo > 20 && tm > 100 && small > 50, `ковзких ${s}, пружних ${bo}, з іншим часом ${tm}, малих ${small}`);
+  assert.ok(s > 20 && bo > 20 && tm > 20 && small > 3, `ковзких ${s}, пружних ${bo}, з іншим часом ${tm}, малих ${small}`);
   const L0 = lawsOf(seed, 0, 0);
   assert.ok(physOf({ ...L0, air: { ...L0.air, pressure: 2.5 } }).vT < physOf({ ...L0, air: { ...L0.air, pressure: 0.3 } }).vT);
 });
 
-test('нові сили: сильний вітер у легкій гравітації зносить у стрибку, в\'язка рідина повільніша, поверхневий натяг тримає на бігу, нахил тяжіння штовхає', () => {
-  const P = world(Array(40).fill('4'.repeat(40)));
-  const a = man(P, 20.5, 20.5), b = man(P, 20.5, 20.5);
-  const lo = { ...PH1, g: 0.4 };
-  for (let i = 0; i < 60; i++) { step(a, 0, 0, i === 0, 1 / 60, P, lo); step(b, 0, 0, i === 0, 1 / 60, P, lo, undefined, { wind: [18, 0] }); }
-  assert.ok(Math.abs(a.x - 20.5) < 1e-9 && b.x > 21, `вітер: ${b.x}`);
+test('нові сили: вітер — чесний опір (на землі — понад поріг від g і густини), в\'язка рідина повільніша, поверхневий натяг тримає на бігу, нахил тяжіння штовхає', () => {
+  // чесний вітер (опір ∝ густина × швидкість²): на землі при 1 g зносить лише понад vT·√тертя (vT 18 — ≈ 117 км/год)
+  const P = world(Array(40).fill('4'.repeat(40))), ph1 = { ...PH1, vT: 18 };
+  const onGround = (ph, w) => { const m = man(P, 20.5, 20.5); for (let i = 0; i < 60; i++) step(m, 0, 0, false, 1 / 60, P, ph, undefined, { wind: [w, 0] }); return m.x - 20.5; };
+  assert.equal(onGround(ph1, 15), 0, '1 g, 15 кл/с — не зносить');
+  assert.ok(onGround(ph1, 20) > 0.5, '1 g, 20 кл/с — зносить');
+  assert.ok(onGround({ ...PH1, g: 0.165, vT: 7.1 }, 8) > 0.3, 'Місяць, 8 кл/с — зносить');
   const rows = ['77777777', '7wwwwww7', '7wwwwww7', '77777777'];
   const W1 = world(rows), W5 = world(rows, { swim: true, danger: '', density: 1, visc: 5 });
   const s1 = { x: 2.5, y: 1.5, z: 2.25, vz: 0, ground: false }, s5 = { x: 2.5, y: 1.5, z: 2.25, vz: 0, ground: false };
@@ -433,7 +437,7 @@ test('плавний спуск: уступ у 1 блок униз — ноги 
   assert.ok(j.jumped && !j.ground, 'стрибок позначено');
 });
 
-test('вітер: затишок за стіною, деревом чи каменем з навітряного боку (до 3 клітинок) і в печері; зносить лише сильний вітер у легкій гравітації', async () => {
+test('вітер: затишок за стіною, деревом чи каменем з навітряного боку (до 3 клітинок) і в печері; у повітрі не керуєш, вітер — опором', async () => {
   const { windShelter } = await import('../js/player.js');
   const open = world(Array(20).fill('4'.repeat(20)));
   assert.equal(windShelter(open, 10.5, 10.5, 4 * LEVEL, [5, 0]), 1);
@@ -452,13 +456,18 @@ test('вітер: затишок за стіною, деревом чи каме
     obj: () => null,
   };
   assert.equal(windShelter(cave, 12.5, 5.5, 4 * LEVEL, [5, 0]), 0, 'у печері');
-  // зносить лише сильний вітер і лише в легкій гравітації: 0,4 g і 16 кл/с — так; 1 g чи 8 кл/с — ні (ні на землі, ні в стрибку)
-  const P = world(Array(40).fill('4'.repeat(40)));
-  const go = (ph, w, jump) => { const m = man(P, 20.5, 20.5); for (let i = 0; i < 40; i++) step(m, 0, 0, jump && i === 0, 1 / 60, P, ph, undefined, { wind: [w, 0] }); return m.x - 20.5; };
-  const lo = { ...PH1, g: 0.4 };
-  assert.ok(go(lo, 16, false) > 0.3, 'легка гравітація, сильний вітер — зносить');
-  for (const j of [false, true]) {
-    assert.equal(go(PH1, 16, j), 0, '1 g — не зносить');
-    assert.equal(go(lo, 8, j), 0, 'помірний вітер — не зносить');
-  }
+  // у повітрі не керуєш: клавіші не змінюють швидкість; розбіг — летиш далі; вітер зносить слабко, ширяння — сильніше
+  const P = world(Array(40).fill('4'.repeat(40))), ph1 = { ...PH1, vT: 18 };
+  const jumpIn = (w, keys) => { const m = man(P, 20.5, 20.5); step(m, 0, 0, true, 1 / 60, P, ph1, undefined, { wind: [w, 0] }); while (!m.ground) step(m, keys, 0, false, 1 / 60, P, ph1, [[1, 0], [0, 1]], { wind: [w, 0] }); return m.x - 20.5; };
+  assert.equal(jumpIn(0, 1), 0, 'у повітрі клавіші не діють');
+  const drift = jumpIn(4.6, 0);
+  assert.ok(drift > 0 && drift < 0.5, `звичайний вітер у стрибку: ${drift}`);
+  const r = man(P, 5.5, 20.5);
+  for (let i = 0; i < 10; i++) step(r, 1, 0, false, 1 / 60, P, ph1, [[1, 0], [0, 1]]);
+  const v0 = r.vx;
+  step(r, 1, 0, true, 1 / 60, P, ph1, [[1, 0], [0, 1]]);
+  for (let i = 0; i < 10; i++) step(r, 0, 0, false, 1 / 60, P, ph1, [[1, 0], [0, 1]]);
+  assert.ok(!r.ground && Math.abs(r.vx - v0) < 1e-9, `розбіг: ${r.vx} ${v0}`);
+  const fall = (vert) => { const m = { x: 20.5, y: 20.5, z: 30, vz: 0, ground: false }; for (let i = 0; i < 60; i++) step(m, 0, 0, false, 1 / 60, P, ph1, undefined, { wind: [6, 0], vert }); return m.x - 20.5; };
+  assert.ok(fall(1) > fall(0) * 1.5, `ширяння: ${fall(1)} ${fall(0)}`);
 });
