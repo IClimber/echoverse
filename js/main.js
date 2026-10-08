@@ -4,7 +4,7 @@ import { createRenderer } from './render.js';
 import { createWorld, findSpawn, ckey, skey } from './world.js';
 import { createDevice, landing, landingChunks, CHARGE } from './device.js';
 import { step, support, windShelter, SPRINT, GRAVITY, FOOT } from './player.js';
-import { stepBody, push, rayBody, PLAYER_MASS, HIT_IMPULSE } from './bodies.js';
+import { stepBody, windMoves, push, rayBody, PLAYER_MASS, HIT_IMPULSE } from './bodies.js';
 import { initInput, moveAxis, turnAxis, sprintHeld, vertAxis, takeActions, takeWheel, takeDrag, clearInput, lockPointer, unlockPointer, locked } from './input.js';
 import { listWorlds, putWorld, deleteWorld, serialize, deserialize, newId } from './save.js';
 import { hashStr } from './rng.js';
@@ -228,11 +228,13 @@ function boot() {
       const dx = b.x - me.x, dy = b.y - me.y, l = Math.hypot(dx, dy) || 1, mv = Math.hypot(me.vx || 0, me.vy || 0);
       if (mv > 0.1 && (dx * me.vx + dy * me.vy) > 0) push(b, [dx / l * PLAYER_MASS * 5 * dt, dy / l * PLAYER_MASS * 5 * dt, 0]);
     }
+    const P = g.world.probe(g.d, g.n);
     for (const b of near) {
-      if (b.sleep) continue;
-      const ph = physAt(L, b.x, b.y);
-      const P = g.world.probe(g.d, g.n), lee = windShelter(P, b.x, b.y, b.z - b.hz, W.wind);
-      stepBody(b, dt, P, { g: ph.g, vT: ph.vT, bounce: L.phys.bounce, friction: L.phys.friction, wind: [W.wind[0] * lee, W.wind[1] * lee] });
+      const ph = physAt(L, b.x, b.y), env = { g: ph.g, vT: ph.vT, bounce: L.phys.bounce, friction: L.phys.friction, wind: W.wind };
+      if (b.sleep && !windMoves(b, env)) continue;                // спить і вітер не зрушить — не рахуємо
+      const lee = windShelter(P, b.x, b.y, b.z - b.hz, W.wind);
+      env.wind = [W.wind[0] * lee, W.wind[1] * lee];
+      stepBody(b, dt, P, env);
     }
     if (ob) { me.x += ob.x - ox; me.y += ob.y - oy; me.z = ob.z + ob.hz; }
   }

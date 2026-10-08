@@ -20,6 +20,7 @@ export function makeBody(o) {
   const b = { vx: 0, vy: 0, vz: 0, yaw: 0, spin: 0, sleep: true, calm: 0, ...o };
   b.z = o.z + o.hz;                           // центр
   b.mass = DENSITY * (o.dens || 1) * 8 * o.hx * o.hy * o.hz;
+  if ((o.lift || 0) > 1) { b.ax = o.x; b.ay = o.y; }   // поле породи тримає левітуюче тіло біля цього місця
   return b;
 }
 
@@ -45,9 +46,21 @@ function groundBelow(P, x, y, z) {
   return null;
 }
 
+const ANCHOR = 2;                             // пружність поля, що тримає левітуюче тіло біля місця (1/с²)
+// Межа падіння тіла: від маси на площу (важке й компактне падає швидше й менше зноситься вітром)
+const vTof = (b, vT) => vT * Math.sqrt((b.mass / (4 * b.hx * b.hz)) / (PLAYER_MASS / PLAYER_AREA));
+// Чи зрушить вітер тіло, що спить: левітуюче — помітне прискорення, на ґрунті — сильніше за тертя
+export function windMoves(b, env) {
+  const w = env.wind ? Math.hypot(env.wind[0], env.wind[1]) : 0;
+  if (!w) return false;
+  const a = GRAVITY * env.g * (w / vTof(b, env.vT)) ** 2;
+  return (b.lift || 0) > 1 ? a > 0.15 : a > GRAVITY * env.g * (1 - Math.min(1, b.lift || 0)) * (env.friction ?? 1) * 0.5;
+}
+
 // Крок тіла: P — щуп, env — {g (сила тяжіння, g), vT, bounce, friction, wind [x, y]}
 export function stepBody(b, dt, P, env) {
-  if (b.sleep) return;
+  const windy = windMoves(b, env);
+  if (b.sleep) { if (!windy) return; b.sleep = false; b.calm = 0; }
   const g = GRAVITY * env.g, lift = b.lift || 0;
   // тяжіння мінус підйом породи; левітуюче — пружина до висоти ширяння (немає ґрунту під — просто висить)
   let az = -g * (1 - Math.min(1, lift));
@@ -57,9 +70,11 @@ export function stepBody(b, dt, P, env) {
   }
   // опір повітря й вітер — як у гравця: прискорення g·(v_відн / vT)², межа падіння тіла vTb — від маси на площу
   // (важке й компактне падає швидше й менше зноситься)
-  const area = 4 * b.hx * b.hz, w = env.wind || [0, 0], vTb = env.vT * Math.sqrt((b.mass / area) / (PLAYER_MASS / PLAYER_AREA));
+  const w = env.wind || [0, 0], vTb = vTof(b, env.vT);
   const rx = w[0] - b.vx, ry = w[1] - b.vy, rl = Math.hypot(rx, ry);
   if (rl > 1e-6) { const dv = Math.min(rl, GRAVITY * env.g * (rl / vTb) * (rl / vTb) * dt); b.vx += rx / rl * dv; b.vy += ry / rl * dv; }
+  // левітуюче: поле тримає й по горизонталі — вітер лише відхиляє (легке — далі), після удару — нове місце, де спиниться
+  if (lift > 1 && b.ax !== undefined && b.ax !== null) { b.vx += ((b.ax - b.x) * ANCHOR - b.vx * 1.6) * dt; b.vy += ((b.ay - b.y) * ANCHOR - b.vy * 1.6) * dt; }
   b.vz += az * dt;
   if (b.vz < -vTb) b.vz = -vTb;
   // рух по осях окремо, дробимо крок, щоб не проскочити крізь тонку стіну
@@ -79,7 +94,8 @@ export function stepBody(b, dt, P, env) {
   b.spin *= Math.exp(-dt * 1.5);
   const sp = Math.hypot(b.vx, b.vy, b.vz);
   b.calm = sp < SLEEP_V ? b.calm + dt : 0;
-  if (b.calm > SLEEP_T) { b.sleep = true; b.vx = b.vy = b.vz = 0; }
+  if (b.calm > SLEEP_T && !windy) { b.sleep = true; b.vx = b.vy = b.vz = 0; }
+  if (b.calm > SLEEP_T && lift > 1 && b.ax === null) { b.ax = b.x; b.ay = b.y; }   // після удару спинилось — тут і тримається
 }
 
 // Імпульс (j — вектор маса × швидкість) у тіло: будить
@@ -87,6 +103,7 @@ export function push(b, j) {
   b.vx += j[0] / b.mass; b.vy += j[1] / b.mass; b.vz += j[2] / b.mass;
   b.spin += (Math.random() - 0.5) * Math.min(6, Math.hypot(j[0], j[1]) / b.mass * 2);
   b.sleep = false; b.calm = 0;
+  if (b.ax !== undefined) b.ax = null;             // удар зриває з місця: поле підхопить там, де тіло спиниться
 }
 
 // Промінь з (ox, oy, oz) у напрямку d (одиничний) до maxT: найближче тіло зі списку й відстань, або null

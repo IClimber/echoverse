@@ -471,3 +471,16 @@ test('вітер: затишок за стіною, деревом чи каме
   const fall = (vert) => { const m = { x: 20.5, y: 20.5, z: 30, vz: 0, ground: false }; for (let i = 0; i < 60; i++) step(m, 0, 0, false, 1 / 60, P, ph1, undefined, { wind: [6, 0], vert }); return m.x - 20.5; };
   assert.ok(fall(1) > fall(0) * 1.5, `ширяння: ${fall(1)} ${fall(0)}`);
 });
+
+test('тіла й вітер: сплячий левітуючий камінь вітер будить і відхиляє (легкий — далі, важкий — ледь), поле не дає відлетіти', async () => {
+  const { makeBody, stepBody } = await import('../js/bodies.js');
+  const P = world(Array(60).fill('4'.repeat(60))), env = { g: 1.28, vT: 18, bounce: 0, friction: 1, wind: [9, 0] };
+  const mk = (h) => makeBody({ x: 30.5, y: 30.5, z: 4 * LEVEL + 1.5, hx: h, hy: h, hz: h * 0.6, lift: 1.4, hover: 1.5 });
+  const small = mk(0.15), big = mk(1.2);
+  for (let i = 0; i < 600; i++) { stepBody(small, 1 / 60, P, env); stepBody(big, 1 / 60, P, env); }
+  const ds = small.x - 30.5, db = big.x - 30.5;
+  assert.ok(ds > 0.3 && ds < 8 && db >= 0 && db < ds * 0.5, `відхилення: легкий ${ds}, важкий ${db}`);
+  const calm = mk(0.15);
+  for (let i = 0; i < 300; i++) stepBody(calm, 1 / 60, P, { ...env, wind: [0, 0] });
+  assert.ok(calm.sleep && Math.abs(calm.x - 30.5) < 1e-6, 'без вітру спить на місці');
+});
