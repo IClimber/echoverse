@@ -31,7 +31,7 @@ void main() {
   p.z -= dot(p.xy, p.xy) * uCurve;
   vec3 n = normalize(mat3(uModel) * aNor);
   gl_Position = uView * vec4(p, 1.0);
-  vCol = aCol * (uAmb + (1.0 - uAmb) * max(dot(n, uLight), 0.0)) * uLightCol * uTint;
+  vCol = aMat == 19.0 ? aCol * uTint : aCol * (uAmb + (1.0 - uAmb) * max(dot(n, uLight), 0.0)) * uLightCol * uTint;   // лава світиться сама
   vW = p;
   vFog = dot(uFR, uFR) > 0.0 ? length(vec2(dot(p, uFR), dot(p, uFU))) : length(p.xy);
 }`;

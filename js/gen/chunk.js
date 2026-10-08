@@ -2,7 +2,7 @@
 // Основа — поверхня клітинки (tile: висота, тип, предмет) — чиста функція законів і світових координат, тож межі
 // сусідніх чанків збігаються самі. Поверх неї — об'ємні закони: печери, нависання, ширяючі острови (3D-шум на
 // грубій ґратці 4×4×4 блоки з трилінійною інтерполяцією). Рельєф — шум від (x, y, n): сусідні номери схожі.
-import { hash3, unit } from '../rng.js';
+import { hash2, hash3, unit } from '../rng.js';
 import { noise2, noise3, fbm3 } from '../noise.js';
 import { SEA, FLOAT_G, L_WATER, L_DRY, WORLD_H } from '../universe.js';
 import { LEVEL } from '../iso.js';
@@ -44,33 +44,133 @@ function lonely(L, x, y, r, dense, rs) {
   return true;
 }
 
+// Квадратний корінь ітераціями Ньютона: лише + − × ÷, тож однаковий у всіх рушіях (Math.sqrt — ні)
+function nsqrt(v) {
+  if (v <= 0) return 0;
+  let r = v < 1 ? 0.5 + 0.5 * v : 0.5 * v + 0.5;
+  for (let i = 0; i < 10; i++) r = 0.5 * (r + v / r);
+  return r;
+}
+const absv = (v) => v < 0 ? -v : v;
+// Об'єкт на ґратці з кроком S (кратер, вулкан, шпиль): у клітинці ґратки — з імовірністю prob, центр — у середніх
+// 40 % клітинки (тож радіус до 1,3 S видно лише з сусідніх клітинок). f(dx, dy, h) — внесок; сума внесків
+function onGrid(seed, px, py, S, prob, f) {
+  const gx = Math.floor(px / S), gy = Math.floor(py / S);
+  let sum = 0;
+  for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) {
+    const h = hash3(seed, gx + i, gy + j);
+    if (unit(h) >= prob) continue;
+    const cx = (gx + i + 0.3 + 0.4 * unit(hash2(h, 1))) * S, cy = (gy + j + 0.3 + 0.4 * unit(hash2(h, 2))) * S;
+    sum += f(px - cx, py - cy, h);
+  }
+  return sum;
+}
+
+// Форми рельєфу в просторі висоти e (до класифікації; span — e на блок): тераси й плато, річкові долини (до рівня
+// моря — у руслі рідина), каньйони (у сухому кліматі W), кратери (чаша з валом; нижче моря — озеро)
+function carve(L, px, py, e, W, span) {
+  const R = L.relief;
+  if (R.terrace > 0.15 && e > L.seaE) {
+    const mk = noise2(L.sTr, px / 260, py / 260) + 0.35 * R.terrace - 0.2;
+    if (mk > 0) {
+      const q = (e - L.seaE) / span / R.terraceStep, fl = Math.floor(q), f = q - fl, k = 1 + 6 * R.terrace;
+      const f2 = clamp01((f - 0.5) * k + 0.5), m = mk * 4 < 1 ? mk * 4 : 1;
+      e += ((fl + f2) * R.terraceStep * span + L.seaE - e) * m;
+    }
+  }
+  const wq = noise2(L.sRv ^ 0x77, px / 90, py / 90);
+  if (R.rivers > 0.3 && e > L.seaE - 0.02) {
+    const r = absv(noise2(L.sRv, px / R.riverS + wq * 0.3, py / R.riverS - wq * 0.3)), w = 0.004 + 0.016 * R.rivers, wv = w * 4;
+    if (r < w) e = Math.min(e, L.seaE - 0.01 - 0.025 * (1 - r / w));
+    else if (r < wv) { const m0 = 1 - (r - w) / (wv - w), m = m0 * m0 * (3 - 2 * m0); e = Math.min(e, e + (L.seaE + 0.004 - e) * m); }
+  }
+  if (R.canyons > 0.08 && e > L.seaE + 0.02) {
+    const dry = clamp01((0.25 - W) * 2);
+    if (dry > 0) {
+      const c = absv(noise2(L.sCy, px / 150 + wq * 0.4, py / 150)), cw = 0.008 + 0.03 * R.canyons;
+      if (c < cw * 1.5) {
+        const fe = Math.max(L.seaE + 0.015, e - R.canyonD * dry), m = c < cw ? 1 : (cw * 1.5 - c) / (cw * 0.5);
+        e += (fe - e) * m;
+      }
+    }
+  }
+  if (R.craters > 0.02) {
+    const Rm = R.craterR;
+    e += span * onGrid(L.sFt, px, py, Rm * 2 + 12, 0.55 * R.craters * R.craters, (dx, dy, h) => {
+      const Rr = Rm * (0.35 + 0.65 * unit(hash2(h, 3))), u = (dx * dx + dy * dy) / (Rr * Rr);
+      if (u >= 1.7) return 0;
+      const depth = Rr * 0.4, rim = Rr * 0.12 + 1;
+      return u < 1 ? -depth * (1 - u) * (1 - u * 0.3) + rim * u * u : rim * (1.7 - u) / 0.7;
+    });
+  }
+  return e;
+}
+
+// Вершинні форми в блоках над поверхнею (без межі амплітуди): вулкани (конус з жерлом; діючий — лава в жерлі,
+// out.magma) і гострі шпилі. Повертає блоки
+function peaks(L, px, py, out) {
+  const R = L.relief;
+  let dh = 0;
+  if (R.volcano > 0.05) {
+    const Hm = R.volcanoH, S = 300;
+    dh += onGrid(L.sFt ^ 0x51ed, px, py, S, 0.45 * R.volcano * R.volcano, (dx, dy, h) => {
+      const Hv = Hm * (0.55 + 0.45 * unit(hash2(h, 4))), Rv = Hv * 1.7 + 12, d = nsqrt(dx * dx + dy * dy), t = 1 - d / Rv;
+      if (t <= 0) return 0;
+      const rc = 0.16;
+      if (t < 1 - rc) return Hv * t * t * (1.6 - 0.6 * t);
+      const t0 = 1 - rc, top = Hv * t0 * t0 * (1.6 - 0.6 * t0), s = d / (rc * Rv);
+      if (R.volcanoLava && s < 0.8) out.magma = true;
+      return top - Hv * 0.3 * (1 - s * s);
+    });
+  }
+  if (R.spires > 0.01) {
+    dh += onGrid(L.sFt ^ 0x2c1b, px, py, 16, 0.5 * R.spires, (dx, dy, h) => {
+      const Rr = 1 + 2.2 * unit(hash2(h, 5)), u = (dx * dx + dy * dy) / (Rr * Rr);
+      return u < 1 ? R.spireH * (0.5 + 0.5 * unit(hash2(h, 6))) * (1 - u) * (1 - u) : 0;
+    });
+  }
+  return dh;
+}
+const DUNE_DIR = [[1, 0], [0.8, 0.6], [0.6, 0.8], [0, 1], [-0.6, 0.8], [-0.8, 0.6]];
+
 // Клітинка (x, y) → out: h (рівень; у водоймі — дна), t (тип), v (глибина 0…255), bm (біом), o (предмет),
-// ov (варіант 0…65535), os (хеш вибору виду)
+// ov (варіант 0…65535), os (хеш вибору виду), magma (у жерлі вулкана — розпечена лава)
 export function tile(L, x, y, out = {}) {
   const px = x + 0.5, py = y + 0.5;           // центр клітинки: не на вузлах ґратки шуму
-  const e = elevation(L, px, py);
   const T0 = L.temp + 0.6 * fbm3(L.sT, px / 300, py / 300, L.n * 0.03, 3);   // кілька октав: межі кліматів не прямі
-  out.o = 0; out.ov = 0; out.os = 0; out.v = 0; out.bm = 0; out.cold = T0 < -0.6;
-  if (e < L.seaE) {
+  const W = L.wet + 0.65 * fbm3(L.sW, px / 220, py / 220, L.n * 0.03, 3);
+  const span = (1 - L.seaE) / L.amp;          // висота e на один блок
+  out.o = 0; out.ov = 0; out.os = 0; out.v = 0; out.bm = 0; out.cold = T0 < -0.6; out.magma = false;
+  const e = carve(L, px, py, elevation(L, px, py), W, span);
+  const xb = peaks(L, px, py, out), ex = e + xb * span;
+  if (ex < L.seaE) {
     // Дно: що далі від берега (нижче рівня моря), то глибше; біля берега — мілина (рівень SEA − 1)
-    out.h = Math.max(1, SEA - 1 - Math.floor((L.seaE - e) * 22));   // дно — щонайменше 1 блок (під водою не порожнеча)
-    out.v = Math.min(255, Math.floor((L.seaE - e) * 1200));
+    out.h = Math.max(1, SEA - 1 - Math.floor((L.seaE - ex) * 22));   // дно — щонайменше 1 блок (під водою не порожнеча)
+    out.v = Math.min(255, Math.floor((L.seaE - ex) * 1200));
     const k = L.liquid.kind;
     out.t = k === L_DRY ? T_BED : k === L_WATER && out.cold ? T_ICE : T_WATER;
     out.bed = out.h;
     if (out.t === T_ICE) out.h = SEA;
     return out;
   }
-  const h = SEA + 1 + Math.min(L.amp - 1, Math.floor((e - L.seaE) / (1 - L.seaE) * L.amp));
+  // висота: основа — у межах амплітуди, вулкани й шпилі — понад неї
+  let h = e >= L.seaE ? SEA + 1 + Math.min(L.amp - 1, Math.floor((e - L.seaE) / (1 - L.seaE) * L.amp)) + Math.floor(xb)
+    : SEA + 1 + Math.floor((ex - L.seaE) / span);
+  if (h > H - 8) h = H - 8;
   const T = T0 - 0.05 * (h - SEA - 1);        // вище — холодніше
-  const W = L.wet + 0.65 * fbm3(L.sW, px / 220, py / 220, L.n * 0.03, 3);
   let t;
   if (T < -0.45) t = T_SNOW;
+  else if (xb > 2 || out.magma) t = T_ROCK;
   else if (h - SEA >= Math.max(6, L.amp * 0.72)) t = T_ROCK;
-  else if (h === SEA + 1 && e - L.seaE < 0.025) t = T_SAND;
+  else if (h === SEA + 1 && ex - L.seaE < 0.025) t = T_SAND;
   else if (W < -0.35) t = T > 0.15 ? T_DESERT : T_DRY;
   else if (W < -0.05) t = T_DRY;
   else t = T_LUSH;
+  // дюни: асиметрична хвиля (пологий навітряний схил, крутий підвітряний) уздовж напрямку вітру
+  if (t === T_DESERT && L.relief.dunes > 0.2) {
+    const [dx, dy] = DUNE_DIR[L.relief.duneDir], ph = (px * dx + py * dy) / L.relief.duneL + 0.8 * noise2(L.sDn, px / 50, py / 50), f = ph - Math.floor(ph);
+    h += Math.floor((f < 0.75 ? f / 0.75 : (1 - f) / 0.25) * (1 + 3 * L.relief.dunes));
+  }
   out.h = h; out.t = t; out.bed = h;
   // Біом: кліматична зона + варіант (окреме поле шуму з дрібнішою домішкою — межі не гладкі)
   const zone = t === T_SNOW ? Z_SNOW : t === T_ROCK ? Z_PEAK : t === T_SAND ? Z_BEACH : t === T_DESERT ? Z_DESERT : t === T_DRY ? Z_DRY
@@ -86,14 +186,15 @@ export function tile(L, x, y, out = {}) {
   else if (Bm.small.length && unit(hash3(L.sCv, x, y)) < Bm.cover * (0.35 + 1.3 * clamp01(0.5 + noise3(L.sCv, px / 14, py / 14, L.n * 0.06)))) out.o = O_COVER;
   if (out.o) { out.ov = hash3(L.sO, y, x) & 0xffff; out.os = hash3(L.sM, x, y); }
   if (out.o === O_ROCK && L.grav < FLOAT_G && out.ov & 3) out.o = O_FLOAT;   // три чверті каміння ширяє
+  if (out.magma) out.o = 0;                     // у жерлі — нічого не росте
   return out;
 }
 
 // ================= Блоки =================
 export const H = WORLD_H;
 export const B_AIR = 0, B_LIQ = 1, B_ICE = 2, B_SAND = 3, B_GRASS = 4, B_DRY = 5, B_DESERT = 6, B_SNOW = 7, B_ROCK = 8,
-  B_BED = 9, B_MUD = 10, B_SOIL = 11, B_STONE = 12, B_SANDSTONE = 13;
-export const BLOCK_NAMES = ['повітря', 'рідина', 'лід', 'пісок', 'трава', 'степ', 'пустеля', 'сніг', 'скеля', 'дно', 'глина', 'ґрунт', 'камінь', 'пісковик'];
+  B_BED = 9, B_MUD = 10, B_SOIL = 11, B_STONE = 12, B_SANDSTONE = 13, B_MAGMA = 14;
+export const BLOCK_NAMES = ['повітря', 'рідина', 'лід', 'пісок', 'трава', 'степ', 'пустеля', 'сніг', 'скеля', 'дно', 'глина', 'ґрунт', 'камінь', 'пісковик', 'розпечена лава'];
 export const solidB = (b) => b >= B_ICE;                 // тверде (лід теж); рідина й повітря — ні
 const TOP_BLOCK = [B_BED, B_ICE, B_SAND, B_GRASS, B_DRY, B_DESERT, B_SNOW, B_ROCK, B_MUD];   // за типом поверхні T_*
 const SUB_BLOCK = [B_SOIL, B_SOIL, B_SANDSTONE, B_SOIL, B_SOIL, B_SANDSTONE, B_SOIL, B_STONE, B_SOIL];
@@ -129,7 +230,7 @@ function sample(Lt, f, x, y, k) {
 // Стовпець (x, y) у масив B з позиції o (H блоків знизу вгору). c — поверхня (tile), Lt — ґратка
 function column(L, Lt, x, y, c, B, o) {
   const basin = c.t === T_WATER || c.t === T_ICE || c.t === T_BED;
-  const px = x + 0.5, py = y + 0.5, top = TOP_BLOCK[c.t], sub = SUB_BLOCK[c.t];
+  const px = x + 0.5, py = y + 0.5, top = c.magma ? B_MAGMA : TOP_BLOCK[c.t], sub = c.magma ? B_MAGMA : SUB_BLOCK[c.t];
   if (basin) {                                            // водойма: дно, рідина, лід зверху; печер і нависань не чіпаємо
     for (let k = 0; k < H; k++) B[o + k] = k < c.bed - 2 ? B_STONE : k < c.bed - 1 ? B_SOIL : k < c.bed ? top === B_ICE ? B_BED : top : B_AIR;
     if (c.t !== T_BED) for (let k = c.bed; k < SEA; k++) B[o + k] = c.t === T_ICE && k === SEA - 1 ? B_ICE : B_LIQ;

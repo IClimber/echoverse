@@ -290,3 +290,25 @@ test('рослини: дерева не впритул (між стовбура�
     }
   }
 });
+
+test('форми рельєфу: річки (вузькі смуги рідини), вулкани з лавою, вершини понад амплітуду, кратери й дюни трапляються', async () => {
+  const seed = hashStr('test'), c = {};
+  let magma = 0, high = 0, river = 0;
+  for (const n of [-130, -95, 0, 17]) {
+    const L = lawsOf(seed, 0, n);
+    for (let y = -600; y <= 600; y += 5) for (let x = -600; x <= 600; x += 5) {
+      tile(L, x, y, c);
+      magma += c.magma; if (c.t !== 0 && c.h > 6 + L.amp) high++;
+    }
+    if (n === 0) {                              // річка: рідина, а за кілька клітинок обабіч — суходіл
+      for (let x = -300; x <= 300; x++) {
+        tile(L, x, 0, c); if (c.t !== 0) continue;
+        const a = tile(L, x - 6, 0, {}).t, b = tile(L, x + 6, 0, {}).t;
+        if (a !== 0 && b !== 0) river++;
+      }
+    }
+  }
+  assert.ok(magma > 0 && high > 0 && river > 0, `лава ${magma}, вершин понад амплітуду ${high}, русел ${river}`);
+  // закони: біля старту кратери, вулкани й шпилі — рідко
+  for (let n = -5; n <= 5; n++) { const R = lawsOf(seed, 0, n).relief; assert.ok(R.craters <= 0.15 && R.volcano <= 0.25 && R.spires <= 0.2); }
+});

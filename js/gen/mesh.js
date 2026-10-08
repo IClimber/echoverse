@@ -2,7 +2,7 @@
 // позиції (float32 ×3), нормалі (int8 ×3), кольори (uint8 ×3), матеріали (uint8 — шар текстури), індекси.
 // Світло, туман і текстуру (за матеріалом, координати — проєкцією на площину грані) додає шейдер.
 // Земля — з блоків: грань лише між твердим і порожнім.
-import { CS, ci, bi, H, O_TREE, O_FLOAT, O_COVER, solidB, B_AIR, B_LIQ, B_ICE, B_SAND, B_GRASS, B_DRY, B_DESERT, B_SNOW, B_ROCK, B_BED, B_MUD, B_SOIL, B_STONE, B_SANDSTONE } from './chunk.js';
+import { CS, ci, bi, H, O_TREE, O_FLOAT, O_COVER, solidB, B_AIR, B_LIQ, B_ICE, B_SAND, B_GRASS, B_DRY, B_DESERT, B_SNOW, B_ROCK, B_BED, B_MUD, B_SOIL, B_STONE, B_SANDSTONE, B_MAGMA } from './chunk.js';
 import { L_LAVA, SEA } from '../universe.js';
 import { LEVEL } from '../iso.js';
 import { template, place, footprint } from './plants.js';
@@ -75,11 +75,11 @@ export function chunkMesh(C, L) {
   const COL = [], TOPM = [], SIDEM = [];
   COL[B_ICE] = P.ice; COL[B_SAND] = P.sand; COL[B_GRASS] = P.lush; COL[B_DRY] = P.dry; COL[B_DESERT] = P.desert; COL[B_SNOW] = P.snow;
   COL[B_ROCK] = P.rock; COL[B_BED] = P.bed; COL[B_MUD] = shade(P.bed, 1.15); COL[B_SOIL] = P.soil; COL[B_STONE] = shade(P.rock, 0.82);
-  COL[B_SANDSTONE] = shade(P.sand, 0.82);
+  COL[B_SANDSTONE] = shade(P.sand, 0.82); COL[B_MAGMA] = [255, 120, 40];
   TOPM[B_ICE] = M_ICE; TOPM[B_SAND] = M_SAND; TOPM[B_GRASS] = M_LUSH; TOPM[B_DRY] = M_DRY; TOPM[B_DESERT] = M_DESERT; TOPM[B_SNOW] = M_SNOW;
-  TOPM[B_ROCK] = M_ROCK; TOPM[B_BED] = M_BED; TOPM[B_MUD] = M_MUD; TOPM[B_SOIL] = M_SOIL; TOPM[B_STONE] = M_CLIFF; TOPM[B_SANDSTONE] = M_SANDSIDE;
+  TOPM[B_ROCK] = M_ROCK; TOPM[B_BED] = M_BED; TOPM[B_MUD] = M_MUD; TOPM[B_SOIL] = M_SOIL; TOPM[B_STONE] = M_CLIFF; TOPM[B_SANDSTONE] = M_SANDSIDE; TOPM[B_MAGMA] = M_LAVA;
   SIDEM[B_ICE] = M_ICE; SIDEM[B_SAND] = M_SANDSIDE; SIDEM[B_GRASS] = M_SOIL; SIDEM[B_DRY] = M_SOIL; SIDEM[B_DESERT] = M_SANDSIDE; SIDEM[B_SNOW] = M_SNOW;
-  SIDEM[B_ROCK] = M_CLIFF; SIDEM[B_BED] = M_SOIL; SIDEM[B_MUD] = M_SOIL; SIDEM[B_SOIL] = M_SOIL; SIDEM[B_STONE] = M_CLIFF; SIDEM[B_SANDSTONE] = M_SANDSIDE;
+  SIDEM[B_ROCK] = M_CLIFF; SIDEM[B_BED] = M_SOIL; SIDEM[B_MUD] = M_SOIL; SIDEM[B_SOIL] = M_SOIL; SIDEM[B_STONE] = M_CLIFF; SIDEM[B_SANDSTONE] = M_SANDSIDE; SIDEM[B_MAGMA] = M_LAVA;
   const LIP = new Set([B_GRASS, B_DRY, B_SNOW]);
   const lavaish = L.liquid.kind === L_LAVA;
   // Відтінок біому: колір блоку b у біомі bm; у клітинці — середнє по сусідах 3×3 (округлене: однакові зливаються)

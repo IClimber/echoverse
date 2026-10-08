@@ -8,7 +8,7 @@ import { initInput, moveAxis, turnAxis, sprintHeld, vertAxis, takeActions, takeW
 import { listWorlds, putWorld, deleteWorld, serialize, deserialize, newId } from './save.js';
 import { hashStr } from './rng.js';
 import { GEN, physOf } from './universe.js';
-import { CS, solidB, B_LIQ } from './gen/chunk.js';
+import { CS, solidB, B_LIQ, B_MAGMA } from './gen/chunk.js';
 import { LEVEL } from './iso.js';
 import { debugText, fmtN } from './debug.js';
 import { animate } from './anim.js';
@@ -168,11 +168,14 @@ function boot() {
   const addrStr = (d, n) => d === g.d ? `всесвіт ${fmtN(n)}` : `глибина ${d}, всесвіт ${fmtN(n)}`;
 
   // Зайшов у небезпечну рідину — сказати, що це й чим небезпечна (заходити можна: здоров'я ще немає)
-  let wasWet = false;
+  let wasWet = false, wasHot = false;
   function warnLiquid() {
-    const lq = g.world.laws(g.d, g.n).liquid, wet = !!g.me.wet;
+    const lq = g.world.laws(g.d, g.n).liquid, wet = !!g.me.wet, me = g.me;
     if (wet && !wasWet && lq.danger) toast(`${lq.name[0].toUpperCase() + lq.name.slice(1)}: ${lq.danger} — небезпечно`);
     wasWet = wet;
+    const hot = me.ground && g.world.block(g.d, g.n, Math.floor(me.x), Math.floor(me.y), Math.floor(me.z / LEVEL + 1e-4) - 1) === B_MAGMA;
+    if (hot && !wasHot) toast('Під ногами розпечена лава — небезпечно');
+    wasHot = hot;
   }
 
   // Стрибок пристроєм: вдається завжди (там, де ніде стати, — вільне місце: пливеш чи падаєш)

@@ -33,6 +33,7 @@ export function debugText(g, perf, meshCount, cam) {
     `біом       ${c ? BIOMES[c.bm].name : '—'}  (у всесвіті: ${L.biomes.flat().map(([id]) => BIOMES[id].name).filter((v, i, a) => a.indexOf(v) === i).length} біомів)`,
     `види       ${c && c.bm ? speciesLine(L, tx, ty, c.bm) : '—'}`,
     `рослини    густота ${(L.flora * 100).toFixed(1)} %, розмір ×${L.treeH.toFixed(2)}, каміння ${(L.rocks * 100).toFixed(1)} %`,
+    `рельєф     річки ${(L.relief.rivers * 100).toFixed(0)} %, каньйони ${(L.relief.canyons * 100).toFixed(0)} %, кратери ${(L.relief.craters * 100).toFixed(0)} %, вулкани ${(L.relief.volcano * 100).toFixed(0)} %${L.relief.volcanoLava ? ' (з лавою)' : ''}, шпилі ${(L.relief.spires * 100).toFixed(0)} %, тераси ${(L.relief.terrace * 100).toFixed(0)} %, дюни ${(L.relief.dunes * 100).toFixed(0)} %`,
     `фізика     тертя ${L.phys.friction.toFixed(2)}${L.phys.friction < 1 ? ' (ковзко)' : ''}, пружність ${L.phys.bounce.toFixed(2)}, падіння до ${ph.vT.toFixed(1)} од/с, плин часу ×${L.phys.time.toFixed(2)}, радіус планети ${L.phys.planetR.toFixed(0)}`,
     `небо       доба ${L.sky.lock ? 'вічна (припливне захоплення)' : (L.sky.dayMin / L.phys.time).toFixed(1) + ' хв'}, ${clockStr(dayPhase(L, g.clock || 0))}, сонць ${L.sky.suns.length}, місяців ${L.sky.moons.length}${L.sky.rings ? ', кільця' : ''}, широта ${(L.sky.lat * 69).toFixed(0)}°`,
     `повітря    тиск ${L.air.pressure.toFixed(2)} атм, ${L.air.gasName}, радіація ${(L.air.rad * 100).toFixed(0)} %, серпанок ${(L.air.haze * 100).toFixed(0)} %, вітер ${(L.air.wind * 100).toFixed(0)} %`,

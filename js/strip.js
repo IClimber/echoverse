@@ -85,8 +85,8 @@ export function runStrip() {
       Object.assign(fig.style, { margin: 0, width: SIZE * PX + 'px', fontSize: '11px', color: '#96a2bb' });
       const cap = document.createElement('figcaption');
       const mm = minimap(L, x0, y0);
-      const S = L.sky;
-      cap.textContent = `${d}:${fmtN(n)} · доба ${S.lock ? 'вічна' : S.dayMin.toFixed(0) + ' хв'} · сонць ${S.suns.length}, місяців ${S.moons.length}${S.rings ? ', кільця' : ''} · повітря ${L.air.gasName.split(' ')[0]} ${L.air.pressure.toFixed(1)} атм${L.phys.friction < 1 ? ' · ковзко' : ''}${L.phys.bounce ? ' · пружно' : ''}${L.phys.time !== 1 ? ` · час ×${L.phys.time.toFixed(1)}` : ''} · планета ${L.phys.planetR.toFixed(0)} · ${L.grav.toFixed(2)} g · ${L.liquid.name}${L.liquid.kind === 0 ? ' ' + L.liquid.tC + '°' : ''} · море ${L.seaE.toFixed(2)} · рельєф ${L.amp} · t ${L.temp.toFixed(2)} · вол ${L.wet.toFixed(2)} · біомів ${mm.biomes}, видів ${mm.species}`;
+      const S = L.sky, Rf = L.relief, forms = [Rf.volcano > 0.5 && 'вулкани', Rf.craters > 0.5 && 'кратери', Rf.spires > 0.3 && 'шпилі', Rf.canyons > 0.4 && 'каньйони', Rf.terrace > 0.6 && 'тераси'].filter(Boolean);
+      cap.textContent = `${d}:${fmtN(n)} · доба ${S.lock ? 'вічна' : S.dayMin.toFixed(0) + ' хв'} · сонць ${S.suns.length}, місяців ${S.moons.length}${S.rings ? ', кільця' : ''} · повітря ${L.air.gasName.split(' ')[0]} ${L.air.pressure.toFixed(1)} атм${L.phys.friction < 1 ? ' · ковзко' : ''}${L.phys.bounce ? ' · пружно' : ''}${L.phys.time !== 1 ? ` · час ×${L.phys.time.toFixed(1)}` : ''} · планета ${L.phys.planetR.toFixed(0)} · ${L.grav.toFixed(2)} g · ${L.liquid.name}${L.liquid.kind === 0 ? ' ' + L.liquid.tC + '°' : ''} · море ${L.seaE.toFixed(2)} · рельєф ${L.amp} · t ${L.temp.toFixed(2)} · вол ${L.wet.toFixed(2)} · біомів ${mm.biomes}, видів ${mm.species}${forms.length ? ' · ' + forms.join(', ') : ''}`;
       fig.append(skyBar(L), mm.cv, cap);
       wrap.append(fig);
     }
