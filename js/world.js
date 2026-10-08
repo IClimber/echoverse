@@ -156,7 +156,7 @@ export function createWorld(seed, onMesh) {
 export function findSpawn(seed, d = 0, n = 0, maxR = 200) {
   const L = lawsOf(seed, d, n), ph = physOf(L), cols = new Map();
   const col = (x, y) => { const k = `${x},${y}`; let c = cols.get(k); if (!c) { c = genColumn(L, x, y); cols.set(k, c); } return c; };
-  const surf = (c) => { for (let k = c.c.h + 6; k >= 0; k--) if (c.at(k) !== B_AIR) return k; return -1; };
+  const surf = (c) => { for (let k = c.c.h + (c.c.fb || 0) + 1; k >= 0; k--) if (c.at(k) !== B_AIR) return k; return -1; };
   const P = {
     liquid: L.liquid,
     block: (x, y, k) => col(x, y).at(k),

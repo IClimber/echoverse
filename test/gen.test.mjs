@@ -190,7 +190,7 @@ test('левітуючі породи: біля старту немає; тра�
   assert.ok(conds.size === 4 && withFloat !== null && islands > 3 && islands < 120, `умов ${conds.size}, островів ${islands}`);
   let floatsN = 0;
   const L = lawsOf(seed, 0, withFloat);
-  for (let cx = 0; cx < 12; cx++) {
+  for (let cx = 0; cx < 80 && floatsN < 5; cx++) {        // каміння — рідкість (1 % клітинок): шукаємо далі, поки не трапиться
     const C = genChunk(L, cx, 0), m = solidMask(C);
     for (const o of C.obj) if (o.k === O_FLOAT) {
       floatsN++; assert.equal(m[o.y * CS + o.x], 0);
@@ -355,7 +355,7 @@ test('форми рельєфу: річки (вузькі смуги рідин�
 test('далечінь: плитка — узгоджений меш, висоти вершин — поверхня tile', async () => {
   const { farMesh, FT } = await import('../js/gen/far.js');
   const { LEVEL } = await import('../js/iso.js');
-  const { T_ICE } = await import('../js/gen/chunk.js');
+  const { T_ICE, cliffTop } = await import('../js/gen/chunk.js');
   const L = lawsOf(hashStr('далечінь'), 0, 7);
   for (const s of [2, 4, 8]) {
     const { mesh: m, zmin, zmax } = farMesh(L, -1, 2, s), n = FT / s + 1, nv = m.pos.length / 3;
@@ -364,8 +364,8 @@ test('далечінь: плитка — узгоджений меш, висот
     for (const i of m.idx) assert.ok(i < nv);
     assert.ok(zmin <= zmax);
     for (const [i, j] of [[0, 0], [n - 1, 3], [5, n - 1]]) {
-      const c = tile(L, -FT + i * s, 2 * FT + j * s), z = m.pos[(j * n + i) * 3 + 2];
-      if (c.t !== T_WATER && c.t !== T_ICE) assert.ok(Math.abs(z - (c.h + 1) * LEVEL) < 1e-6, `${z} / ${c.h}`);
+      const x = -FT + i * s, y = 2 * FT + j * s, c = tile(L, x, y), z = m.pos[(j * n + i) * 3 + 2];   // скелі — за шумом на рівні поверхні
+      if (c.t !== T_WATER && c.t !== T_ICE) assert.ok(Math.abs(z - (c.h + cliffTop(L, x, y, c) + 1) * LEVEL) < 1e-6, `${z} / ${c.h}`);
     }
   }
 });
@@ -395,18 +395,22 @@ test('печери: великі зали (порожнина ≥ 30 блокі�
 test('рідкісність законів: класи всесвітів 30 / 45 / 20 / 5 %, крайнє й легендарне — рідко, біля старту — лише звичайне', async () => {
   const { qOf, STRANGE_NAMES } = await import('../js/universe.js');
   const seed = hashStr('test'), N = 20000, cls = [0, 0, 0, 0], dec = new Array(10).fill(0);
-  let none = 0, ext = 0, leg = 0, isl = 0, anom = 0, volc = 0, w360 = 0;
+  let none = 0, ext = 0, leg = 0, isl = 0, anom = 0, volc = 0, w360 = 0, c0 = 0, n0 = 0, c4 = 0, inv = 0, p150 = 0;
   const W = [];
   for (let i = 0; i < N; i++) {
     const L = lawsOf(seed, 0, 200 + i * 7), t = Object.values(L.tiers), m = t.length ? Math.max(...t) : 0;
     cls[L.strange.cls]++; dec[Math.min(9, Math.floor(qOf((i * 0.618034 % 1) * 2.2 - 1.1) * 10))]++;
     if (m === 0) none++; if (m >= 2) ext++; if (m === 3) leg++;
+    if (L.strange.cls === 0) { n0++; c0 += L.land.cliff.share; }
+    if (L.land.cliff.share >= 0.4) c4++; if (L.land.fam[5].share > 0) inv++; if (L.land.P > 150) p150++;
     if (L.islands > 0) isl++; if (L.anom.freq >= 0.02) anom++; if (L.relief.volcano > 0.4) volc++;
     const kmh = L.air.wind * 2.2 * 1.8 * 3.6; W.push(kmh); if (kmh > 360) w360++;
   }
   const pc = (v) => v / N * 100;
   [30, 45, 20, 5].forEach((v, i) => assert.ok(Math.abs(pc(cls[i]) - v) < 3, `${STRANGE_NAMES[i]}: ${pc(cls[i]).toFixed(1)} %`));
-  assert.ok(pc(none) > 25 && pc(none) < 42, `без незвичного ${pc(none)}`);
+  // рельєф 3.1 (як гори) — від повільної незвичайності, свій бюджет: тож і серед «звичайних» трапляються незвичні форми
+  assert.ok(pc(none) > 20 && pc(none) < 42, `без незвичного ${pc(none)}`);
+  assert.ok(c0 / n0 > 0.05 && c0 / n0 < 0.2 && pc(c4) < 6 && pc(inv) < 2.5 && pc(p150) < 8, `скелі у звичайних ${c0 / n0}, ≥ 0,4 — ${pc(c4)} %, перевернутий ${pc(inv)} %, плато > 150 — ${pc(p150)} %`);
   assert.ok(pc(ext) > 12 && pc(ext) < 30, `з крайнім ${pc(ext)}`);
   assert.ok(pc(leg) > 0.2 && pc(leg) < 2.5, `з легендарним ${pc(leg)}`);
   assert.ok(pc(isl) > 1.2 && pc(isl) < 6, `острови ${pc(isl)}`);
@@ -453,4 +457,107 @@ test('печери за рідкісністю: лише в печерних о�
     for (let i = 0; i < 20000; i++) { t++; if (noise3(L.sCm, ((i * 37) % 3000) / 200, ((i * 91) % 2900) / 200, -((i * 13) % 400) / 300) > L.caveThr) inn++; }
     assert.ok(Math.abs(inn / t - L.caveShare) < 0.08, `області ${inn / t} проти ${L.caveShare}`);
   }
+});
+
+test('рельєф 3.1: родини кривої «материк → висота» — берег на місці, неперервні, мають свою форму', async () => {
+  const { famF } = await import('../js/gen/chunk.js');
+  const A = 20, P = 100, c = 0.5, N = 4, F = (id, u) => famF(id, u, A, P, c, N, 0);
+  for (let id = 0; id < 6; id++) {
+    assert.ok(Math.abs(F(id, 0)) < 1e-9, `родина ${id}: F(0) = ${F(id, 0)}`);
+    for (let u = 0; u < 1; u += 0.001) {
+      const d = F(id, u + 0.001) - F(id, u);
+      assert.ok(Math.abs(d) < 0.1 * P, `родина ${id}: стрибок ${d} при u ${u}`);
+      if (id < 5) assert.ok(d > -1e-9, `родина ${id} спадає при u ${u}`);
+    }
+  }
+  assert.ok(F(4, 0.53) - F(4, 0.495) >= 0.9 * P, 'столові гори: урвище');
+  for (let k = 0; k < N; k++) {                            // трапи: на середині сходинки — рівно плато сходинки
+    const u = 0.08 + 0.84 * (k + 0.35) / N;
+    assert.ok(Math.abs(F(3, u) - (0.3 * A * u + P * k / N)) < 1e-6, `трапи: сходинка ${k}`);
+  }
+  assert.ok(F(5, 0.2) >= 0.9 * P && F(5, 1) <= -0.25 * P, 'перевернутий: високі береги й внутрішнє море');
+});
+
+test('скелі: вежі й нависання є, відірваних шматків немає; межі чанків і окремий стовпець збігаються', async () => {
+  const { genCol, genBlocks, genColumn, bv, solidB, B_FLOAT } = await import('../js/gen/chunk.js');
+  const seed = hashStr('скелі');
+  let L = null;
+  for (let i = 0; i < 20000 && !L; i++) { const M = lawsOf(seed, 0, 7 * i); if (M.land.cliff.share >= 0.4 && M.land.cliff.F >= 40) L = M; }
+  assert.ok(L, 'немає всесвіту зі скелями');
+  let cx0 = null, cy0 = 0;                                   // чанк з вежами (> 50 блоків скель)
+  const towers = (col) => { let t = 0; for (let i = 0; i < col.cells.length; i++) { const c = col.cells[i], x = i % (CS + 2), y = Math.floor(i / (CS + 2)); if (c.fk && x > 0 && y > 0 && x <= CS && y <= CS) for (const v of c.fk) t += v; } return t; };
+  for (let cy = -20; cy < 20 && cx0 === null; cy++) for (let cx = -20; cx < 20; cx++) if (tile(L, cx * CS + 8, cy * CS + 8).fb > 10 && towers(genCol(L, cx, cy)) > 50) { cx0 = cx; cy0 = cy; break; }
+  assert.ok(cx0 !== null, 'немає смуги скель');
+  const cols = {};
+  let hmin = Infinity, top = -Infinity;
+  for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) {
+    const col = cols[i + ',' + j] = genCol(L, cx0 + i, cy0 + j);
+    for (const c of col.cells) { hmin = Math.min(hmin, c.h); top = Math.max(top, c.h + c.fb); }
+  }
+  const k0 = hmin - 4, nk = top + 2 - k0, V = {};
+  for (const key in cols) V[key] = genBlocks(L, cols[key], k0, nk);
+  // 3×3 чанки: від ґрунту (нижче поверхні клітинки) по 6 сусідах крізь тверде (острови — ні) — до кожного блоку скелі
+  const W = 3 * CS, key = (x, y) => (Math.floor(x / CS) - 1) + ',' + (Math.floor(y / CS) - 1);
+  const at = (x, y, k) => { if (x < 0 || y < 0 || x >= W || y >= W || k < 0 || k >= nk) return false; const b = V[key(x, y)].b[bv(x % CS, y % CS, k, nk)]; return solidB(b) && b !== B_FLOAT; };
+  const hAt = (x, y) => cols[key(x, y)].h[ci(x % CS, y % CS)] - k0;
+  const seen = new Uint8Array(W * W * nk), id = (x, y, k) => (y * W + x) * nk + k, st = [];
+  for (let y = 0; y < W; y++) for (let x = 0; x < W; x++) for (let k = 0; k < hAt(x, y); k++) if (at(x, y, k)) { seen[id(x, y, k)] = 1; st.push(x, y, k); }
+  while (st.length) {
+    const k = st.pop(), y = st.pop(), x = st.pop();
+    for (const [a, b, c] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) {
+      const X = x + a, Y = y + b, K = k + c;
+      if (at(X, Y, K) && !seen[id(X, Y, K)]) { seen[id(X, Y, K)] = 1; st.push(X, Y, K); }
+    }
+  }
+  let tower = 0, lost = 0, over = 0;
+  for (let y = CS; y < 2 * CS; y++) for (let x = CS; x < 2 * CS; x++) {
+    const h = hAt(x, y);
+    for (let k = h; k < nk; k++) if (at(x, y, k)) { tower++; if (!seen[id(x, y, k)]) lost++; if (k > h && !at(x, y, k - 1)) over++; }
+  }
+  assert.equal(lost, 0, `відірваних блоків ${lost} з ${tower}`);
+  assert.ok(tower > 50, `блоків скель лише ${tower}`);
+  // нависання: шукаємо в сусідніх чанках області (у центральному може не трапитись)
+  for (let i = 0; i < 40 && !over; i++) {
+    const col = genCol(L, cx0 + (i % 8) - 4, cy0 + Math.floor(i / 8) - 2);
+    for (const c of col.cells) if (c.fk) for (let q = 1; q < c.fk.length; q++) if (c.fk[q] && !c.fk[q - 1]) over++;
+  }
+  assert.ok(over > 0, 'немає нависань');
+  // рамки сусідів і окремий стовпець — ті самі блоки по всій смузі
+  const A = V['0,0'], E = V['1,0'];
+  for (let y = 0; y < CS; y++) for (let k = 0; k < nk; k++) assert.equal(A.b[bv(CS, y, k, nk)], E.b[bv(0, y, k, nk)], `рамка (${y}, ${k})`);
+  let checked = 0;
+  for (let y = 0; y < CS && checked < 3; y++) for (let x = 0; x < CS && checked < 3; x++) {
+    if (!cols['0,0'].cells[ci(x, y)].fb) continue;
+    checked++;
+    const C = genColumn(L, (cx0 + 0) * CS + x, cy0 * CS + y);
+    for (let k = 0; k < nk; k++) assert.equal(C.at(k0 + k), A.b[bv(x, y, k, nk)], `стовпець (${x}, ${y}, ${k0 + k})`);
+  }
+  assert.equal(checked, 3);
+});
+
+test('рельєф 3.1: форми майже не зменшують схожість сусідніх всесвітів', () => {
+  const seed = hashStr('test');
+  const off = (D) => { D.cliff.share = 0; D.fam.forEach((f) => { f.share = 0; }); D.cuesta.share = 0; D.rift.share = 0; D.insel.prob = 0; D.karst.share = 0; D.ero.bias = 0; };
+  const sim = (n, bare) => {
+    const A = structuredClone(lawsOf(seed, 0, n)), B = structuredClone(lawsOf(seed, 0, n + 1)), a = {}, b = {};
+    if (bare) { off(A.land); off(B.land); }
+    let close = 0, N = 0;
+    for (let y = -256; y < 256; y += 4) for (let x = -256; x < 256; x += 4) {
+      tile(A, x, y, a); tile(B, x, y, b);
+      close += a.t === T_WATER && b.t === T_WATER || Math.abs(a.h - b.h) <= 1 + 0.08 * Math.abs(a.h - SEA); N++;
+    }
+    return close / N;
+  };
+  const crit = [(L) => L.land.cliff.share >= 0.4, ...[0, 1, 2, 3, 4].map((i) => (L) => L.land.fam[i].share >= 0.4), (L) => L.land.fam[5].share > 0.05,
+    (L) => L.land.cuesta.share >= 0.3, (L) => L.land.insel.prob >= 0.35, (L) => L.land.karst.share >= 0.15, (L) => L.land.rift.share >= 0.25, (L) => Math.abs(L.land.ero.bias) >= 0.4];
+  const res = [];
+  for (const f of crit) {
+    let n = null;
+    for (let i = 0; i < 30000 && n === null; i++) if (f(lawsOf(seed, 0, 200 + 7 * i))) n = 200 + 7 * i;
+    assert.ok(n !== null, 'форма не трапилась');
+    const s = sim(n, false), s0 = sim(n, true);
+    res.push(s);
+    assert.ok(s > s0 - 0.08, `всесвіт ${n}: схожість ${s.toFixed(3)} проти ${s0.toFixed(3)} без форм 3.1`);
+  }
+  assert.ok(res.reduce((a, b) => a + b) / res.length > 0.8, `середня схожість ${res}`);
 });

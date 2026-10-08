@@ -1,12 +1,20 @@
 // debug.js — панель F3: зерно, адреса, клітинка, чанк і його відбиток, закони всесвіту, швидкодія.
-import { CS, TYPE_NAMES, BLOCK_NAMES, digest } from './gen/chunk.js';
-import { physOf, STRANGE_NAMES, TIER_NAMES } from './universe.js';
+import { CS, TYPE_NAMES, BLOCK_NAMES, digest, tile } from './gen/chunk.js';
+import { physOf, STRANGE_NAMES, TIER_NAMES, FAM_NAMES } from './universe.js';
 import { BIOMES } from './gen/biomes.js';
 import { regionAt, speciesOf, FORMS } from './gen/flora.js';
 import { jumpHeight } from './player.js';
 import { dayPhase, clockStr } from './sky.js';
 import { weatherAt, WEATHER_NAMES } from './weather.js';
 import { LEVEL } from './iso.js';
+
+// Рельєф 3.1: скелі, родини кривої, ерозія, куести, останці, карст, рифти
+function land3(L) {
+  const D = L.land, pc = (v) => (v * 100).toFixed(0) + ' %';
+  const fam = D.fam.map((f, i) => f.share >= 0.01 ? `${FAM_NAMES[i]} ${pc(f.share)}` : '').filter(Boolean);
+  return `скелі ${pc(D.cliff.share)} до ${D.cliff.F.toFixed(0)} бл. · плато ${D.P.toFixed(0)} бл.${fam.length ? ': ' + fam.join(', ') : ''} · ерозія ${D.ero.bias.toFixed(2)}`
+    + ` · куести ${pc(D.cuesta.share)} · останці ${pc(D.insel.prob)} · карст ${pc(D.karst.share)} · рифти ${pc(D.rift.share)}`;
+}
 
 // Види області під ногами в цьому біомі: «область 3fa2c1: хвойне, кущ, трава»
 function speciesLine(L, x, y, bm) {
@@ -35,6 +43,8 @@ export function debugText(g, perf, meshCount, cam) {
     `види       ${c && c.bm ? speciesLine(L, tx, ty, c.bm) : '—'}`,
     `рослини    густота ${(L.flora * 100).toFixed(1)} %, розмір ×${L.treeH.toFixed(2)}, каміння ${(L.rocks * 100).toFixed(1)} %`,
     `рельєф     річки ${(L.relief.rivers * 100).toFixed(0)} %, каньйони ${(L.relief.canyons * 100).toFixed(0)} %, кратери ${(L.relief.craters * 100).toFixed(0)} %, вулкани ${(L.relief.volcano * 100).toFixed(0)} %${L.relief.volcanoLava ? ' (з лавою)' : ''}, шпилі ${(L.relief.spires * 100).toFixed(0)} %, тераси ${(L.relief.terrace * 100).toFixed(0)} %, дюни ${(L.relief.dunes * 100).toFixed(0)} %`,
+    `рельєф 3.1 ${land3(L)}`,
+    `тут        ${((t) => (t.fam >= 0 ? FAM_NAMES[t.fam] : 'плавна') + (t.fx ? `, скелі до ${t.fx.toFixed(0)} бл.` : ''))(tile(L, tx, ty))}`,
     `породи     ${L.stones.length ? L.stones.map((st) => `${['завжди', 'g < ' + st.thr.toFixed(2), 'g > ' + st.thr.toFixed(2), 'поле > ' + st.thr.toFixed(2)][st.cond]}, підйом ${st.lift.toFixed(2)}${st.active ? (st.lift > 1 ? ' — ширяє' : ' — легша') : ' — ні'}${st.islands ? ', острови' : ''}`).join('; ') : 'левітуючих немає'}`,
     `поле       магнітне ${(L.mag.k * 100).toFixed(0)} %, аномалії гравітації ${(L.anom.freq * 100).toFixed(0)} %${L.anom.tilt ? ' (з нахилом)' : ''}, тут ×${(g.ph && g.ph.anom || 1).toFixed(2)}; рідина: в'язкість ${L.liquid.visc.toFixed(1)}${L.liquid.tension ? ', поверхневий натяг' : ''}`,
     `фізика     тертя ${L.phys.friction.toFixed(2)}${L.phys.friction < 1 ? ' (ковзко)' : ''}, пружність ${L.phys.bounce.toFixed(2)}, падіння до ${ph.vT.toFixed(1)} од/с, плин часу ×${L.phys.time.toFixed(2)}, радіус планети ${L.phys.planetR.toFixed(0)}`,

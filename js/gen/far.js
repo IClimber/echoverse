@@ -3,7 +3,7 @@
 // (текстурами) верху, на крутому схилі — боку, як у повних секціях.
 // «Спідниця» по краях (стрічка донизу) ховає щілини між плитками різного кроку. Лише вигляд: позиції — від
 // куточка плитки, нормалі й кольори — float (рендер), генерація — tile (детермінована)
-import { tile, SURF_Z, T_WATER, T_ICE, T_SAND, T_LUSH, T_DRY, T_DESERT, T_SNOW, T_ROCK, T_BED, O_TREE, O_ROCK } from './chunk.js';
+import { tile, cliffTop, SURF_Z, T_WATER, T_ICE, T_SAND, T_LUSH, T_DRY, T_DESERT, T_SNOW, T_ROCK, T_BED, O_TREE, O_ROCK } from './chunk.js';
 import { groundTint } from './flora.js';
 import { LEVEL } from '../iso.js';
 import { L_LAVA } from '../universe.js';
@@ -18,8 +18,10 @@ export function farMesh(L, tx, ty, s) {
   const Z = new Float32Array(N * N), C = new Uint8Array(n * n * 3), T = new Uint8Array(n * n), c = {};
   let zmin = Infinity, zmax = -Infinity;
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
-    tile(L, x0 + (i - 1) * s, y0 + (j - 1) * s, c);
-    const water = c.t === T_WATER, z = water || c.t === T_ICE ? SURF_Z : (c.t === T_BED ? c.bed : c.h) * LEVEL + LEVEL;   // верх верхнього блоку
+    const x = x0 + (i - 1) * s, y = y0 + (j - 1) * s;
+    tile(L, x, y, c);
+    // верх верхнього блоку (скелі — за шумом на рівні поверхні)
+    const water = c.t === T_WATER, z = water || c.t === T_ICE ? SURF_Z : c.t === T_BED ? c.bed * LEVEL + LEVEL : (c.h + cliffTop(L, x, y, c)) * LEVEL + LEVEL;
     Z[j * N + i] = z;
     if (i < 1 || j < 1 || i > n || j > n) continue;
     if (z < zmin) zmin = z;

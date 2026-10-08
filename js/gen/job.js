@@ -29,7 +29,8 @@ export function colSummary(col, L) {
     const c = col.cells[i], basin = c.t === T_WATER || c.t === T_ICE || c.t === T_BED, sky = col.sky[i];
     top[i] = basin ? Math.max(c.bed, c.t === T_BED ? 0 : SEA) : sky < SEA - 1 && pit ? SEA : sky + 1;
     lo = Math.min(lo, (basin ? c.bed : Math.min(sky, c.h)) - 10);
-    hi = Math.max(hi, c.h + 8);
+    // скелі — над поверхнею; водойма — до рівня рідини (глибоке море: інакше секцію з поверхнею не підвантажували)
+    hi = Math.max(hi, (basin && c.t !== T_BED ? Math.max(c.h, SEA) : c.h + (c.fb || 0)) + 8);
   }
   for (const o of col.obj) hi = Math.max(hi, o.z + 1);
   return {
