@@ -484,3 +484,37 @@ test('тіла й вітер: сплячий левітуючий камінь �
   for (let i = 0; i < 300; i++) stepBody(calm, 1 / 60, P, { ...env, wind: [0, 0] });
   assert.ok(calm.sleep && Math.abs(calm.x - 30.5) < 1e-6, 'без вітру спить на місці');
 });
+
+test('погода в місці не мигтить на межі пустелі: пустеля й сухість — за околом з гістерезисом', async () => {
+  const { lawsOf } = await import('../js/universe.js');
+  const { areaClimate } = await import('../js/weather.js');
+  const { tile, T_DESERT, T_DRY } = await import('../js/gen/chunk.js');
+  const { hashStr } = await import('../js/rng.js');
+  const seed = hashStr('test');
+  let checked = 0;
+  for (let i = 0; i < 2000 && checked < 3; i++) {
+    const L = lawsOf(seed, 0, 200 + 7 * i);
+    if (L.wet > -0.3) continue;
+    const typ = (x) => tile(L, x, 0).t, ar = (t) => t === T_DESERT || t === T_DRY;
+    let x0 = null;                                   // рвана межа: тип перемикається ≥ 4 рази на 60 клітинках
+    for (let a = -3000; a < 3000 && x0 === null; a += 30) {
+      let f = 0, p = ar(typ(a));
+      for (let x = a + 1; x < a + 60; x++) { const q = ar(typ(x)); if (q !== p) f++; p = q; }
+      if (f >= 4) x0 = a;
+    }
+    if (x0 === null) continue;
+    checked++;
+    for (const key of ['arid', 'desert']) {
+      const cellOf = key === 'arid' ? (t) => ar(t) : (t) => t === T_DESERT;
+      let prev = null, last = null, flips = 0, cellFlips = 0, pc = null, pa = null;
+      for (let x = x0 - 100; x < x0 + 160; x++) {
+        prev = areaClimate(L, x + 0.5, 0.5, prev);
+        if (pa !== null && prev[key] !== pa) { assert.ok(last === null || x - last >= 12, `${key}: перемикання через ${x - last} клітинок`); last = x; flips++; }
+        pa = prev[key];
+        const q = cellOf(typ(x)); if (pc !== null && q !== pc) cellFlips++; pc = q;
+      }
+      assert.ok(flips < cellFlips || cellFlips === 0, `${key}: ${flips} перемикань околу проти ${cellFlips} по клітинках`);
+    }
+  }
+  assert.ok(checked > 0, 'не знайшлося рваної межі пустелі');
+});

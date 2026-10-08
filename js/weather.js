@@ -2,7 +2,9 @@
 // Час поділено на відрізки (L.air.segMin хв); погода відрізка — з ваг законів (L.air.w) за хешем (всесвіт, відрізок),
 // тож та сама мить — та сама погода. Між відрізками — плавний перехід. Гроза — зі спалахами блискавок.
 // Місце уточнює: у холоді (сніг, лід) дощ — снігом, у пустелі й степу дощ не долітає; кислота — кислотний дощ.
+// Холод, пустеля й сухість — за околом з гістерезисом (areaClimate), не за клітинкою під ногами.
 import { hash3, unit } from './rng.js';
+import { tile, T_DESERT, T_DRY } from './gen/chunk.js';
 
 export const W_CLEAR = 0, W_CLOUDY = 1, W_RAIN = 2, W_STORM = 3, W_FOG = 4, W_DUST = 5;
 const KINDS = ['clear', 'cloudy', 'rain', 'storm', 'fog', 'dust'];
@@ -64,4 +66,27 @@ export function localWeather(L, W, cold, desert, arid = desert) {
   if (cold) name = W.kind === W_STORM ? 'хуртовина' : 'сніг';
   else if (type === 'acid') name = W.kind === W_STORM ? 'гроза, кислотний дощ' : 'кислотний дощ';
   return { type, k: W.precip, name, W };
+}
+
+// Клімат місця для погоди: холодно (сніг), пустеля (дощ не долітає), сухо (пилова буря) — за околом (3×3 точки з
+// кроком CLIM_S клітинок: погода не знає про окремі клітинки) з гістерезисом: біля межі не перемикається на кожному
+// кроці (скарга 08.10.2026: «в одному блоці пилова буря, а в сусідньому нема»). prev — попередній результат
+const COLD_T = -0.45, COLD_H = 0.04, CLIM_S = 12;
+export function areaClimate(L, x, y, prev) {
+  const fx = Math.floor(x), fy = Math.floor(y);
+  if (prev && prev.L === L && prev.x === fx && prev.y === fy) return prev;
+  let T = 0, de = 0, ar = 0;
+  for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) {
+    const c = tile(L, fx + i * CLIM_S, fy + j * CLIM_S);
+    T += c.T / 9;
+    if (c.t === T_DESERT) de++;
+    if (c.t === T_DESERT || c.t === T_DRY) ar++;
+  }
+  const p = prev && prev.L === L ? prev : null;
+  return {
+    L, x: fx, y: fy,
+    cold: p ? (p.cold ? T < COLD_T + COLD_H : T < COLD_T - COLD_H) : T < COLD_T,
+    desert: p && p.desert ? de >= 3 : de >= 6,       // вмикається з 6 із 9 точок, вимикається нижче 3
+    arid: p && p.arid ? ar >= 3 : ar >= 6,
+  };
 }
