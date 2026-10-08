@@ -17,11 +17,14 @@ import { clockStr } from './sky.js';
 import { weatherAt, localWeather, areaClimate } from './weather.js';
 import { createCamera, rotate, wheel, smooth, moveBasis, clipDist, camDist, facing, setYaw, basis, setViewChunks, ISO, THIRD, HEAD, VIEW_R } from './camera.js';
 import { createStreamer } from './stream.js';
+import { createTicker } from './ticker.js';
 
 const $ = (id) => document.getElementById(id);
 const SAVE_MS = 10000;                     // автозбереження
 const CAM_KEY = 'echoverse-camera';         // вибраний вигляд (на браузер)
 const VIEW_KEY = 'echoverse-view';          // дальність, чанків (на браузер)
+const PHYS_DT = 1 / 120, AI_DT = 1 / 30;      // такти: фізика (гравець, тіла); світ, моби й NPC
+const AI_BUDGET = 2;                          // мс на такт світу: що не встигло — на наступному
 
 const QS = new URLSearchParams(location.search);
 if (QS.has('strip')) import('./strip.js').then((m) => m.runStrip());
@@ -42,6 +45,7 @@ function boot() {
   let g = null;                              // поточна гра
   const camera = createCamera(load(CAM_KEY) === ISO ? ISO : THIRD);
   const streamer = createStreamer();
+  const physT = createTicker(PHYS_DT), aiT = createTicker(AI_DT, 4);
   // Дальність (8–32 чанки): камера, ліміти пам'яті світу, бюджет GPU, стрімінг
   const setView = (c) => {
     c = setViewChunks(c);
@@ -144,6 +148,7 @@ function boot() {
 
   // ================= Гра =================
   async function startWorld(rec) {
+    physT.reset(); aiT.reset();
     if (g && g.rec.id === rec.id) { hideMenu(); return; }
     if (g) await quitGame(true);
     if (!rec.player) {
@@ -160,6 +165,7 @@ function boot() {
       }), dev: createDevice(rec.history),
       d: p.d, n: p.n, me: { x: p.x, y: p.y, z: p.z, vz: 0, air: false, ground: true, yaw: Math.PI * 0.75, moving: false, placed: false },
       cam: [p.x, p.y, p.z || 0], lastSave: performance.now(), view: null, clock: rec.clock || 0,
+      stamp: 0, ai: [], aiAt: 0,                 // крок фізики (інтерполяція тіл); системи світу (моби, NPC) — (dt, g)
     };
     g.world.setCurrent(g.d, g.n);
     g.world.setKeep(keepFor(VIEW_R));
@@ -264,6 +270,7 @@ function boot() {
       if (mv > 0.1 && (dx * me.vx + dy * me.vy) > 0) push(b, [dx / l * PLAYER_MASS * 5 * dt, dy / l * PLAYER_MASS * 5 * dt, 0]);
     }
     const P = g.world.probe(g.d, g.n);
+    for (const b of near) { b.px = b.x; b.py = b.y; b.pz = b.z; b.ps = g.stamp; }   // стан до кроку — інтерполяція кадру
     for (const b of near) {
       const ph = physAt(L, b.x, b.y), env = { g: ph.g, vT: ph.vT, bounce: L.phys.bounce, friction: L.phys.friction, wind: W.wind };
       if (b.sleep && !windMoves(b, env)) continue;                // спить і вітер не зрушить — не рахуємо
@@ -332,34 +339,54 @@ function boot() {
       const at = placeIn(g.d, g.n, me.x, me.y, me.z);
       if (at !== undefined) {
         me.x = at[0]; me.y = at[1]; me.z = at[2];
-        me.ground = false; me.stepOff = 0; me.vis = me.z;
+        me.ground = false; me.stepOff = 0; me.vis = me.z; me.px = me.x; me.py = me.y; me.pv = me.z;
         g.cam = [me.x, me.y, me.z]; me.placed = true;
         $('loading').hidden = true;
         $('mouseHint').hidden = camera.mode !== THIRD || locked();
       }
     } else {
+      // фізика — фіксованим тактом PHYS_DT (стан до кроку — для інтерполяції кадру); пробіл — «защіпка» до кроку
       const [ix, iy] = moveAxis();
       const sprint = sprintHeld();
-      const L = g.world.laws(g.d, g.n), W = weatherAt(L, g.clock);   // вітер — сила опору (густина повітря — у vT)
-      g.ph = physAt(L, me.x, me.y);
-      const probe = g.world.probe(g.d, g.n);
-      g.lee = windShelter(probe, me.x, me.y, me.z, W.wind);       // затишок: стіна, дерево чи камінь з навітряного боку, печера
-      step(me, ix, iy, jump, dt, probe, g.ph, moveBasis(camera), { sprint, vert: vertAxis(), wind: [W.wind[0] * g.lee, W.wind[1] * g.lee] });
-      me.run = sprint && me.moving && !me.fly;
-      if (camera.mode === THIRD) me.yaw = facing(camera);                 // спиною до камери; S — задкує
-      simBodies(dt, L, W);
-      warnLiquid();
-      if (g.dev.update(dt)) tryJump();
+      g.jumpLatch = g.jumpLatch || jump;
+      for (let s = physT.advance(dt); s > 0; s--) {
+        const L = g.world.laws(g.d, g.n), W = weatherAt(L, g.clock);   // вітер — сила опору (густина повітря — у vT)
+        me.px = me.x; me.py = me.y; me.pv = me.vis ?? me.z; g.stamp++;
+        g.ph = physAt(L, me.x, me.y);
+        const probe = g.world.probe(g.d, g.n);
+        g.lee = windShelter(probe, me.x, me.y, me.z, W.wind);       // затишок: стіна, дерево чи камінь з навітряного боку, печера
+        step(me, ix, iy, g.jumpLatch, PHYS_DT, probe, g.ph, moveBasis(camera), { sprint, vert: vertAxis(), wind: [W.wind[0] * g.lee, W.wind[1] * g.lee] });
+        g.jumpLatch = false;
+        me.run = sprint && me.moving && !me.fly;
+        if (camera.mode === THIRD) me.yaw = facing(camera);                 // спиною до камери; S — задкує
+        simBodies(PHYS_DT, L, W);
+        warnLiquid();
+        if (g.dev.update(PHYS_DT)) { tryJump(); me.px = me.x; me.py = me.y; me.pv = me.vis ?? me.z; }   // стрибок — без «шлейфу»
+        if (!me.placed) break;
+      }
+      if (camera.mode === THIRD) me.yaw = facing(camera);                   // і в кадрі без кроку фізики (камера — щокадру)
+      // світ, моби й NPC — тактом AI_DT; бюджет такту AI_BUDGET мс: системи, що не встигли, — на наступному
+      for (let s = aiT.advance(dt); s > 0; s--) {
+        const t0 = performance.now();
+        for (let i = 0; i < g.ai.length; i++) {
+          const j = (g.aiAt + i) % g.ai.length;
+          if (performance.now() - t0 > AI_BUDGET) { g.aiAt = j; break; }
+          g.ai[j](AI_DT, g);
+        }
+      }
     }
+    // Інтерполяція між двома останніми кроками фізики (кадр не смикається при частоті, не кратній такту)
+    const al = physT.alpha, lerp = (a, b) => a === undefined ? b : a + (b - a) * al;
+    me.ix = lerp(me.px, me.x); me.iy = lerp(me.py, me.y); me.iv = lerp(me.pv, me.vis ?? me.z);
     // Ціль камери: гравець (у третій особі — його голова); плавно, по висоті — повільніше (стрибок не трусить камеру)
     const k = Math.min(1, dt * (camera.mode === ISO ? 8 : 14)), kz = Math.min(1, dt * 5);
-    let tz = (me.vis ?? me.z ?? 0) + (camera.mode === THIRD ? HEAD : 0), capped = false;
+    let tz = (me.iv ?? me.z ?? 0) + (camera.mode === THIRD ? HEAD : 0), capped = false;
     const solidAt = (x, y, z) => { const b = g.world.block(g.d, g.n, x, y, Math.floor(z / LEVEL)); return b === B_LIQ || solidB(b); };
     if (camera.mode === THIRD && me.placed) {                 // низька стеля (печера): ціль — під нею, інакше видно крізь блоки
-      const fx = Math.floor(me.x), fy = Math.floor(me.y), base = me.vis ?? me.z;
+      const fx = Math.floor(me.x), fy = Math.floor(me.y), base = me.iv ?? me.z;
       for (let z = me.z + 0.6; z <= me.z + HEAD + 0.35; z += LEVEL) if (solidAt(fx, fy, z)) { tz = Math.min(tz, Math.floor(z / LEVEL) * LEVEL - me.z + base - 0.28); capped = true; break; }
     }
-    g.cam[0] += (me.x - g.cam[0]) * k; g.cam[1] += (me.y - g.cam[1]) * k;
+    g.cam[0] += ((me.ix ?? me.x) - g.cam[0]) * k; g.cam[1] += ((me.iy ?? me.y) - g.cam[1]) * k;
     g.cam[2] += (tz - g.cam[2]) * kz;
     if (capped && tz < g.cam[2]) g.cam[2] = tz;               // під стелю — одразу
     g.camDist = camera.mode === THIRD ? camDist(g.camDist, clipDist(camera, g.cam, solidAt), dt) : camera.dist;
@@ -395,9 +422,15 @@ function boot() {
     const anim = animate(me, dt, now, physOf(L).speed * (me.run ? SPRINT * 0.85 : 1));
     if (!g.view) return;
     renderer.pump();
+    // тіла: між двома останніми кроками фізики (ті, що цього кроку не рахувались, — де є)
+    const bodies = g.world.bodiesNear(g.d, g.n, g.cam[0], g.cam[1], BODY_R), al = physT.alpha;
+    for (const b of bodies) {
+      const k = b.ps === g.stamp ? al : 1;
+      b.ix = b.ps === undefined ? b.x : b.px + (b.x - b.px) * k; b.iy = b.ps === undefined ? b.y : b.py + (b.y - b.py) * k; b.iz = b.ps === undefined ? b.z : b.pz + (b.z - b.pz) * k;
+    }
     const sk = renderer.draw({
-      camera, target: g.cam, view: g.view, laws: L, far: g.far, clock: g.clock, bodies: g.world.bodiesNear(g.d, g.n, g.cam[0], g.cam[1], BODY_R), weather: { W: loc.W, loc }, rain: me.placed && loc.type ? rainMap(now) : null,
-      me: me.placed ? { x: me.x, y: me.y, z: me.vis ?? me.z, gz: under ? under.z : me.z, yaw: me.yaw, swim: me.swim, fly: me.fly, tint: [1 + a * 0.4, 1 + a, 1 + a * 1.3], anim } : null,
+      camera, target: g.cam, view: g.view, laws: L, far: g.far, clock: g.clock, bodies, weather: { W: loc.W, loc }, rain: me.placed && loc.type ? rainMap(now) : null,
+      me: me.placed ? { x: me.ix ?? me.x, y: me.iy ?? me.y, z: me.iv ?? me.vis ?? me.z, gz: under ? under.z : me.z, yaw: me.yaw, swim: me.swim, fly: me.fly, tint: [1 + a * 0.4, 1 + a, 1 + a * 1.3], anim } : null,
     });
     setText('addr', `Глибина ${g.d} · всесвіт ${fmtN(g.n)} · ${clockStr(sk.phase)}${L.sky.lock ? ' (вічно)' : ''}`);
     const an = g.ph && g.ph.anom ? ` · аномалія ×${g.ph.anom.toFixed(1).replace('.', ',')}` : '';

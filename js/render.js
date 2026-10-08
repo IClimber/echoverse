@@ -394,7 +394,7 @@ export function createRenderer(canvas) {
         groups.clear();
         let n = 0;
         for (const b of st.bodies) {
-          const r = Math.max(b.hx, b.hy, b.hz) * 2, x = b.x - t[0], y = b.y - t[1], z = b.z - t[2];
+          const r = Math.max(b.hx, b.hy, b.hz) * 2, x = (b.ix ?? b.x) - t[0], y = (b.iy ?? b.y) - t[1], z = (b.iz ?? b.z) - t[2];
           if (!aabbInView(m, x - r, y - r, z - r, x + r, y + r, z + r)) continue;
           let g = groups.get(b.T);
           if (!g) groups.set(b.T, (g = []));
@@ -403,7 +403,7 @@ export function createRenderer(canvas) {
         if (instData.length < n * 6) instData = new Float32Array(n * 12);
         let i = 0;
         for (const g of groups.values()) for (const b of g) {
-          instData[i++] = b.x - t[0]; instData[i++] = b.y - t[1]; instData[i++] = b.z - b.hz - t[2]; instData[i++] = b.yaw; instData[i++] = b.tilt; instData[i++] = b.s;
+          instData[i++] = (b.ix ?? b.x) - t[0]; instData[i++] = (b.iy ?? b.y) - t[1]; instData[i++] = (b.iz ?? b.z) - b.hz - t[2]; instData[i++] = b.yaw; instData[i++] = b.tilt; instData[i++] = b.s;
         }
         if (n) {
           R.instances(instData, n);

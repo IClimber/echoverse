@@ -189,3 +189,14 @@ test('стрімінг: коло дальності 32 чанки, у пірам
   for (const d of [60, 200, 500]) assert.ok(colPri(d, true) < colPri(d, false));
   assert.equal(colPri(30, false), colPri(30, true));
 });
+
+// ================= Такт =================
+import { createTicker } from '../js/ticker.js';
+
+test('такт: 240 к/с → 120 Гц, alpha у [0, 1), довгий кадр — не більше 8 кроків', () => {
+  const T = createTicker(1 / 120);
+  let n = 0;
+  for (let i = 0; i < 1000; i++) { n += T.advance(1 / 240); assert.ok(T.alpha >= 0 && T.alpha < 1); }
+  assert.ok(Math.abs(n - 500) <= 1, `${n}`);
+  assert.equal(createTicker(1 / 120).advance(0.25), 8);
+});
