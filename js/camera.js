@@ -10,7 +10,7 @@ export const ISO = 'iso', THIRD = 'third';
 const D2R = Math.PI / 180;
 export const LIMITS = {
   iso: { pitch: [20 * D2R, 75 * D2R], zoom: [0.45, 2.5] },
-  third: { pitch: [-8 * D2R, 75 * D2R], dist: [2.5, 16] },
+  third: { pitch: [-70 * D2R, 80 * D2R], dist: [2.5, 16] },   // від'ємний нахил — погляд угору (eyeDir)
 };
 export const FOV = 55 * D2R;
 export const VIEW_R = 112;           // третя особа: далечінь (клітинок), далі — туман і небо
@@ -31,6 +31,13 @@ const SENS = 0.0022;                 // радіан на піксель рух�
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 export const pitchOf = (c) => c.mode === ISO ? c.pitch : c.pitch3;
+
+// Третя особа: напрям від цілі до ока. Нахил угору (від'ємний) не опускає камеру під землю — вона лишається за
+// спиною на висоті голови, а вгору повертається лише погляд (гравець — унизу екрана)
+export function eyeDir(c) {
+  const p = Math.max(0, pitchOf(c)), cp = Math.cos(p);
+  return [cp * Math.cos(c.yaw), cp * Math.sin(c.yaw), Math.sin(p)];
+}
 
 export function basis(c) {
   const p = pitchOf(c), cp = Math.cos(p), sp = Math.sin(p), cy = Math.cos(c.yaw), sy = Math.sin(c.yaw);
@@ -74,7 +81,7 @@ export function viewProj(c, W, H, dist = c.dist) {
       eye: [u[0] * 400, u[1] * 400, u[2] * 400], ortho: true,
     };
   }
-  const eye = [u[0] * dist, u[1] * dist, u[2] * dist];
+  const e = eyeDir(c), eye = [e[0] * dist, e[1] * dist, e[2] * dist];
   const f = 1 / Math.tan(FOV / 2), near = 0.08, far = VIEW_R * 2, A = (far + near) / (near - far), B = 2 * far * near / (near - far);
   const fx = f * H / W;
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -136,7 +143,7 @@ export function isoRadius(c, W, H, zr, targetZ) {
 
 // Третя особа: відстань до ока, щоб камера не заходила в блоки й рідину за спиною. solid(x, y, z) → чи там тверде
 export function clipDist(c, target, solid) {
-  const { u } = basis(c);
+  const u = eyeDir(c);
   for (let t = 0.6; t <= c.dist; t += 0.2) {
     const x = target[0] + u[0] * t, y = target[1] + u[1] * t, z = target[2] + u[2] * t;
     if (solid(Math.floor(x), Math.floor(y), z - 0.2) || solid(Math.floor(x), Math.floor(y), z + 0.2)) return Math.max(1.0, t - 0.3);

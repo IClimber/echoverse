@@ -59,8 +59,13 @@ export class Mesh {
 }
 
 // ================= Земля чанка (блоки) =================
-// Грань блоку — лише там, де сусід не твердий (повітря чи рідина). Однакові грані в одному шарі зливаються
-// в прямокутники (верх і низ — у двох напрямках, боки — уздовж ряду): так вершин у рази менше.
+// Грань блоку — лише там, де сусід не твердий (повітря чи рідина). Вигляд плавний (Surface Nets): вершини поверхні —
+// у подвійній ґратці (по одній на куб 2×2×2 центрів блоків, у середньому серед перетинів його ребер), грань блоку
+// стає чотирикутником між чотирма такими вершинами — сходинки стають схилами, кути — фасками; під капотом світ
+// лишається з блоків. Вершина залежить лише від 8 блоків навколо, тож на межах чанків (рамка) усе збігається.
+// Рівна грань (вершини — точно в кутах грані блоку: рівнина, пряма стіна) іде в жадібне злиття: однакові в одному
+// шарі зливаються в прямокутники (верх і низ — у двох напрямках, боки — уздовж ряду), так вершин у рази менше;
+// решта — два трикутники з власною нормаллю (пласкі грані, низькополігональний вигляд).
 // Позиції — локальні (0…16 по x і y), висота — k · LEVEL. Меші: тверде, поверхня рідини (окремо, напівпрозоро),
 // рослини й каміння зблизька (flora: повна будова, трава й квіти) і здалеку (far: спрощені великі рослини й каміння).
 // Трава, степ і пустеля — відтінку біому клітинки (межі біомів — усереднення по сусідах 3×3)
@@ -106,6 +111,72 @@ export function chunkMesh(C, L) {
   };
   const key = (lk) => lk[0] * 16777216 + (lk[1][0] << 16 | lk[1][1] << 8 | lk[1][2]);
   const mask = new Float64Array(CS * CS), looks = new Array(CS * CS);
+  // Подвійна ґратка: вершина куба з нижнім кутом у центрі блоку (x, y, k), x, y ∈ −1…CS−1, k ∈ −1…H−1 (кеш)
+  const solidAt = (x, y, k) => k < 0 ? true : k >= H ? false : solidB(B[bi(x, y, k)]);
+  const NX = CS + 1, VC = new Float32Array(NX * NX * (H + 1) * 3).fill(NaN);
+  const EDGES = [[0, 1], [2, 3], [4, 5], [6, 7], [0, 2], [1, 3], [4, 6], [5, 7], [0, 4], [1, 5], [2, 6], [3, 7]];
+  const cornerSolid = new Array(8);
+  const dualV = (x, y, k) => {
+    const o = (((k + 1) * NX + y + 1) * NX + x + 1) * 3;
+    if (VC[o] === VC[o]) return o;
+    for (let c = 0; c < 8; c++) cornerSolid[c] = solidAt(x + (c & 1), y + (c >> 1 & 1), k + (c >> 2));
+    let sx = 0, sy = 0, sz = 0, n = 0;
+    for (const [a, b] of EDGES) {
+      if (cornerSolid[a] === cornerSolid[b]) continue;
+      sx += ((a & 1) + (b & 1)) / 2; sy += ((a >> 1 & 1) + (b >> 1 & 1)) / 2; sz += ((a >> 2) + (b >> 2)) / 2; n++;
+    }
+    VC[o] = x + 0.5 + sx / n; VC[o + 1] = y + 0.5 + sy / n; VC[o + 2] = (k + 0.5 + sz / n) * LEVEL;
+    return o;
+  };
+  // Чотири вершини грані блоку (x, y, k) у напрямку d (DIRS) — по колу; flat — чи збігаються з кутами грані блоку
+  const RING = [[-1, -1], [0, -1], [0, 0], [-1, 0]];
+  const quadOf = (x, y, k, d) => {
+    const [dx, dy, dk] = DIRS[d], ax = dx ? 0 : dy ? 1 : 2, lo = [x, y, k];
+    if (dx + dy + dk < 0) lo[ax]--;                     // ребро між центрами блоку й сусіда; навколо нього — 4 куби
+    const o1 = (ax + 1) % 3, o2 = (ax + 2) % 3;
+    return RING.map(([u, v]) => { const c = lo.slice(); c[o1] += u; c[o2] += v; return dualV(c[0], c[1], c[2]); });
+  };
+  const flatQ = (q, x, y, k, d) => {
+    const [dx, dy, dk] = DIRS[d];
+    for (const o of q) {
+      const px = VC[o], py = VC[o + 1], pz = VC[o + 2] / LEVEL;
+      if (dx && px !== (dx > 0 ? x + 1 : x)) return false;
+      if (dy && py !== (dy > 0 ? y + 1 : y)) return false;
+      if (dk && pz !== (dk > 0 ? k + 1 : k)) return false;
+      if (px !== Math.round(px) || py !== Math.round(py) || pz !== Math.round(pz)) return false;
+    }
+    return true;
+  };
+  // Негладка грань — два трикутники; вигляд — за нормаллю: дивиться вгору — як верх стовпця (трава на схилі),
+  // униз — як низ, інакше — як бік
+  const smoothFace = (x, y, k, d, q, b) => {
+    const P0 = [VC[q[0]], VC[q[0] + 1], VC[q[0] + 2]], P1 = [VC[q[1]], VC[q[1] + 1], VC[q[1] + 2]], P2 = [VC[q[2]], VC[q[2] + 1], VC[q[2] + 2]], P3 = [VC[q[3]], VC[q[3] + 1], VC[q[3] + 2]];
+    const d02 = (P0[0] - P2[0]) ** 2 + (P0[1] - P2[1]) ** 2 + (P0[2] - P2[2]) ** 2, d13 = (P1[0] - P3[0]) ** 2 + (P1[1] - P3[1]) ** 2 + (P1[2] - P3[2]) ** 2;
+    const tris = d02 <= d13 ? [[P0, P1, P2], [P0, P2, P3]] : [[P0, P1, P3], [P1, P2, P3]];
+    const [ex, ey, ez] = DIRS[d];
+    for (const [a, bb, c] of tris) {
+      const ux = bb[0] - a[0], uy = bb[1] - a[1], uz = bb[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+      let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      const l = Math.hypot(nx, ny, nz);
+      if (l < 1e-9) continue;
+      const flip = nx * ex + ny * ey + nz * ez < 0;
+      nx /= flip ? -l : l; ny /= flip ? -l : l; nz /= flip ? -l : l;
+      let lk;
+      if (nz > 0.42) { let kt = k; while (kt + 1 < H && solidB(B[bi(x, y, kt + 1)])) kt++; lk = look(B[bi(x, y, kt)], 4, x, y, kt); }
+      else if (nz < -0.42) lk = look(b, 5, x, y, k);
+      else lk = look(b, d, x, y, k);
+      const N = [nx * 127 | 0, ny * 127 | 0, nz * 127 | 0], i = M.n, pts = flip ? [a, c, bb] : [a, bb, c];
+      for (const p of pts) M.vert(p[0], p[1], p[2], N[0], N[1], N[2], lk[1], lk[0]);
+      M.i.push(i, i + 1, i + 2);
+    }
+  };
+  // Грань (x, y, k, d) рівна? Ні — одразу малюємо гладкою й не віддаємо в злиття
+  const flatFace = (x, y, k, d, b) => {
+    const q = quadOf(x, y, k, d);
+    if (flatQ(q, x, y, k, d)) return true;
+    smoothFace(x, y, k, d, q, b);
+    return false;
+  };
   for (let k = 0; k < H; k++) {
     // Верх (d = 4) і низ (d = 5): маска шару 16×16, жадібне злиття прямокутників
     for (const d of [4, 5]) {
@@ -114,7 +185,7 @@ export function chunkMesh(C, L) {
       for (let y = 0; y < CS; y++) for (let x = 0; x < CS; x++) {
         const b = B[bi(x, y, k)], i = y * CS + x, nk = k + dk;
         const nb = nk < 0 ? B_STONE : nk >= H ? B_AIR : B[bi(x, y, nk)];
-        if (solidB(b) && !solidB(nb)) { const lk = look(b, d, x, y, k); mask[i] = key(lk) + 1; looks[i] = lk; any = true; } else mask[i] = 0;
+        if (solidB(b) && !solidB(nb) && flatFace(x, y, k, d, b)) { const lk = look(b, d, x, y, k); mask[i] = key(lk) + 1; looks[i] = lk; any = true; } else mask[i] = 0;
       }
       if (!any) continue;
       const z = (d === 4 ? k + 1 : k) * LEVEL, nz = d === 4 ? 1 : -1;
@@ -146,7 +217,7 @@ export function chunkMesh(C, L) {
         for (let s = 0; s < CS; s++) {
           const x = dx ? r : s, y = dx ? s : r, b = B[bi(x, y, k)];
           let kk = 0, lk = null;
-          if (solidB(b) && !solidB(B[bi(x + dx, y + dy, k)])) { lk = look(b, d, x, y, k); kk = key(lk) + 1; }
+          if (solidB(b) && !solidB(B[bi(x + dx, y + dy, k)]) && flatFace(x, y, k, d, b)) { lk = look(b, d, x, y, k); kk = key(lk) + 1; }
           if (kk !== rk) { flush(s); rk = kk; rl = lk; }
           if (kk) run++;
         }

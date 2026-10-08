@@ -122,6 +122,31 @@ test('меш чанка: масиви узгоджені, індекси в ме
   for (let i = 0; i < m.pos.length; i += 3) assert.ok(m.pos[i] >= -0.5 && m.pos[i] <= CS + 0.5 && m.pos[i + 1] >= -0.5 && m.pos[i + 1] <= CS + 0.5);
 });
 
+test('плавна поверхня: рівнина — пласка на верху блоків, сходинка — схил, на межі чанків вершини збігаються', async () => {
+  const { B_GRASS, B_AIR, bi: biF } = await import('../js/gen/chunk.js');
+  const L = lawsOf(hashStr('меш'), 0, 4);
+  // штучний чанк: ліворуч (x < 8) — 6 блоків, праворуч — 7; рамка — так само
+  const mk = (hx) => {
+    const C = genChunk(L, 3, 3);
+    C.obj = [];
+    for (let y = -1; y <= CS; y++) for (let x = -1; x <= CS; x++) for (let k = 0; k < 96; k++) C.b[biF(x, y, k)] = k < hx(x) ? B_GRASS : B_AIR;
+    return chunkMesh(C, L).solid;
+  };
+  const m = mk((x) => x < 8 ? 6 : 7), zs = new Set();
+  for (let i = 0; i < m.pos.length; i += 3) {
+    const x = m.pos[i], z = m.pos[i + 2];
+    if (m.nor[i + 2] > 60) zs.add(z);
+    if (x <= 6 && m.nor[i + 2] > 120) assert.equal(z, 3);                  // далеко від сходинки — рівно на верху блоків
+  }
+  assert.ok([...zs].some((z) => z > 3 && z < 3.5), 'сходинка не стала схилом');
+  // вершини на межі чанків: однакові дані рамки → однакові точки в обох сусідів (тут — зсув на CS)
+  const a = mk((x) => x < 16 ? 6 : 7), b = mk((x) => x < 0 ? 6 : 7), pa = new Set(), pb = new Set();   // b — сусід праворуч
+  for (let i = 0; i < a.pos.length; i += 3) if (a.pos[i] >= CS - 0.5) pa.add(`${a.pos[i] - CS},${a.pos[i + 1]},${a.pos[i + 2]}`);
+  for (let i = 0; i < b.pos.length; i += 3) if (b.pos[i] <= 0.5) pb.add(`${b.pos[i]},${b.pos[i + 1]},${b.pos[i + 2]}`);
+  for (const p of pa) assert.ok(pb.has(p), `вершина ${p} є лише в одного з сусідів`);
+  assert.ok(pa.size > 0 && pb.size > 0);
+});
+
 test('гравітація: межі, ≈ 1 g біля старту, легкі й важкі всесвіти трапляються; легка — вільніший рух і ширяюче каміння', async () => {
   const { physOf, FLOAT_G } = await import('../js/universe.js');
   const { solidMask, O_FLOAT } = await import('../js/gen/chunk.js');

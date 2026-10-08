@@ -13,5 +13,7 @@ export const scale = (x, y, z) => new Float32Array([x, 0, 0, 0, 0, y, 0, 0, 0, 0
 export function rotZ(a) { const c = Math.cos(a), s = Math.sin(a); return new Float32Array([c, s, 0, 0, -s, c, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]); }
 // Поворот навколо поперечної осі (y): додатний кут веде +z до +x (кінцівка, що звисає, — уперед)
 export function rotY(a) { const c = Math.cos(a), s = Math.sin(a); return new Float32Array([c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0, 0, 0, 0, 1]); }
+// Поворот навколо поздовжньої осі (x): додатний кут веде −z до +y (опущена рука — убік, ліворуч)
+export function rotX(a) { const c = Math.cos(a), s = Math.sin(a); return new Float32Array([1, 0, 0, 0, 0, c, s, 0, 0, -s, c, 0, 0, 0, 0, 1]); }
 // Добуток зліва направо: chain(A, B, C) = A·B·C
 export function chain(...ms) { let r = ms[0]; for (let i = 1; i < ms.length; i++) r = mul(r, ms[i]); return r; }
