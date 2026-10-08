@@ -2,7 +2,7 @@
 // позиції (float32 ×3), нормалі (int8 ×3), кольори (uint8 ×3), матеріали (uint8 — шар текстури), індекси.
 // Світло, туман і текстуру (за матеріалом, координати — проєкцією на площину грані) додає шейдер.
 // Земля — з блоків: грань лише між твердим і порожнім.
-import { CS, ci, bv, H, O_TREE, O_FLOAT, O_COVER, solidB, B_AIR, B_LIQ, B_ICE, B_SAND, B_GRASS, B_DRY, B_DESERT, B_SNOW, B_ROCK, B_BED, B_MUD, B_SOIL, B_STONE, B_SANDSTONE, B_MAGMA, B_FLOAT } from './chunk.js';
+import { CS, CW, ci, bv, H, O_TREE, O_FLOAT, O_COVER, solidB, B_AIR, B_LIQ, B_ICE, B_SAND, B_GRASS, B_DRY, B_DESERT, B_SNOW, B_ROCK, B_BED, B_MUD, B_SOIL, B_STONE, B_SANDSTONE, B_MAGMA, B_FLOAT } from './chunk.js';
 import { L_LAVA, SEA, gravityAt } from '../universe.js';
 import { LEVEL } from '../iso.js';
 import { template, place, footprint } from './plants.js';
@@ -12,17 +12,40 @@ import { M_FLAT, M_ROCK, M_CLIFF, M_WATER, M_LAVA, M_ICE, M_SAND, M_LUSH, M_DRY,
 export const shade = (c, k) => [Math.min(255, c[0] * k | 0), Math.min(255, c[1] * k | 0), Math.min(255, c[2] * k | 0)];
 const mixc = (a, b, k) => [a[0] + (b[0] - a[0]) * k | 0, a[1] + (b[1] - a[1]) * k | 0, a[2] + (b[2] - a[2]) * k | 0];
 
+// Меш: типізовані масиви, що ростуть ×2 (без push у JS-масиви); значення перетворюються так само, як у finish
+// (float32, int8, uint8 із загортанням)
 export class Mesh {
-  constructor() { this.p = []; this.nr = []; this.c = []; this.mt = []; this.i = []; this.n = 0; }
+  constructor(cap = 256) {
+    this.p = new Float32Array(cap * 3); this.nr = new Int8Array(cap * 3); this.c = new Uint8Array(cap * 3); this.mt = new Uint8Array(cap);
+    this.i = new Uint32Array(cap * 2); this.n = 0; this.ni = 0;
+  }
+  // Місце ще на nv вершин і nidx індексів
+  room(nv, nidx) {
+    if (this.n + nv > this.mt.length) {
+      let c = this.mt.length * 2;
+      while (c < this.n + nv) c *= 2;
+      const g = (a, k) => { const b = new a.constructor(c * k); b.set(a); return b; };
+      this.p = g(this.p, 3); this.nr = g(this.nr, 3); this.c = g(this.c, 3); this.mt = g(this.mt, 1);
+    }
+    if (this.ni + nidx > this.i.length) {
+      let c = this.i.length * 2;
+      while (c < this.ni + nidx) c *= 2;
+      const b = new Uint32Array(c); b.set(this.i); this.i = b;
+    }
+  }
   vert(x, y, z, nx, ny, nz, c, m) {
-    this.p.push(x, y, z); this.nr.push(nx, ny, nz); this.c.push(c[0], c[1], c[2]); this.mt.push(m);
+    this.room(1, 0);
+    const n = this.n, j = n * 3;
+    this.p[j] = x; this.p[j + 1] = y; this.p[j + 2] = z; this.nr[j] = nx; this.nr[j + 1] = ny; this.nr[j + 2] = nz;
+    this.c[j] = c[0]; this.c[j + 1] = c[1]; this.c[j + 2] = c[2]; this.mt[n] = m;
     return this.n++;
   }
+  idx(a, b, c) { this.room(0, 3); const i = this.i, k = this.ni; i[k] = a; i[k + 1] = b; i[k + 2] = c; this.ni = k + 3; }
   // Чотирикутник a-b-c-d (точки [x, y, z]) з однією нормаллю (одиничний вектор); mat — матеріал (materials.js)
   quad(a, b, c, d, nx, ny, nz, col, mat = M_FLAT) {
     const N = [nx * 127 | 0, ny * 127 | 0, nz * 127 | 0], i = this.n;
     for (const q of [a, b, c, d]) this.vert(q[0], q[1], q[2], N[0], N[1], N[2], col, mat);
-    this.i.push(i, i + 1, i + 2, i, i + 2, i + 3);
+    this.idx(i, i + 1, i + 2); this.idx(i, i + 2, i + 3);
   }
   // Трикутник; нормаль — з векторного добутку (лише вигляд, тож sqrt тут дозволений),
   // повернута вгору (up) чи вниз (низ ширяючого каменя)
@@ -32,7 +55,7 @@ export class Mesh {
     const l = Math.hypot(nx, ny, nz) || 1;
     const s = ((nz < 0) === up ? -127 : 127) / l, i = this.n;
     for (const q of [a, b, c]) this.vert(q[0], q[1], q[2], nx * s | 0, ny * s | 0, nz * s | 0, col, mat);
-    this.i.push(i, i + 1, i + 2);
+    this.idx(i, i + 1, i + 2);
   }
   // Ящик: верх і чотири бічні грані (низу не видно)
   box(x0, y0, z0, x1, y1, z1, col, mat = M_FLAT) {
@@ -53,8 +76,8 @@ export class Mesh {
     this.tri(B, C, bot, col, false, mat); this.tri(C, D, bot, col, false, mat); this.tri(D, A, bot, col, false, mat); this.tri(A, B, bot, col, false, mat);
   }
   finish() {
-    const idx = this.n > 65535 ? new Uint32Array(this.i) : new Uint16Array(this.i);
-    return { pos: new Float32Array(this.p), nor: new Int8Array(this.nr), col: new Uint8Array(this.c), mat: new Uint8Array(this.mt), idx, count: this.i.length };
+    const n = this.n, ix = this.i.subarray(0, this.ni), idx = n > 65535 ? ix.slice() : new Uint16Array(ix);
+    return { pos: this.p.slice(0, n * 3), nor: this.nr.slice(0, n * 3), col: this.c.slice(0, n * 3), mat: this.mt.slice(0, n), idx, count: this.ni };
   }
 }
 
@@ -115,29 +138,38 @@ export function chunkMesh(C, L, { near = true, far = true } = {}) {
   const key = (lk) => lk[0] * 16777216 + (lk[1][0] << 16 | lk[1][1] << 8 | lk[1][2]);
   const mask = new Float64Array(CS * CS), looks = new Array(CS * CS);
   // Подвійна ґратка: вершина куба з нижнім кутом у центрі блоку (x, y, k), x, y ∈ −1…CS−1, k ∈ −1…NK−1 (кеш)
-  const solidAt = (x, y, k) => solidB(B[bi(x, y, k)]);
   const NX = CS + 1, VC = new Float32Array(NX * NX * (NK + 1) * 3).fill(NaN);
   const EDGES = [[0, 1], [2, 3], [4, 5], [6, 7], [0, 2], [1, 3], [4, 6], [5, 7], [0, 4], [1, 5], [2, 6], [3, 7]];
-  const cornerSolid = new Array(8);
+  const cornerSolid = new Uint8Array(8), EA = EDGES.map((e) => e[0]), EB = EDGES.map((e) => e[1]);
+  // середина ребра (від нижнього кута куба) і зсув кута в масиві блоків
+  const EX = EDGES.map(([a, b]) => ((a & 1) + (b & 1)) / 2), EY = EDGES.map(([a, b]) => ((a >> 1 & 1) + (b >> 1 & 1)) / 2), EZ = EDGES.map(([a, b]) => ((a >> 2) + (b >> 2)) / 2);
+  const CO = [0, 1, 2, 3, 4, 5, 6, 7].map((c) => bi(c & 1, c >> 1 & 1, c >> 2) - bi(0, 0, 0));
   const dualV = (x, y, k) => {
     const o = (((k + 1) * NX + y + 1) * NX + x + 1) * 3;
     if (VC[o] === VC[o]) return o;
-    for (let c = 0; c < 8; c++) cornerSolid[c] = solidAt(x + (c & 1), y + (c >> 1 & 1), k + (c >> 2));
+    const o0 = bi(x, y, k);
+    for (let c = 0; c < 8; c++) cornerSolid[c] = B[o0 + CO[c]] >= B_ICE ? 1 : 0;
     let sx = 0, sy = 0, sz = 0, n = 0;
-    for (const [a, b] of EDGES) {
-      if (cornerSolid[a] === cornerSolid[b]) continue;
-      sx += ((a & 1) + (b & 1)) / 2; sy += ((a >> 1 & 1) + (b >> 1 & 1)) / 2; sz += ((a >> 2) + (b >> 2)) / 2; n++;
+    for (let e = 0; e < 12; e++) {
+      if (cornerSolid[EA[e]] === cornerSolid[EB[e]]) continue;
+      sx += EX[e]; sy += EY[e]; sz += EZ[e]; n++;
     }
     VC[o] = x + 0.5 + sx / n; VC[o + 1] = y + 0.5 + sy / n; VC[o + 2] = (k + 0.5 + sz / n) * LEVEL;
     return o;
   };
   // Чотири вершини грані блоку (x, y, k) у напрямку d (DIRS) — по колу; flat — чи збігаються з кутами грані блоку
-  const RING = [[-1, -1], [0, -1], [0, 0], [-1, 0]];
+  // (спільний масив QO — до наступного виклику)
+  const RU = [-1, 0, 0, -1], RV = [-1, -1, 0, 0], QO = new Int32Array(4), lo = new Int32Array(3);
   const quadOf = (x, y, k, d) => {
-    const [dx, dy, dk] = DIRS[d], ax = dx ? 0 : dy ? 1 : 2, lo = [x, y, k];
-    if (dx + dy + dk < 0) lo[ax]--;                     // ребро між центрами блоку й сусіда; навколо нього — 4 куби
+    const D = DIRS[d], ax = D[0] ? 0 : D[1] ? 1 : 2;
+    lo[0] = x; lo[1] = y; lo[2] = k;
+    if (D[0] + D[1] + D[2] < 0) lo[ax]--;               // ребро між центрами блоку й сусіда; навколо нього — 4 куби
     const o1 = (ax + 1) % 3, o2 = (ax + 2) % 3;
-    return RING.map(([u, v]) => { const c = lo.slice(); c[o1] += u; c[o2] += v; return dualV(c[0], c[1], c[2]); });
+    for (let r = 0; r < 4; r++) {
+      const c0 = lo[0] + (o1 === 0 ? RU[r] : o2 === 0 ? RV[r] : 0), c1 = lo[1] + (o1 === 1 ? RU[r] : o2 === 1 ? RV[r] : 0), c2 = lo[2] + (o1 === 2 ? RU[r] : o2 === 2 ? RV[r] : 0);
+      QO[r] = dualV(c0, c1, c2);
+    }
+    return QO;
   };
   const flatQ = (q, x, y, k, d) => {
     const [dx, dy, dk] = DIRS[d];
@@ -153,25 +185,29 @@ export function chunkMesh(C, L, { near = true, far = true } = {}) {
   // Негладка грань — два трикутники; вигляд — за нормаллю: дивиться вгору — як верх стовпця (трава на схилі),
   // униз — як низ, інакше — як бік
   const smoothFace = (x, y, k, d, q, b) => {
-    const P0 = [VC[q[0]], VC[q[0] + 1], VC[q[0] + 2]], P1 = [VC[q[1]], VC[q[1] + 1], VC[q[1] + 2]], P2 = [VC[q[2]], VC[q[2] + 1], VC[q[2] + 2]], P3 = [VC[q[3]], VC[q[3] + 1], VC[q[3] + 2]];
-    const d02 = (P0[0] - P2[0]) ** 2 + (P0[1] - P2[1]) ** 2 + (P0[2] - P2[2]) ** 2, d13 = (P1[0] - P3[0]) ** 2 + (P1[1] - P3[1]) ** 2 + (P1[2] - P3[2]) ** 2;
-    const tris = d02 <= d13 ? [[P0, P1, P2], [P0, P2, P3]] : [[P0, P1, P3], [P1, P2, P3]];
-    const [ex, ey, ez] = DIRS[d];
-    for (const [a, bb, c] of tris) {
-      const ux = bb[0] - a[0], uy = bb[1] - a[1], uz = bb[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
-      let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
-      const l = Math.hypot(nx, ny, nz);
-      if (l < 1e-9) continue;
-      const flip = nx * ex + ny * ey + nz * ez < 0;
-      nx /= flip ? -l : l; ny /= flip ? -l : l; nz /= flip ? -l : l;
-      let lk;
-      if (nz > 0.42) { let kt = k; while (kt + 1 <= NK && solidB(B[bi(x, y, kt + 1)])) kt++; lk = look(B[bi(x, y, kt)], 4, x, y, kt); }
-      else if (nz < -0.42) lk = look(b, 5, x, y, k);
-      else lk = look(b, d, x, y, k);
-      const N = [nx * 127 | 0, ny * 127 | 0, nz * 127 | 0], i = M.n, pts = flip ? [a, c, bb] : [a, bb, c];
-      for (const p of pts) M.vert(p[0], p[1], p[2], N[0], N[1], N[2], lk[1], lk[0]);
-      M.i.push(i, i + 1, i + 2);
-    }
+    const q0 = q[0], q1 = q[1], q2 = q[2], q3 = q[3];
+    const d02 = (VC[q0] - VC[q2]) ** 2 + (VC[q0 + 1] - VC[q2 + 1]) ** 2 + (VC[q0 + 2] - VC[q2 + 2]) ** 2;
+    const d13 = (VC[q1] - VC[q3]) ** 2 + (VC[q1 + 1] - VC[q3 + 1]) ** 2 + (VC[q1 + 2] - VC[q3 + 2]) ** 2;
+    if (d02 <= d13) { smoothTri(x, y, k, d, b, q0, q1, q2); smoothTri(x, y, k, d, b, q0, q2, q3); }
+    else { smoothTri(x, y, k, d, b, q0, q1, q3); smoothTri(x, y, k, d, b, q1, q2, q3); }
+  };
+  // Трикутник гладкої грані (вершини — зсуви в VC)
+  const smoothTri = (x, y, k, d, b, a, bb, c) => {
+    const ux = VC[bb] - VC[a], uy = VC[bb + 1] - VC[a + 1], uz = VC[bb + 2] - VC[a + 2], vx = VC[c] - VC[a], vy = VC[c + 1] - VC[a + 1], vz = VC[c + 2] - VC[a + 2];
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const l = Math.hypot(nx, ny, nz);
+    if (l < 1e-9) return;
+    const D = DIRS[d], flip = nx * D[0] + ny * D[1] + nz * D[2] < 0;
+    nx /= flip ? -l : l; ny /= flip ? -l : l; nz /= flip ? -l : l;
+    let lk;
+    if (nz > 0.42) { let kt = k; while (kt + 1 <= NK && solidB(B[bi(x, y, kt + 1)])) kt++; lk = look(B[bi(x, y, kt)], 4, x, y, kt); }
+    else if (nz < -0.42) lk = look(b, 5, x, y, k);
+    else lk = look(b, d, x, y, k);
+    const N0 = nx * 127 | 0, N1 = ny * 127 | 0, N2 = nz * 127 | 0, i = M.n, p1 = flip ? c : bb, p2 = flip ? bb : c, cl = lk[1], m = lk[0];
+    M.vert(VC[a], VC[a + 1], VC[a + 2], N0, N1, N2, cl, m);
+    M.vert(VC[p1], VC[p1 + 1], VC[p1 + 2], N0, N1, N2, cl, m);
+    M.vert(VC[p2], VC[p2 + 1], VC[p2 + 2], N0, N1, N2, cl, m);
+    M.idx(i, i + 1, i + 2);
   };
   // Грань (x, y, k, d) рівна? Ні — одразу малюємо гладкою й не віддаємо в злиття
   const flatFace = (x, y, k, d, b) => {
@@ -180,15 +216,39 @@ export function chunkMesh(C, L, { near = true, far = true } = {}) {
     smoothFace(x, y, k, d, q, b);
     return false;
   };
+  // Шари без граней (усе своє й сусіди — суцільне, чи твердого немає) пропускаємо: результат той самий, у рази швидше.
+  // inS[k] — твердих у шарі k (без рамки), allS[k] — з рамкою, inL[k] — рідини (без рамки); k ∈ −1…NK
+  const inS = new Int32Array(NK + 2), allS = new Int32Array(NK + 2), inL = new Int32Array(NK + 2);
+  for (let y = -1; y <= CS; y++) for (let x = -1; x <= CS; x++) {
+    const inner = x >= 0 && y >= 0 && x < CS && y < CS, o = bi(x, y, -1);
+    for (let k = 0; k < NK + 2; k++) {
+      const b = B[o + k];
+      if (b >= B_ICE) { allS[k]++; if (inner) inS[k]++; }
+      else if (b === B_LIQ && inner) inL[k]++;
+    }
+  }
+  // Маска граней шару: fm[y·CS + x] — біт 1 << d, якщо блок твердий, а сусід у напрямку d — ні; rows[d·CS + r] — є
+  // такі в ряду r (для ±x — стовпчик x, для ±y — рядок y)
+  const fm = new Uint8Array(CS * CS), rows = new Uint8Array(6 * CS), SK = NK + 2, SX = SK, SY = CW * SK;
+  const NB = [SX, -SX, SY, -SY, 1, -1];
   for (let k = 0; k < NK; k++) {
+    if (!inS[k + 1] || (allS[k + 1] === CW * CW && inS[k + 2] === CS * CS && inS[k] === CS * CS)) continue;
+    rows.fill(0);
+    let anyF = 0;
+    for (let y = 0; y < CS; y++) for (let x = 0; x < CS; x++) {
+      const o = ((y + 1) * CW + x + 1) * SK + k + 1;
+      let f = 0;
+      if (B[o] >= B_ICE) for (let d = 0; d < 6; d++) if (B[o + NB[d]] < B_ICE) { f |= 1 << d; rows[d * CS + (d < 2 ? x : y)] = 1; }
+      fm[y * CS + x] = f; anyF |= f;
+    }
+    if (!anyF) continue;
     // Верх (d = 4) і низ (d = 5): маска шару 16×16, жадібне злиття прямокутників
     for (const d of [4, 5]) {
-      const dk = d === 4 ? 1 : -1;
+      if (!(anyF & 1 << d)) continue;
       let any = false;
       for (let y = 0; y < CS; y++) for (let x = 0; x < CS; x++) {
-        const b = B[bi(x, y, k)], i = y * CS + x, nk = k + dk;
-        const nb = B[bi(x, y, nk)];
-        if (solidB(b) && !solidB(nb) && flatFace(x, y, k, d, b)) { const lk = look(b, d, x, y, k); mask[i] = key(lk) + 1; looks[i] = lk; any = true; } else mask[i] = 0;
+        const i = y * CS + x, b = B[bi(x, y, k)];
+        if (fm[i] & 1 << d && flatFace(x, y, k, d, b)) { const lk = look(b, d, x, y, k); mask[i] = key(lk) + 1; looks[i] = lk; any = true; } else mask[i] = 0;
       }
       if (!any) continue;
       const z = (d === 4 ? k + 1 : k) * LEVEL, nz = d === 4 ? 1 : -1;
@@ -207,8 +267,10 @@ export function chunkMesh(C, L, { near = true, far = true } = {}) {
     // Боки: уздовж ряду (для ±x — уздовж y, для ±y — уздовж x)
     const z0 = k * LEVEL, z1 = z0 + LEVEL;
     for (let d = 0; d < 4; d++) {
+      if (!(anyF & 1 << d)) continue;
       const [dx, dy] = DIRS[d];
       for (let r = 0; r < CS; r++) {
+        if (!rows[d * CS + r]) continue;
         let run = 0, rk = 0, rl = null;
         const flush = (end) => {
           if (!run) return;
@@ -220,7 +282,7 @@ export function chunkMesh(C, L, { near = true, far = true } = {}) {
         for (let s = 0; s < CS; s++) {
           const x = dx ? r : s, y = dx ? s : r, b = B[bi(x, y, k)];
           let kk = 0, lk = null;
-          if (solidB(b) && !solidB(B[bi(x + dx, y + dy, k)]) && flatFace(x, y, k, d, b)) { lk = look(b, d, x, y, k); kk = key(lk) + 1; }
+          if (fm[y * CS + x] & 1 << d && flatFace(x, y, k, d, b)) { lk = look(b, d, x, y, k); kk = key(lk) + 1; }
           if (kk !== rk) { flush(s); rk = kk; rl = lk; }
           if (kk) run++;
         }
@@ -231,7 +293,8 @@ export function chunkMesh(C, L, { near = true, far = true } = {}) {
   // Поверхня рідини: верхній блок рідини під повітрям (трохи нижче за край блоку)
   // і бічні грані там, де рідина межує з повітрям (печера біля водойми): об'єм рідини завжди замкнений
   const LM = lavaish ? M_LAVA : M_WATER;
-  for (let y = 0; y < CS; y++) for (let x = 0; x < CS; x++) for (let k = 0; k < NK; k++) {
+  for (let k = 0; k < NK; k++) for (let y = 0; y < CS; y++) for (let x = 0; x < CS; x++) {
+    if (!inL[k + 1]) break;
     if (B[bi(x, y, k)] !== B_LIQ) continue;
     const open = B[bi(x, y, k + 1)] === B_AIR, top = (k + 1) * LEVEL - (open ? 0.15 : 0), z0 = k * LEVEL;
     const c = mixc(P.liquid, P.liquidDeep, Math.min(1, C.v[ci(x, y)] / 160));

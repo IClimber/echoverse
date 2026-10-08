@@ -530,14 +530,16 @@ export function footprint(T) {
 // множники кольору cj [r, g, b]
 export function place(M, T, x, y, z, rot, s, tl, cj) {
   const c = Math.cos(rot), sn = Math.sin(rot), ct = Math.cos(tl), st = Math.sin(tl), P = T.p, N = T.n, C = T.c, base = M.n;
+  M.room(T.verts, T.verts);
+  const MP = M.p, MN = M.nr, MC = M.c, MM = M.mt, MI = M.i, ni = M.ni;
   for (let i = 0, j = 0; i < T.verts; i++, j += 3) {
-    const px = P[j], y1 = P[j + 1] * ct - P[j + 2] * st, z1 = P[j + 1] * st + P[j + 2] * ct;
-    M.p.push(x + (px * c - y1 * sn) * s, y + (px * sn + y1 * c) * s, z + z1 * s);
+    const px = P[j], y1 = P[j + 1] * ct - P[j + 2] * st, z1 = P[j + 1] * st + P[j + 2] * ct, o = (base + i) * 3;
+    MP[o] = x + (px * c - y1 * sn) * s; MP[o + 1] = y + (px * sn + y1 * c) * s; MP[o + 2] = z + z1 * s;
     const nx = N[j], ny = N[j + 1] * ct - N[j + 2] * st, nz = N[j + 1] * st + N[j + 2] * ct;
-    M.nr.push(nx * c - ny * sn | 0, nx * sn + ny * c | 0, nz | 0);
-    M.c.push(Math.min(255, C[j] * cj[0] | 0), Math.min(255, C[j + 1] * cj[1] | 0), Math.min(255, C[j + 2] * cj[2] | 0));
-    M.mt.push(T.m[i]);
-    M.i.push(base + i);
+    MN[o] = nx * c - ny * sn | 0; MN[o + 1] = nx * sn + ny * c | 0; MN[o + 2] = nz | 0;
+    MC[o] = Math.min(255, C[j] * cj[0] | 0); MC[o + 1] = Math.min(255, C[j + 1] * cj[1] | 0); MC[o + 2] = Math.min(255, C[j + 2] * cj[2] | 0);
+    MM[base + i] = T.m[i];
+    MI[ni + i] = base + i;
   }
-  M.n += T.verts;
+  M.n += T.verts; M.ni += T.verts;
 }
