@@ -12,12 +12,13 @@ export function createGen(seed, onDone) {
   const cache = new Map();          // стовпці (без worker)
   const busy = new Map();           // id → [key, запит]
   let worker = null, nextId = 1;
+  const done = { col: 0, sec: 0, far: 0 };
   try {
     worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
     worker.onmessage = (e) => {
       const b = busy.get(e.data.id);
       busy.delete(e.data.id);
-      if (b) onDone(b[0], b[1].q, e.data.data, e.data.mesh, e.data.ms);
+      if (b) { done[b[1].q.type] = (done[b[1].q.type] || 0) + 1; onDone(b[0], b[1].q, e.data.data, e.data.mesh, e.data.ms); }
       pump();
     };
     worker.onerror = (e) => {
@@ -60,10 +61,12 @@ export function createGen(seed, onDone) {
         for (const [k, q] of queue) if (!best || q.pri < best[1].pri) best = [k, q];
         queue.delete(best[0]);
         const q = best[1].q, t1 = performance.now(), r = runJob(lawsOf(seed, q.d, q.n), q, cache);
+        done[q.type] = (done[q.type] || 0) + 1;
         onDone(best[0], q, r.data, r.mesh || null, performance.now() - t1);
       }
     },
     get pending() { return queue.size + busy.size; },
+    stats: () => ({ workers: worker ? 1 : 0, inflight: busy.size, queued: queue.size, done }),
     stop() { if (worker) worker.terminate(); worker = null; queue.clear(); busy.clear(); },
   };
 }

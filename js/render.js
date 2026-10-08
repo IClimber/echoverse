@@ -163,6 +163,7 @@ export function createRenderer(canvas) {
           r: b.r, u: b.up, kind: [P.kind, loc.k * P.dens, P.len, P.size], mapO: [st.rain.x0 - t[0], st.rain.y0 - t[1]], col,
         });
       }
+      R.end();
       return sk;
     },
   };

@@ -43,10 +43,26 @@ function boot() {
   let g = null;                              // поточна гра
   const camera = createCamera(load(CAM_KEY) === ISO ? ISO : THIRD);
   let showDebug = false, showHelp = true, toastUntil = 0;
-  const perf = { fps: 60, cpu: 0 };
+  const perf = { fps: 60, cpu: 0, upd: 0, drw: 0, frameMs: 0, p99: 0 };
+  const frameT = new Float32Array(512);      // інтервали між кадрами (мс), кільце — для середнього й p99 у F3
+  let frameI = 0, frameN = 0;
+  function frameStats() {
+    const n = Math.min(frameN, frameT.length), a = frameT.slice(0, n).sort();
+    let s = 0;
+    for (let i = 0; i < n; i++) s += a[i];
+    perf.frameMs = n ? s / n : 0; perf.p99 = n ? a[Math.min(n - 1, Math.floor(n * 0.99))] : 0;
+  }
   const hudCache = {};
   const setText = (id, s) => { if (hudCache[id] !== s) { hudCache[id] = s; $(id).textContent = s; } };
-  if (QS.has('dev')) window.eco = { get g() { return g; }, camera, renderer };   // для автоматичних перевірок у браузері
+  if (QS.has('dev')) window.eco = {                // для автоматичних перевірок у браузері
+    get g() { return g; }, camera, renderer,
+    stats() {
+      frameStats();
+      const st = g ? g.world.stats() : {}, R = renderer.R;
+      return { fps: perf.fps, frameMs: perf.frameMs, p99: perf.p99, upd: perf.upd, drw: perf.drw, gpuMs: R.gpuMs, draws: R.stats.draws, tris: R.stats.tris,
+        gpuMB: R.stats.gpuBytes / 1048576, colsPerSec: st.colsPerSec, pending: st.pending, cols: st.cols, secs: st.secs, meshes: renderer.meshCount };
+    },
+  };
 
   // ================= Меню =================
   function showMenu() { unlockPointer(); $('menu').hidden = false; $('resume').hidden = !g; renderWorlds(); }
@@ -450,7 +466,7 @@ function boot() {
       $('chargeBar').style.width = (ch.t / CHARGE * 100).toFixed(1) + '%';
     }
     if (toastUntil && now > toastUntil) { $('toast').hidden = true; toastUntil = 0; }
-    if (showDebug && now - (hudCache.dbgT || 0) > 250) { hudCache.dbgT = now; $('debug').textContent = debugText(g, perf, renderer.meshCount, camera); }
+    if (showDebug && now - (hudCache.dbgT || 0) > 250) { hudCache.dbgT = now; frameStats(); $('debug').textContent = debugText(g, perf, renderer.meshCount, camera, renderer.R); }
   }
 
   function toast(s) { $('toast').textContent = s; $('toast').hidden = false; toastUntil = performance.now() + 2800; }
@@ -459,12 +475,16 @@ function boot() {
   let last = performance.now(), fpsT = last, fpsN = 0;
   function frame(now) {
     const dt = Math.min(0.1, (now - last) / 1000);
+    frameT[frameI] = now - last; frameI = (frameI + 1) % frameT.length; frameN++;
     last = now;
     if (g) {
       const t0 = performance.now();
       update(dt, now);
+      const t1 = performance.now();
       if (g) draw(dt, now);
-      perf.cpu = perf.cpu * 0.95 + (performance.now() - t0) * 0.05;
+      const t2 = performance.now();
+      perf.upd = perf.upd * 0.95 + (t1 - t0) * 0.05; perf.drw = perf.drw * 0.95 + (t2 - t1) * 0.05;
+      perf.cpu = perf.cpu * 0.95 + (t2 - t0) * 0.05;
     }
     fpsN++;
     if (now - fpsT > 500) { perf.fps = fpsN * 1000 / (now - fpsT); fpsN = 0; fpsT = now; }

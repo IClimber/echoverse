@@ -16,7 +16,8 @@ const KEEP_COLS = 1500, KEEP_SECS = 5000, KEEP_FARS = 1200;   // скільки 
 
 export function createWorld(seed, onMesh) {
   const lawsMap = new Map(), cols = new Map(), secs = new Map(), fars = new Map();
-  let genMs = 0, genN = 0, objR = 0.5;      // objR — найбільша півширина перешкоди серед завантажених
+  let genMs = 0, genN = 0, objR = 0.5;
+  const colTimes = [];                       // мітки часу готових стовпців за останню секунду (F3: стовпців/с)      // objR — найбільша півширина перешкоди серед завантажених
   const evict = (map, keep) => {
     if (map.size <= keep) return;
     const old = [...map].sort((a, b) => a[1].used - b[1].used).slice(0, map.size - keep * 0.9);
@@ -51,7 +52,7 @@ export function createWorld(seed, onMesh) {
   }
   const gen = createGen(seed, (key, q, data, mesh, ms) => {
     genMs += ms; genN++;
-    if (q.type === 'col') { addCol(ckey(q.d, q.n, q.cx, q.cy), data); return; }
+    if (q.type === 'col') { colTimes.push(performance.now()); addCol(ckey(q.d, q.n, q.cx, q.cy), data); return; }
     if (q.type === 'far') { data.used = performance.now(); fars.set(key, data); onMesh(key, data, mesh); evict(fars, KEEP_FARS); return; }
     data.used = performance.now();
     const was = secs.get(key);
@@ -144,7 +145,11 @@ export function createWorld(seed, onMesh) {
     wantFar(d, n, tx, ty, s, pri) { const key = `f${d}:${n}:${tx}:${ty}:${s}`; gen.want(key, { type: 'far', d, n, tx, ty, s }, pri); return key; },
     far: (key) => { const F = fars.get(key); if (F) F.used = performance.now(); return F; },
     wantSec(d, n, cx, cy, cz, pri) { const key = skey(d, n, cx, cy, cz); gen.want(key, { type: 'sec', d, n, cx, cy, cz }, pri); return key; },
-    stats: () => ({ cols: cols.size, secs: secs.size, genMs: genN ? genMs / genN : 0, pending: gen.pending }),
+    stats: () => {
+      const now = performance.now();
+      while (colTimes.length && now - colTimes[0] > 1000) colTimes.shift();
+      return { cols: cols.size, secs: secs.size, genMs: genN ? genMs / genN : 0, pending: gen.pending, colsPerSec: colTimes.length, workers: gen.stats().workers };
+    },
     stop() { gen.stop(); },
   };
   return W;

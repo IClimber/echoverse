@@ -303,9 +303,14 @@ export function createGL(canvas) {
   if (aniso) gl.texParameterf(gl.TEXTURE_2D_ARRAY, aniso.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(8, gl.getParameter(aniso.MAX_TEXTURE_MAX_ANISOTROPY_EXT)));
   gl.generateMipmap(gl.TEXTURE_2D_ARRAY);
   let W = 1, H = 1, dpr = 1;
+  // Час GPU (EXT_disjoint_timer_query_webgl2): кільце запитів, результат — згладжено; немає розширення — null
+  const tq = gl.getExtension('EXT_disjoint_timer_query_webgl2'), queries = [];
+  let qOn = null;
 
   const R = {
     gl,
+    stats: { draws: 0, tris: 0, upBytes: 0, up: 0, gpuBytes: 0 },
+    gpuMs: tq ? 0 : null,
     get width() { return W; }, get height() { return H; }, get dpr() { return dpr; },
     resize() {
       dpr = Math.min(2, devicePixelRatio || 1);
@@ -334,14 +339,31 @@ export function createGL(canvas) {
       const ib = gl.createBuffer(); bufs.push(ib);
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, m.idx, gl.STATIC_DRAW);
       gl.bindVertexArray(null);
-      return { vao, bufs, count: m.count, type: m.idx instanceof Uint32Array ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT };
+      const bytes = m.pos.byteLength + m.nor.byteLength + m.col.byteLength + m.mat.byteLength + m.idx.byteLength;
+      R.stats.gpuBytes += bytes; R.stats.upBytes += bytes;
+      return { vao, bufs, bytes, count: m.count, type: m.idx instanceof Uint32Array ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT };
     },
     free(mesh) {
       gl.deleteVertexArray(mesh.vao);
       for (const b of mesh.bufs) gl.deleteBuffer(b);
+      R.stats.gpuBytes -= mesh.bytes || 0;
     },
+    // Час GPU: опитати готові запити, почати новий (кінець — R.end())
+    timeBegin() {
+      if (!tq) return;
+      for (let i = queries.length - 1; i >= 0; i--) {
+        const q = queries[i];
+        if (!gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE)) continue;
+        if (!gl.getParameter(tq.GPU_DISJOINT_EXT)) R.gpuMs = R.gpuMs * 0.9 + gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6 * 0.1;
+        gl.deleteQuery(q); queries.splice(i, 1);
+      }
+      if (queries.length < 4) { qOn = gl.createQuery(); gl.beginQuery(tq.TIME_ELAPSED_EXT, qOn); }
+    },
+    end() { if (qOn) { gl.endQuery(tq.TIME_ELAPSED_EXT); queries.push(qOn); qOn = null; } },
     // Кадр: небо, світло, туман, камера (view — матриця з camera.viewProj); cut — «вікно» до гравця або null
     begin({ fogCol, light, amb, lightCol, fog, fogAxes = null, view, cut, time = 0, sky = null, wind = [0, 0], curve = 0 }) {
+      R.stats.up = R.stats.upBytes; R.stats.draws = 0; R.stats.tris = 0; R.stats.upBytes = 0;
+      R.timeBegin();
       gl.clearColor(fogCol[0] / 255, fogCol[1] / 255, fogCol[2] / 255, 1);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       if (sky) R.drawSky(sky);
@@ -404,6 +426,7 @@ export function createGL(canvas) {
       gl.enable(gl.BLEND); gl.depthMask(false);
       gl.bindVertexArray(skyVao);
       gl.drawArrays(gl.TRIANGLES, 0, PARTICLES * 6);
+      R.stats.draws++; R.stats.tris += PARTICLES * 2;
       gl.disable(gl.BLEND); gl.depthMask(true);
       gl.useProgram(prog);
     },
@@ -435,6 +458,7 @@ export function createGL(canvas) {
       if (tint) gl.uniform3f(U.uTint, tint[0], tint[1], tint[2]); else gl.uniform3f(U.uTint, 1, 1, 1);
       gl.bindVertexArray(mesh.vao);
       gl.drawElements(gl.TRIANGLES, mesh.count, mesh.type, 0);
+      R.stats.draws++; R.stats.tris += mesh.count / 3;
     },
     // Лише зсув (чанки): без виділення пам'яті щокадру
     drawAt(mesh, ox, oy, oz) { shift[12] = ox; shift[13] = oy; shift[14] = oz; R.draw(mesh, shift); },

@@ -24,7 +24,8 @@ function speciesLine(L, x, y, bm) {
 
 export const fmtN = (n) => n > 0 ? '+' + n : n < 0 ? '−' + -n : '0';
 
-export function debugText(g, perf, meshCount, cam) {
+const f1 = (v) => v.toFixed(1).replace('.', ',');
+export function debugText(g, perf, meshCount, cam, R) {
   const { world, rec, me } = g, L = world.laws(g.d, g.n);
   const tx = Math.floor(me.x), ty = Math.floor(me.y), c = world.column(g.d, g.n, tx, ty);
   const kf = Math.floor((me.z ?? 0) / LEVEL + 1e-4), under = world.block(g.d, g.n, tx, ty, kf - 1);
@@ -52,7 +53,8 @@ export function debugText(g, perf, meshCount, cam) {
     `повітря    тиск ${L.air.pressure.toFixed(2)} атм, ${L.air.gasName}, радіація ${(L.air.rad * 100).toFixed(0)} %, серпанок ${(L.air.haze * 100).toFixed(0)} %, вітер ${(L.air.wind * 1.8 * 3.6).toFixed(0)} км/год (у грозу ×2,2)`,
     `погода     ${WEATHER_NAMES[weatherAt(L, g.clock || 0).kind]} (зміна раз на ${L.air.segMin.toFixed(1)} хв; ${Object.entries(L.air.w).filter(([, v]) => v > 0.05).map(([k, v]) => k + ' ' + v.toFixed(1)).join(', ')})`,
     `камера     ${cam.mode === 'iso' ? `згори, масштаб ${cam.zoom.toFixed(2)}` : `третя особа, відстань ${cam.dist.toFixed(1)}`}, азимут ${Math.round(cam.yaw * 180 / Math.PI) % 360}°, видно чанків ${g.view ? g.view.chunks.length : 0}`,
-    `кадр       ${perf.fps.toFixed(0)} к/с, CPU ${perf.cpu.toFixed(2)} мс`,
-    `генерація  ${st.genMs.toFixed(2)} мс/робота, стовпців ${st.cols}, секцій ${st.secs}, мешів ${meshCount}, у черзі ${st.pending}`,
+    `кадр       ${perf.fps.toFixed(0)} к/с · ${f1(perf.frameMs)} мс (p99 ${f1(perf.p99)}) · CPU ${perf.upd.toFixed(2).replace('.', ',')} + ${perf.drw.toFixed(2).replace('.', ',')} мс · GPU ${R && R.gpuMs !== null ? R.gpuMs.toFixed(2).replace('.', ',') + ' мс' : '—'}`,
+    `рендер     викликів ${R ? R.stats.draws : 0} · трикутників ${R ? (R.stats.tris / 1e6).toFixed(2).replace('.', ',') : 0} млн · завантажено ${R ? (R.stats.up / 1024).toFixed(0) : 0} КБ/кадр · у GPU ${R ? (R.stats.gpuBytes / 1048576).toFixed(0) : 0} МБ · мешів ${meshCount}`,
+    `генерація  воркерів ${st.workers} · ${st.colsPerSec} стовпців/с · ${st.genMs.toFixed(2).replace('.', ',')} мс/робота · стовпців ${st.cols}, секцій ${st.secs}, у черзі ${st.pending}`,
   ].join('\n');
 }
