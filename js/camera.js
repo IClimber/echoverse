@@ -13,9 +13,15 @@ export const LIMITS = {
   third: { pitch: [-70 * D2R, 80 * D2R], dist: [2.5, 16] },   // від'ємний нахил — погляд угору (eyeDir)
 };
 export const FOV = 55 * D2R;
-export const VIEW_R = 112;           // третя особа: повні секції (клітинок)
-export const FAR_R = 1400;           // третя особа: далечінь (плитки поверхні, gen/far.js), далі — туман і небо
-export const SEAM = VIEW_R - 8;      // шов: ближче — повні секції, далі — плитки далечі
+// Дальність (третя особа) — налаштування гравця, 8–32 чанки (setViewChunks; живі прив'язки ES-модулів — імпортери бачать нове)
+export let VIEW_R = 256;             // повні секції (клітинок)
+export let FAR_R = 1400;             // далечінь (плитки поверхні, gen/far.js), далі — туман і небо
+export let SEAM = VIEW_R - 8;        // шов: ближче — повні секції, далі — плитки далечі
+export function setViewChunks(c) {
+  c = Math.max(8, Math.min(32, c | 0));
+  VIEW_R = c * CS; SEAM = VIEW_R - 8; FAR_R = Math.max(1400, Math.round(VIEW_R * 2.75));
+  return c;
+}
 export const HEAD = 1.0;             // третя особа: камера дивиться на висоту голови
 // Третя особа: куди дивиться камера (по горизонталі) — туди обернений гравець, спиною до камери
 export const facing = (c) => c.yaw + Math.PI;

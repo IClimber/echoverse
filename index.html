@@ -65,6 +65,8 @@
   h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 20px 0 8px; }
   .row { display: flex; gap: 8px; }
   .row input { flex: 1; }
+  .range { align-items: center; font-size: 13px; }
+  .range span { min-width: 210px; }
   #worlds { display: grid; gap: 8px; }
   .world { display: flex; align-items: center; gap: 8px; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
   .world .info { flex: 1; min-width: 0; }
@@ -107,6 +109,8 @@
     <h2>Світи</h2>
     <div id="worlds"></div>
     <div id="err" hidden></div>
+    <h2>Налаштування</h2>
+    <label class="row range"><span id="viewLabel">Дальність</span><input id="view" type="range" min="8" max="32" step="1"></label>
     <div class="foot">
       <span>Зберігається в цьому браузері</span>
       <span><button id="import">Імпорт з файлу</button><input id="file" type="file" accept=".json,application/json" hidden></span>

@@ -1,7 +1,7 @@
 // main.js — запуск: меню світів, ігровий цикл (рух, стрибки, камера, підвантаження чанків), HUD, автозбереження.
 // ?strip — замість гри стенд «смуга всесвітів» (js/strip.js), ?flora — галерея видів рослин (js/flora-stand.js).
-import { createRenderer, BODY_R } from './render.js';
-import { createWorld, findSpawn, ck, sk, skey } from './world.js';
+import { createRenderer, BODY_R, budgetFor } from './render.js';
+import { createWorld, findSpawn, keepFor } from './world.js';
 import { createDevice, landing, landingChunks, CHARGE } from './device.js';
 import { step, support, windShelter, SPRINT, GRAVITY, FOOT } from './player.js';
 import { stepBody, windMoves, push, rayBody, PLAYER_MASS, HIT_IMPULSE } from './bodies.js';
@@ -15,15 +15,13 @@ import { debugText, fmtN } from './debug.js';
 import { animate } from './anim.js';
 import { clockStr } from './sky.js';
 import { weatherAt, localWeather, areaClimate } from './weather.js';
-import { createCamera, rotate, wheel, smooth, moveBasis, clipDist, camDist, facing, setYaw, basis, boxInView, ISO, THIRD, HEAD, FAR_R, SEAM } from './camera.js';
-import { FT } from './gen/far.js';
+import { createCamera, rotate, wheel, smooth, moveBasis, clipDist, camDist, facing, setYaw, basis, setViewChunks, ISO, THIRD, HEAD, VIEW_R } from './camera.js';
+import { createStreamer } from './stream.js';
 
 const $ = (id) => document.getElementById(id);
 const SAVE_MS = 10000;                     // автозбереження
 const CAM_KEY = 'echoverse-camera';         // вибраний вигляд (на браузер)
-const ZR_FAR = [-200, 2050];                 // висоти (од.) для піраміди видимості ще не згенерованої плитки далечі
-const UNDER_R = 64;                            // під землею: радіус (клітинок), у якому вантажимо секції біля висоти гравця (зали)
-const FLORA_R = 60;                            // рослини зблизька замовляємо для стовпців ближче (рендер малює ближче NEAR 44)
+const VIEW_KEY = 'echoverse-view';          // дальність, чанків (на браузер)
 
 const QS = new URLSearchParams(location.search);
 if (QS.has('strip')) import('./strip.js').then((m) => m.runStrip());
@@ -43,6 +41,19 @@ function boot() {
 
   let g = null;                              // поточна гра
   const camera = createCamera(load(CAM_KEY) === ISO ? ISO : THIRD);
+  const streamer = createStreamer();
+  // Дальність (8–32 чанки): камера, ліміти пам'яті світу, бюджет GPU, стрімінг
+  const setView = (c) => {
+    c = setViewChunks(c);
+    $('view').value = c;
+    $('viewLabel').textContent = `Дальність: ${c} чанків (${c * CS} клітинок)`;
+    if (g) g.world.setKeep(keepFor(VIEW_R));
+    renderer.setBudget(budgetFor(VIEW_R));
+    streamer.force();
+    return c;
+  };
+  setView(+(load(VIEW_KEY) || 16));
+  $('view').addEventListener('input', () => store(VIEW_KEY, setView(+$('view').value)));
   let showDebug = false, showHelp = true, toastUntil = 0;
   const perf = { fps: 60, cpu: 0, upd: 0, drw: 0, frameMs: 0, p99: 0 };
   const frameT = new Float32Array(512);      // інтервали між кадрами (мс), кільце — для середнього й p99 у F3
@@ -61,7 +72,7 @@ function boot() {
       frameStats();
       const st = g ? g.world.stats() : {}, R = renderer.R;
       return { fps: perf.fps, frameMs: perf.frameMs, p99: perf.p99, upd: perf.upd, drw: perf.drw, gpuMs: R.gpuMs, draws: R.stats.draws, tris: R.stats.tris,
-        gpuMB: (R.stats.gpuBytes + R.stats.arenaBytes) / 1048576, colsPerSec: st.colsPerSec, pending: st.pending, cols: st.cols, secs: st.secs, meshes: renderer.meshCount, workers: st.workers };
+        gpuMB: (R.stats.gpuBytes + R.stats.arenaBytes) / 1048576, colsPerSec: st.colsPerSec, pending: st.pending, cols: st.cols, secs: st.secs, meshes: renderer.meshCount, workers: st.workers, streamMs: g ? g.streamMs : 0 };
     },
   };
 
@@ -151,6 +162,8 @@ function boot() {
       cam: [p.x, p.y, p.z || 0], lastSave: performance.now(), view: null, clock: rec.clock || 0,
     };
     g.world.setCurrent(g.d, g.n);
+    g.world.setKeep(keepFor(VIEW_R));
+    streamer.force();
     if (camera.mode === THIRD) setYaw(camera, g.me.yaw + Math.PI);
     putWorld(snapshot());
     hideMenu();
@@ -221,6 +234,7 @@ function boot() {
     if (at === undefined) return;                               // ще генерується — стрибок трохи зачекає
     const P = g.world.laws(g.d, g.n), was = P.grav, L = g.world.laws(d, n), depth = d !== g.d;
     g.dev.done([g.d, g.n]);
+    g.prev = [g.d, g.n];
     g.d = d; g.n = n; g.world.setCurrent(d, n); g.me.x = at[0]; g.me.y = at[1]; g.me.z = at[2]; g.me.vz = 0; g.me.vx = 0; g.me.vy = 0; g.me.ground = false; g.me.stepOff = 0; g.me.fly = false;
     const msg = [];
     if (depth) msg.push(`глибина ${d}`);
@@ -351,83 +365,9 @@ function boot() {
     g.camDist = camera.mode === THIRD ? camDist(g.camDist, clipDist(camera, g.cam, solidAt), dt) : camera.dist;
     const dist = g.camDist;
     g.view = renderer.view(camera, g.cam, dist);
-    stream();
+    g.far = streamer.update(g, camera, renderer, now).far;
+    g.visible = streamer.visible; g.streamMs = streamer.ms;
     if (now - g.lastSave > SAVE_MS) { g.lastSave = now; save(); }
-  }
-
-  // Підвантаження: видимі чанки поточного всесвіту; коло приземлення в обох сусідніх (стрибок — без чекання);
-  // під час заряджання — усе видиме у всесвіті, куди стрибаємо
-  // Підвантаження: стовпці (зведення) у видимості, у них — секції з поверхнею й островами, що потрапляють у піраміду
-  // видимості; біля гравця — ще й секції навколо його висоти (печери, глибина). Для стрибка — те саме у всесвітах,
-  // куди можна стрибнути
-  function stream() {
-    const keys = new Set(), W = g.world, me = g.me, t = g.cam, m = g.view.m;
-    const kMe = Math.floor((me.z ?? 0) / LEVEL), czMe = Math.floor(kMe / SEC);
-    const col = (d, n, cx, cy, pri) => {
-      const C = W.touchCol(d, n, cx, cy);
-      keys.add(C ? `c${d}:${n}:${cx}:${cy}` : W.wantCol(d, n, cx, cy, pri));
-      return C;
-    };
-    const sec = (d, n, cx, cy, cz, pri) => {
-      const key = skey(d, n, cx, cy, cz);
-      keys.add(key);
-      const S = W.touchSec(d, n, cx, cy, cz);                 // меш могли звільнити з GPU — тоді наново
-      if (!S || (!S.empty && !renderer.hasSection(d, n, sk(cx, cy, cz)))) W.wantSec(d, n, cx, cy, cz, pri);
-      return key;
-    };
-    // секції стовпця, що видно: поверхня й острови в піраміді; поруч з гравцем — ±2 секції від його висоти;
-    // під землею (великі порожнини) — ще ±3 секції в піраміді видимості до UNDER_R клітинок
-    const myC = W.col(g.d, g.n, Math.floor(me.x / CS), Math.floor(me.y / CS)), under = !!myC && czMe < myC.czLo;
-    const visSecs = (d, n, C, pri, near) => {
-      const list = [], cave = under && Math.hypot(C.cx * CS + 8 - me.x, C.cy * CS + 8 - me.y) < UNDER_R;
-      for (let cz = C.czLo; cz <= C.czHi; cz++) list.push(cz);
-      for (const cz of C.isl) if (cz < C.czLo || cz > C.czHi) list.push(cz);
-      const r = near ? 2 : cave ? 3 : -1;
-      for (let cz = czMe - r; cz <= czMe + r; cz++) if (!list.includes(cz)) list.push(cz);
-      for (const cz of list) {
-        const z0 = cz * SEC * LEVEL - t[2], ax = C.cx * CS - t[0], ay = C.cy * CS - t[1];
-        if (!near && !boxInView(m, ax, ay, z0, z0 + SEC * LEVEL + 12)) continue;
-        sec(d, n, C.cx, C.cy, cz, pri + Math.abs(cz - czMe) * 40);
-      }
-      // рослини зблизька — окрема робота стовпця, лише біля цілі камери
-      if (C.obj.length && Math.hypot(C.cx * CS + 8 - t[0], C.cy * CS + 8 - t[1]) < FLORA_R && !renderer.hasFlora(d, n, ck(C.cx, C.cy))) keys.add(W.wantFlora(d, n, C.cx, C.cy, pri));
-    };
-    const vis = g.view.chunks, ch = g.dev.charge;
-    const nearCols = landingChunks(me.x, me.y, CS);
-    for (const [cx, cy] of nearCols) { const C = col(g.d, g.n, cx, cy, -3e6); if (C) visSecs(g.d, g.n, C, -3e6, true); }   // під ногами — першими
-    for (const v of vis) { const C = col(g.d, g.n, v.cx, v.cy, v.dist2 - 1e5); if (C) visSecs(g.d, g.n, C, v.dist2, Math.abs(v.cx * CS + 8 - me.x) < 24 && Math.abs(v.cy * CS + 8 - me.y) < 24); }
-    const other = (d, n, hot) => {
-      for (const [cx, cy] of nearCols) { const C = col(d, n, cx, cy, hot ? -2e6 : 1e5); if (C) visSecs(d, n, C, hot ? -2e6 : 1e5, true); }
-      if (hot) for (const v of vis) { const C = col(d, n, v.cx, v.cy, -1e6 + v.dist2); if (C) visSecs(d, n, C, -1e6 + v.dist2, false); }
-    };
-    g.far = camera.mode === ISO ? null : farTiles(keys, t, m);
-    for (const dir of [-1, 1]) other(g.d, g.n + dir, ch && ch.to[0] === g.d && ch.to[1] === g.n + dir);
-    if (ch && (ch.to[0] !== g.d || Math.abs(ch.to[1] - g.n) !== 1)) other(ch.to[0], ch.to[1], true);   // далекий стрибок (R)
-    W.gen.keepOnly(keys);
-    W.gen.tick();
-  }
-
-  // Далечінь (третя особа): плитки поверхні FT×FT клітинок у радіусі FAR_R, що виходять за шов і потрапляють у
-  // піраміду видимості; крок — від відстані (2, 4, 8 клітинок). Поки потрібного кроку немає — показуємо інший готовий
-  // крок тієї самої плитки (без дір під час перемикання). Запити — після секцій поточного всесвіту
-  function farTiles(keys, t, m) {
-    const W = g.world, out = [], tx0 = Math.floor((t[0] - FAR_R) / FT), tx1 = Math.floor((t[0] + FAR_R) / FT);
-    const ty0 = Math.floor((t[1] - FAR_R) / FT), ty1 = Math.floor((t[1] + FAR_R) / FT);
-    for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) {
-      const ax = tx * FT - t[0], ay = ty * FT - t[1], qx = Math.max(ax, Math.min(0, ax + FT)), qy = Math.max(ay, Math.min(0, ay + FT));
-      const near = Math.hypot(qx, qy), far = Math.hypot(Math.max(-ax, ax + FT), Math.max(-ay, ay + FT));
-      if (near > FAR_R || far < SEAM) continue;
-      const s = near < 300 ? 2 : near < 700 ? 4 : 8;
-      let F = null;
-      for (const ss of [s, s * 2, s / 2, s * 4]) { if (ss < 2 || ss > 8) continue; const k = `f${g.d}:${g.n}:${tx}:${ty}:${ss}`; if (renderer.hasFar(k)) { F = { k, d: W.far(k) }; break; } }
-      const z0 = F && F.d ? F.d.zmin - t[2] : ZR_FAR[0] - t[2], z1 = F && F.d ? F.d.zmax + 40 - t[2] : ZR_FAR[1] - t[2];
-      if (!boxInView(m, ax, ay, z0, z1, FT)) continue;
-      const key = `f${g.d}:${g.n}:${tx}:${ty}:${s}`;
-      keys.add(key);
-      if (!renderer.hasFar(key)) W.wantFar(g.d, g.n, tx, ty, s, 2e5 + near);
-      if (F) { keys.add(F.k); out.push({ key: F.k, x0: tx * FT, y0: ty * FT }); }
-    }
-    return out;
   }
 
   // Карта укриттів від опадів (64×64 навколо гравця): висота верху стовпця; перебудова — коли гравець перейшов

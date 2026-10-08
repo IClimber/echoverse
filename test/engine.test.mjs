@@ -179,3 +179,13 @@ test('робота flora: рослини зблизька стовпця — т�
     assert.equal(meshDigest(meshHash(u.buffer)), MESH_GOLD[`${i}:near`]);
   });
 });
+
+// ================= Стрімінг =================
+import { columnsInCircle, colPri } from '../js/stream.js';
+
+test('стрімінг: коло дальності 32 чанки, у піраміді — раніше', () => {
+  const n = columnsInCircle([1000.5, -300.25], 512).length, a = Math.PI * (512 / 16) ** 2;
+  assert.ok(n >= 0.95 * a && n <= 1.1 * a, `${n} / ${a}`);
+  for (const d of [60, 200, 500]) assert.ok(colPri(d, true) < colPri(d, false));
+  assert.equal(colPri(30, false), colPri(30, true));
+});

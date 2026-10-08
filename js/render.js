@@ -9,13 +9,12 @@ import { figureParts, Mesh } from './gen/mesh.js';
 import { poseMatrices } from './anim.js';
 import { chain, translate, scale, invert } from './mat.js';
 import { skyState, applyWeather } from './sky.js';
-import { ISO, VIEW_R, FAR_R, SEAM, viewProj, chunksInView, isoRadius, project, basis, aabbInView, aabbInside } from './camera.js';
+import { ISO, VIEW_R, FAR_R, SEAM, viewProj, isoRadius, project, basis, aabbInView, aabbInside } from './camera.js';
 import { regionOf, RS, RW, RH } from './gen/pack.js';
 import { ck } from './world.js';
 import { texturesOf, TEX } from './textures.js';
 import { LAYERS } from './gen/materials.js';
 
-const ZR = [-200, 2100];                       // висоти для піраміди видимості стовпців: від глибин до вершин гір (секції — точніше)
 const ZR_ISO = [0, (SEA + MAX_AMP) * LEVEL + 6]; // згори радіус — по рельєфу з деревами (інакше чанків набагато більше)
 const KEEP_FAR = 1500;                         // плиток далечі в GPU
 const ARENA0 = 32768, ARENA_MAX = 4194304;     // ємність арени регіону (вершин): початкова, найбільша
@@ -73,10 +72,13 @@ export function createRenderer(canvas) {
   };
 
   // ---- сховище регіонів ----
+  let lastU = null;                             // останній знайдений (стрімінг питає підряд — без складання рядків)
   const uni = (d, n, make) => {
+    if (lastU && lastU.d === d && lastU.n === n && !lastU.dead) return lastU;
     const k = `${d}:${n}`;
     let U = unis.get(k);
-    if (!U && make) { U = { d, n, regions: new Map(), slots: new Map(), flora: new Map(), added: frame, drawn: 0 }; unis.set(k, U); }
+    if (!U && make) { U = { d, n, regions: new Map(), slots: new Map(), flora: new Map(), added: frame, drawn: 0, at: performance.now() }; unis.set(k, U); }
+    if (U) lastU = U;
     return U;
   };
   const region = (U, rx, ry, rz) => {
@@ -125,7 +127,7 @@ export function createRenderer(canvas) {
     G.fls.delete(k);
     emptyCheck(U, G);
   };
-  const dropUni = (U) => { for (const G of [...U.regions.values()]) dropRegion(U, G); unis.delete(`${U.d}:${U.n}`); };
+  const dropUni = (U) => { for (const G of [...U.regions.values()]) dropRegion(U, G); unis.delete(`${U.d}:${U.n}`); U.dead = true; };
 
   // Секція в арени свого регіону (заміна — старі діапазони звільнити); без меша — порожня
   function putSection(d, n, k, q, mesh) {
@@ -266,14 +268,14 @@ export function createRenderer(canvas) {
     },
     get meshCount() { return nSlots; },
 
-    // Камера на цей кадр: матриця, радіус видимого, туман і чанки в піраміді видимості (ближчі першими).
+    // Камера на цей кадр: матриця, радіус видимого, туман.
     // dist — відстань до ока в третій особі (після зіткнення з рельєфом)
     view(camera, target, dist) {
       const v = viewProj(camera, R.width, R.height, dist), iso = camera.mode === ISO;
       const rad = iso ? isoRadius(camera, R.width, R.height, ZR_ISO, target[2]) : VIEW_R;
       // туман: згори — за відстанню на екрані (кути екрана злегка в тумані, висота не вибілює), у третій особі — по горизонталі
       const b = basis(camera), rs = Math.hypot(R.width, R.height) / 2 / (S * camera.zoom);
-      return { ...v, rad, fog: iso ? [0.8 * rs, 1.15 * rs] : [0.3 * FAR_R, 0.97 * FAR_R], fogAxes: iso ? [b.r, b.up] : null, chunks: chunksInView(v.m, target, rad, ZR) };
+      return { ...v, rad, fog: iso ? [0.8 * rs, 1.15 * rs] : [0.3 * FAR_R, 0.97 * FAR_R], fogAxes: iso ? [b.r, b.up] : null };
     },
 
     // st: {camera, target [x,y,z], view (з view()), laws, clock (с, годинник світу), weather ({W — weather.js weatherAt,

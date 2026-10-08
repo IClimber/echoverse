@@ -16,13 +16,15 @@ export const ck = (cx, cy) => (cx + 0x100000) * 0x200000 + (cy + 0x100000);
 export const sk = (cx, cy, cz) => ck(cx, cy) * 1024 + (cz + 512);
 // Рядкові ключі робіт генератора й мешів рендера
 export const skey = (d, n, cx, cy, cz) => `${d}:${n}:${cx}:${cy}:${cz}`;
-const KEEP_COLS = 1500, KEEP_SECS = 5000, KEEP_FARS = 1200;   // скільки тримати в пам'яті (секція ~6 КБ)
+// Скільки тримати в пам'яті (секція ~6 КБ) — від дальності (стрімінг: setKeep(keepFor(R)))
+export const keepFor = (R) => { const n = Math.ceil(Math.PI * (R / CS + 1) ** 2); return { cols: Math.max(1500, Math.ceil(n * 1.8)), secs: Math.max(5000, n * 6), fars: 1500 }; };
 
 export function createWorld(seed, onMesh) {
   const lawsMap = new Map(), fars = new Map();
-  // Всесвіти: 'd:n' → {d, n, cols: Map(ck → стовпець), secs: Map(sk → секція), at — коли був поточним}. Порядок Map —
-  // давність (touch* переставляє в кінець), тож витіснення бере з початку
+  // Всесвіти: 'd:n' → {d, n, cols: Map(ck → стовпець), secs: Map(sk → секція), at — коли був поточним}. Давність —
+  // мітка used (touch* ставить нову; сортування — лише під час витіснення)
   const unis = new Map();
+  let keep = keepFor(256);
   let genMs = 0, genN = 0, objR = 0.5, nCols = 0, nSecs = 0, cur = null, lastU = null;   // objR — найбільша півширина перешкоди серед завантажених
   const colTimes = [];                       // мітки часу готових стовпців за останню секунду (F3: стовпців/с)
   const uni = (d, n, make) => {
@@ -39,7 +41,7 @@ export function createWorld(seed, onMesh) {
     if (cur) order.push(cur);
     for (const U of order) {
       const map = U[kind];
-      for (const [k, o] of map) {
+      for (const [k, o] of [...map].sort((a, b) => a[1].used - b[1].used)) {
         if (total <= keep * 0.9) break;
         o.dead = true; map.delete(k); total--;
       }
@@ -48,7 +50,8 @@ export function createWorld(seed, onMesh) {
     }
     return total;
   };
-  const touch = (map, k) => { const o = map.get(k); if (o) { map.delete(k); map.set(k, o); } return o; };
+  let stamp = 0;
+  const touch = (map, k) => { const o = map.get(k); if (o) o.used = ++stamp; return o; };
 
   // Стовпець прийшов: перешкоди-предмети за клітинкою (світові координати; розмір — o.r, o.top), тіла (ширяюче каміння)
   function addCol(c) {
@@ -72,23 +75,25 @@ export function createWorld(seed, onMesh) {
     c.kTop = (c.czHi + 1) * SEC;
     const U = uni(c.d, c.n, true), was = U.cols.get(key);
     if (was) { was.dead = true; U.cols.delete(key); } else nCols++;
+    c.used = ++stamp;
     U.cols.set(key, c);
-    nCols = trim('cols', nCols, KEEP_COLS);
+    nCols = trim('cols', nCols, keep.cols);
   }
   const gen = createGen(seed, (key, q, data, mesh, ms) => {
     genMs += ms; genN++;
-    if (q.type === 'col') { colTimes.push(performance.now()); addCol(data); return; }
+    if (q.type === 'col') { colTimes.push(performance.now()); addCol(data); W.dirty = true; return; }
     if (q.type === 'far') {
       fars.delete(key); fars.set(key, data); onMesh('far', q.d, q.n, key, q, data, mesh);
-      if (fars.size > KEEP_FARS) for (const k of fars.keys()) { if (fars.size <= KEEP_FARS * 0.9) break; fars.delete(k); }
+      if (fars.size > keep.fars) for (const k of fars.keys()) { if (fars.size <= keep.fars * 0.9) break; fars.delete(k); }
       return;
     }
     if (q.type === 'flora') { onMesh('flora', q.d, q.n, ck(q.cx, q.cy), q, data, mesh); return; }
     const U = uni(q.d, q.n, true), k = sk(q.cx, q.cy, q.cz), was = U.secs.get(k);
     if (was) { was.dead = true; U.secs.delete(k); } else nSecs++;
+    data.used = ++stamp;
     U.secs.set(k, data);
     onMesh('sec', q.d, q.n, k, q, data, mesh);
-    nSecs = trim('secs', nSecs, KEEP_SECS);
+    nSecs = trim('secs', nSecs, keep.secs);
   });
 
   // Стовпець і секція точки; останні знайдені пам'ятаємо (фізика питає сусідні блоки підряд)
@@ -122,6 +127,8 @@ export function createWorld(seed, onMesh) {
     // Давність для витіснення (кличе стрімінг для потрібного)
     touchCol(d, n, cx, cy) { const U = uni(d, n); return U && touch(U.cols, ck(cx, cy)); },
     touchSec(d, n, cx, cy, cz) { const U = uni(d, n); return U && touch(U.secs, sk(cx, cy, cz)); },
+    setKeep(k) { keep = k; },
+    dirty: false,                            // прийшли зведення стовпців (стрімінг перерахує)
     // Поточний всесвіт (витісняється останнім)
     setCurrent(d, n) { cur = uni(d, n, true); cur.at = performance.now(); },
     // Вид блоку (цілі x, y, k); −1 — ще не згенеровано. Нижче світу — камінь, вище — повітря; вище за предмети й поверхню
@@ -173,7 +180,7 @@ export function createWorld(seed, onMesh) {
     wantCol(d, n, cx, cy, pri) { const key = `c${d}:${n}:${cx}:${cy}`; gen.want(key, { type: 'col', d, n, cx, cy }, pri); return key; },
     // Плитка далечі (крок s): запит (готова — far(key): zmin, zmax; меш — у рендері), ключ
     wantFar(d, n, tx, ty, s, pri) { const key = `f${d}:${n}:${tx}:${ty}:${s}`; gen.want(key, { type: 'far', d, n, tx, ty, s }, pri); return key; },
-    far: (key) => touch(fars, key),
+    far: (key) => { const F = fars.get(key); if (F) { fars.delete(key); fars.set(key, F); } return F; },
     // Рослини зблизька стовпця (меш — у рендері)
     wantFlora(d, n, cx, cy, pri) { const key = `p${d}:${n}:${cx}:${cy}`; gen.want(key, { type: 'flora', d, n, cx, cy }, pri); return key; },
     wantSec(d, n, cx, cy, cz, pri) { const key = skey(d, n, cx, cy, cz); gen.want(key, { type: 'sec', d, n, cx, cy, cz }, pri); return key; },
