@@ -63,7 +63,19 @@ void main() {
   if (uCut.z > 0.0 && gl_FragCoord.z < uCutD && vW.z > uCut.w && distance(gl_FragCoord.xy, uCut.xy) < uCut.z
       && mod(floor(gl_FragCoord.x) + floor(gl_FragCoord.y), 2.0) < 1.0) discard;
   vec2 uv = vUV + (vMat == 1.0 ? uTime * vec2(0.05, 0.03) : vMat == 19.0 ? uTime * vec2(0.008, 0.005) : vec2(0.0));   // вода пливе, лава — повільно
-  vec3 c = vCol * texture(uTex, vec3(uv, vMat)).rgb * 2.0;               // текстура — множник кольору (0,5 = ×1)
+  // Кожна клітинка текстури — зі своїм поворотом і віддзеркаленням (за хешем клітинки й матеріалу), щоб однакові
+  // текстури не складалися в помітну сітку. Вода, лава (спільний плин) і край дерну — без повороту; візерунки з
+  // напрямом (брижі піску, пласти скель, кора) — лише на 180°. Градієнти — до повороту (textureGrad): без швів мип-мап
+  vec2 g1 = dFdx(uv), g2 = dFdy(uv), cell = floor(uv), f = uv - cell - 0.5;
+  if (vMat != 1.0 && vMat != 19.0 && vMat != 16.0) {
+    float h = fract(sin(dot(vec3(cell, vMat), vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+    bool dir = vMat == 3.0 || vMat == 6.0 || vMat == 10.0 || vMat == 11.0 || vMat == 13.0;
+    int k = dir ? (h < 0.5 ? 0 : 2) : int(h * 4.0);
+    mat2 R = k == 0 ? mat2(1.0, 0.0, 0.0, 1.0) : k == 1 ? mat2(0.0, 1.0, -1.0, 0.0) : k == 2 ? mat2(-1.0, 0.0, 0.0, -1.0) : mat2(0.0, -1.0, 1.0, 0.0);
+    if (!dir && fract(h * 7.31) > 0.5) R = R * mat2(-1.0, 0.0, 0.0, 1.0);
+    f = R * f; g1 = R * g1; g2 = R * g2;
+  }
+  vec3 c = vCol * textureGrad(uTex, vec3(f + 0.5, vMat), g1, g2).rgb * 2.0;   // текстура — множник кольору (0,5 = ×1)
   o = vec4(mix(c, uFogCol, smoothstep(uFog.x, uFog.y, vFog)), uAlpha);
 }`;
 
