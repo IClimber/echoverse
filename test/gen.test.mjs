@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { hash2, hash3, hash4, hashStr, rng, unit } from '../js/rng.js';
 import { noise2, noise3, fbm2, fbm3 } from '../js/noise.js';
-import { lawsOf, hsl, GEN } from '../js/universe.js';
+import { lawsOf, hsl, GEN, SEA } from '../js/universe.js';
 import { genChunk, digest, tile, ci, CS, T_WATER, blocks } from '../js/gen/chunk.js';
 import { chunkMesh } from '../js/gen/mesh.js';
 import { findSpawn } from '../js/world.js';
@@ -82,7 +82,10 @@ test('сусідні всесвіти схожі, далекі — ні', () => 
   const sim = (seed, n1, n2) => {
     const A = lawsOf(seed, 0, n1), B = lawsOf(seed, 0, n2), a = {}, b = {};
     let close = 0, N = 0;
-    for (let y = -64; y < 64; y += 2) for (let x = -64; x < 64; x += 2) { tile(A, x, y, a); tile(B, x, y, b); close += Math.abs(a.h - b.h) <= 1; N++; }
+    for (let y = -64; y < 64; y += 2) for (let x = -64; x < 64; x += 2) { tile(A, x, y, a); tile(B, x, y, b);
+      // висота — з допуском 1 + 8 % висоти над морем (гори в сотні блоків трохи вищі чи нижчі — та сама форма); дно моря не порівнюємо
+      close += a.t === T_WATER && b.t === T_WATER || Math.abs(a.h - b.h) <= 1 + 0.08 * Math.abs(a.h - SEA); N++;
+    }
     return close / N;
   };
   const near = [], far = [];
@@ -90,8 +93,8 @@ test('сусідні всесвіти схожі, далекі — ні', () => 
     near.push(sim(hashStr(s), n, n + 1)); far.push(sim(hashStr(s), n, n + 300));
   }
   const avg = (a) => a.reduce((x, y) => x + y) / a.length;
-  assert.ok(Math.min(...near) > 0.85, `найменша схожість сусідів ${Math.min(...near)}`);
-  assert.ok(avg(near) > 0.95, `середня схожість сусідів ${avg(near)}`);
+  assert.ok(Math.min(...near) > 0.8, `найменша схожість сусідів ${Math.min(...near)}`);
+  assert.ok(avg(near) > 0.9, `середня схожість сусідів ${avg(near)}`);
   assert.ok(avg(far) < 0.45, `середня схожість далеких ${avg(far)}`);
 });
 
@@ -113,7 +116,10 @@ test('місце появи: детерміноване, на суходолі �
 });
 
 test('меш чанка: масиви узгоджені, індекси в межах', () => {
-  const L = lawsOf(hashStr('меш'), 0, 4), C = genChunk(L, 3, 3), m = chunkMesh(C, L).solid, nv = m.pos.length / 3;
+  const L = lawsOf(hashStr('меш'), 0, 4);
+  let cx = 3;
+  while (Math.min(...genChunk(L, cx, 3).h) < 1) cx++;           // чанк на суходолі (тестовий стовпець — блоки 0…95)
+  const C = genChunk(L, cx, 3), m = chunkMesh(C, L).solid, nv = m.pos.length / 3;
   assert.equal(m.nor.length, nv * 3);
   assert.equal(m.col.length, nv * 3);
   assert.equal(m.count % 3, 0);
@@ -217,10 +223,10 @@ test('рідини: біля старту — безпечна вода; тра�
     for (let cx = 0; cx < 6; cx++) for (const t of genChunk(L, cx, 0).t) { assert.notEqual(t, T_WATER); assert.notEqual(t, T_ICE); beds += t === T_BED; }
   }
   if (hot !== null) assert.ok(lawsOf(seed, 0, hot).liquid.danger.length > 0);
-  // дно водойми — нижче поверхні, біля берега мілко
+  // дно водойми — нижче поверхні (з v9 може бути й нижче нуля: глибина океанів — закон)
   const L = lawsOf(seed, 0, 0), c = {};
   let found = 0;
-  for (let x = 0; x < 400 && found < 50; x++) { tile(L, x, 7, c); if (c.t === T_WATER) { found++; assert.ok(c.h >= 1 && c.h < 6); } }
+  for (let x = 0; x < 400 && found < 50; x++) { tile(L, x, 7, c); if (c.t === T_WATER) { found++; assert.ok(c.h < SEA, `дно ${c.h}`); } }
 });
 
 test('вокселі: стовпець окремо = стовпець у чанку; рамки сусідніх чанків збігаються; печери й острови трапляються', async () => {

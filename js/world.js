@@ -1,7 +1,7 @@
 // world.js — світ у грі: зерно, закони всесвітів, стовпці й секції з генератора і запити до блоків (рух, приземлення
 // після стрибка, камера, F3). Стовпець (зведення: поверхня, предмети, межі секцій) — на кожні 16×16 клітинок; секція —
 // 16×16×16 блоків з рамкою. Геометрію секції віддає рендеру через onMesh.
-import { lawsOf, physOf } from './universe.js';
+import { lawsOf, physOf, KMIN, KMAX } from './universe.js';
 import { CS, ci, bv, solidB, blocks, genColumn, B_AIR, B_STONE, O_FLOAT, SEC } from './gen/chunk.js';
 import { LEVEL } from './iso.js';
 import { createGen } from './gen/client.js';
@@ -88,12 +88,13 @@ export function createWorld(seed, onMesh) {
     hasCol: (d, n, cx, cy) => cols.has(ckey(d, n, cx, cy)),
     hasSec: (key) => secs.has(key),
     sec: (key) => secs.get(key),
-    // Вид блоку (цілі x, y, k); −1 — ще не згенеровано. Нижче світу — камінь; вище за предмети й поверхню стовпця
-    // (поза смугою островів) — повітря, навіть без секції
+    // Вид блоку (цілі x, y, k); −1 — ще не згенеровано. Нижче світу — камінь, вище — повітря; вище за предмети й поверхню
+    // стовпця (поза смугою островів) — повітря, навіть без секції
     block(d, n, x, y, k) {
-      if (k < 0) return B_STONE;
+      if (k < KMIN) return B_STONE;
+      if (k > KMAX) return B_AIR;
       const cx = Math.floor(x / CS), cy = Math.floor(y / CS), cz = Math.floor(k / SEC), S = secOf(d, n, cx, cy, cz);
-      if (S) return S.empty ? B_AIR : S.b[bv(x - cx * CS, y - cy * CS, k - S.k0, S.nk)];
+      if (S) return S.empty ? (S.solid ? B_STONE : B_AIR) : S.b[bv(x - cx * CS, y - cy * CS, k - S.k0, S.nk)];
       const C = colOf(d, n, x, y);
       if (C && k >= C.kTop && !C.isl.includes(cz)) return B_AIR;
       return -1;

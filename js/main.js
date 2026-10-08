@@ -8,7 +8,7 @@ import { stepBody, push, rayBody, PLAYER_MASS, HIT_IMPULSE } from './bodies.js';
 import { initInput, moveAxis, turnAxis, sprintHeld, vertAxis, takeActions, takeWheel, takeDrag, clearInput, lockPointer, unlockPointer, locked } from './input.js';
 import { listWorlds, putWorld, deleteWorld, serialize, deserialize, newId } from './save.js';
 import { hashStr } from './rng.js';
-import { GEN, physOf, physAt } from './universe.js';
+import { GEN, SEA, physOf, physAt } from './universe.js';
 import { CS, SEC, solidB, B_LIQ, B_MAGMA } from './gen/chunk.js';
 import { LEVEL } from './iso.js';
 import { debugText, fmtN } from './debug.js';
@@ -160,7 +160,10 @@ function boot() {
     return landingChunks(x, y, CS).every(([cx, cy]) => {
       const C = g.world.col(d, n, cx, cy);
       if (!C) return false;
-      for (let cz = Math.min(czMe - 1, C.czLo); cz <= Math.max(czMe + 1, C.czHi); cz++) if (!g.world.hasSec(skey(d, n, cx, cy, cz))) return false;
+      // ті самі секції, що замовляє stream (поверхня й біля ніг); між ними — невідомо, landing вважає це стіною
+      const has = (cz) => g.world.hasSec(skey(d, n, cx, cy, cz));
+      for (let cz = C.czLo; cz <= C.czHi; cz++) if (!has(cz)) return false;
+      for (let cz = czMe - 1; cz <= czMe + 1; cz++) if (!has(cz)) return false;
       return true;
     });
   };
@@ -391,7 +394,7 @@ function boot() {
     });
     setText('addr', `Глибина ${g.d} · всесвіт ${fmtN(g.n)} · ${clockStr(sk.phase)}${L.sky.lock ? ' (вічно)' : ''}`);
     const an = g.ph && g.ph.anom ? ` · аномалія ×${g.ph.anom.toFixed(1).replace('.', ',')}` : '';
-    setText('coords', `x ${Math.floor(me.x)} · y ${Math.floor(me.y)} · гравітація ${gStr(L)}${an}${me.wet ? ` · у рідині: ${liqStr(L.liquid)}${L.liquid.danger ? ' — небезпечно' : ''}` : ''}`);
+    setText('coords', `x ${Math.floor(me.x)} · y ${Math.floor(me.y)} · висота ${Math.floor(me.z / LEVEL) - SEA} · гравітація ${gStr(L)}${an}${me.wet ? ` · у рідині: ${liqStr(L.liquid)}${L.liquid.danger ? ' — небезпечно' : ''}` : ''}`);
     const A = L.air;
     setText('env', `${loc.name}${W.windK > 0.3 ? ` · вітер ${(W.windK * 1.8).toFixed(0)} м/с` : ''}${A.breath ? '' : ` · повітря ${A.gasName}`}${A.rad > 0.3 ? ` · радіація ${A.rad > 0.65 ? 'висока' : 'помірна'}` : ''}`);
     $('charge').hidden = !ch;

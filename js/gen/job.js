@@ -42,7 +42,7 @@ export function runJob(L, q, cache) {
   const col = colFor(L, q, cache);
   if (q.type === 'col') return { data: colSummary(col, L), bufs: [] };
   const sec = genSection(L, col, q.cz);
-  if (sec.empty) return { data: { empty: true, k0: sec.k0, nk: sec.nk }, bufs: [] };
+  if (sec.empty) return { data: sec, bufs: [] };
   const m = chunkMesh({ cx: q.cx, cy: q.cy, h: col.h, bm: col.bm, v: col.v, b: sec.b, k0: sec.k0, nk: sec.nk, obj: col.obj, sp: col.sp }, L);
   const bufs = [sec.b.buffer];
   for (const x of [m.solid, m.liquid, m.flora, m.far]) if (x) bufs.push(x.pos.buffer, x.nor.buffer, x.col.buffer, x.mat.buffer, x.idx.buffer);

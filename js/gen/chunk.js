@@ -4,7 +4,7 @@
 // грубій ґратці 4×4×4 блоки з трилінійною інтерполяцією). Рельєф — шум від (x, y, n): сусідні номери схожі.
 import { hash2, hash3, unit } from '../rng.js';
 import { noise2, noise3, fbm3 } from '../noise.js';
-import { SEA, L_WATER, L_DRY, WORLD_H, floats, gravityAt } from '../universe.js';
+import { SEA, L_WATER, L_DRY, WORLD_H, KMIN, KMAX, floats, gravityAt } from '../universe.js';
 import { LEVEL } from '../iso.js';
 import { BIOMES, pickBiome, Z_TEMP, Z_COLD, Z_HOT, Z_WET, Z_DRY, Z_DESERT, Z_SNOW, Z_PEAK, Z_BEACH } from './biomes.js';
 import { regionAt, speciesOf, pickSpecies } from './flora.js';
@@ -68,6 +68,27 @@ function onGrid(seed, px, py, S, prob, f) {
 
 // Форми рельєфу в просторі висоти e (до класифікації; span — e на блок): тераси й плато, річкові долини (до рівня
 // моря — у руслі рідина), каньйони (у сухому кліматі W), кратери (чаша з валом; нижче моря — озеро)
+// Гірські хребти (генератор v9), блоки над рельєфом: гребені шуму (1 − |шум|, загострені) у гористих землях.
+// Лише від повільних полів зерна глибини (масштаб — з висотою), не від e: у сусідньому всесвіті гори ті самі (дрібна
+// зміна e × сотні блоків дала б стіни), і додаються до висоти до перевірки моря — берег гори є її схилом (з моря —
+// гористі острови). Річка
+// прорізає V-подібну долину: ширина — від глибини, схил ≲ 3 блоки на клітинку
+function mountain(L, px, py) {
+  const M = L.mount;
+  if (!M) return 0;
+  const mask = noise2(L.sMt2, px / (M.S * 2), py / (M.S * 2)) + M.f - 0.6;
+  if (mask <= 0) return 0;
+  const r = 1 - absv(noise2(L.sMt, px / M.S, py / M.S)), r2 = r * r;
+  let h = M.H * (mask * 3 < 1 ? mask * 3 : 1) * r2 * r2;
+  const R = L.relief;
+  if (R.rivers > 0.3 && h > 1) {
+    const wq = noise2(L.sRv ^ 0x77, px / 90, py / 90), rv = absv(noise2(L.sRv, px / R.riverS + wq * 0.3, py / R.riverS - wq * 0.3));
+    const w = 0.004 + 0.016 * R.rivers, v = clamp01((rv - w) / (h * 0.6 / R.riverS + 0.001));
+    h *= v * v * (3 - 2 * v);
+  }
+  return h;
+}
+
 function carve(L, px, py, e, W, span) {
   const R = L.relief;
   if (R.terrace > 0.15 && e > L.seaE) {
@@ -141,11 +162,19 @@ export function tile(L, x, y, out = {}) {
   const W = L.wet + 0.65 * fbm3(L.sW, px / 220, py / 220, L.n * 0.03, 3);
   const span = (1 - L.seaE) / L.amp;          // висота e на один блок
   out.o = 0; out.ov = 0; out.os = 0; out.v = 0; out.bm = 0; out.cold = T0 < -0.6; out.magma = false;
-  const e = carve(L, px, py, elevation(L, px, py), W, span);
-  const xb = peaks(L, px, py, out), ex = e + xb * span;
+  const e0 = elevation(L, px, py), e = carve(L, px, py, e0, W, span);
+  const mt = mountain(L, px, py), xb = peaks(L, px, py, out) + mt, ex = e + xb * span;
   if (ex < L.seaE) {
     // Дно: що далі від берега (нижче рівня моря), то глибше; біля берега — мілина (рівень SEA − 1)
-    out.h = Math.max(1, SEA - 1 - Math.floor((L.seaE - ex) * 22));   // дно — щонайменше 1 блок (під водою не порожнеча)
+    // дно: біля берега мілко, далі — глибина океанів закону (до сотень блоків); під водою не порожнеча
+    // (глибина закону — від повільного шуму материків: далеко від них глибоко; від берега — схилом, не обривом)
+    const M = L.mount;
+    let deep = 0;
+    if (M) {
+      const cc = clamp01(0.3 - noise3(L.sA, px / 192, py / 192, L.n * 0.01) * 2) * M.ocean, q = (L.seaE - ex) * 80;
+      deep = Math.floor(cc < q ? cc : q);
+    }
+    out.h = Math.max(KMIN + 8, SEA - 1 - Math.floor((L.seaE - ex) * 22) - deep);
     out.v = Math.min(255, Math.floor((L.seaE - ex) * 1200));
     const k = L.liquid.kind;
     out.t = k === L_DRY ? T_BED : k === L_WATER && out.cold ? T_ICE : T_WATER;
@@ -156,11 +185,11 @@ export function tile(L, x, y, out = {}) {
   // висота: основа — у межах амплітуди, вулкани й шпилі — понад неї
   let h = e >= L.seaE ? SEA + 1 + Math.min(L.amp - 1, Math.floor((e - L.seaE) / (1 - L.seaE) * L.amp)) + Math.floor(xb)
     : SEA + 1 + Math.floor((ex - L.seaE) / span);
-  if (h > H - 8) h = H - 8;
+  if (h > KMAX - 64) h = KMAX - 64;
   const T = T0 - 0.05 * (h - SEA - 1);        // вище — холодніше
   let t;
   if (T < -0.45) t = T_SNOW;
-  else if (xb > 2 || out.magma) t = T_ROCK;
+  else if (xb - mt > 2 || out.magma) t = T_ROCK;              // вулкани й шпилі — скеля (гори — за висотою)
   else if (h - SEA >= Math.max(6, L.amp * 0.72)) t = T_ROCK;
   else if (h === SEA + 1 && ex - L.seaE < 0.025) t = T_SAND;
   else if (W < -0.35) t = T > 0.15 ? T_DESERT : T_DRY;
@@ -248,15 +277,15 @@ function sample(Lt, f, x, y, k) {
     l(l(at(0, 0, 1), at(1, 0, 1), u), l(at(0, 1, 1), at(1, 1, 1), u), v), w);
 }
 
-// Сира щільність суходолу на висоті k: 0 — повітря, 1 — ґрунт, 2 — острів. Нижче світу (k < 0) — камінь
+// Сира щільність суходолу на висоті k: 0 — повітря, 1 — ґрунт, 2 — острів. Два нижні блоки світу — корінна порода
 function raw(L, Lt, c, px, py, k) {
-  if (k < 0) return 1;
+  if (k < KMIN + 2) return 1;
   let s = k < c.h;
   // нависання й арки: поверхня зсувається 3D-шумом поблизу (тож профіль схилу буває не монотонним)
   const ov = L.overhang * 5;
   if (ov > 0.2 && k > c.h - 7 && k < c.h + 7) s = k < c.h + sample(Lt, 2, px, py, k) * ov;
-  // печери-тунелі: обидва поля близькі до нуля; не біля самого дна світу
-  if (s && k > 1 && k < c.h + 1) {
+  // печери-тунелі: обидва поля близькі до нуля; углиб — аж до дна світу
+  if (s && k < c.h + 1) {
     const cr = L.caveW * (0.5 + L.caves), a = sample(Lt, 0, px, py, k), b = sample(Lt, 1, px, py, k);
     if (a * a + b * b < cr * cr) s = false;
   }
@@ -270,11 +299,12 @@ function raw(L, Lt, c, px, py, k) {
 }
 const isBasin = (c) => c.t === T_WATER || c.t === T_ICE || c.t === T_BED;
 
-// «Небо» стовпця суходолу: найвищий ґрунт нижче смуги островів біля поверхні (−1 — немає). Нижче моря й під
-// відкритим небом — западина під рідиною
+// «Небо» стовпця суходолу: найвищий ґрунт біля поверхні (острови — ні; шукаємо до SKY_D блоків нижче поверхні).
+// Нижче моря й під відкритим небом — западина під рідиною
+const SKY_D = 24;
 function skyOf(L, Lt, c, px, py) {
-  for (let k = Math.min(ISL0 - 1, c.h + 7); k >= 0; k--) if (raw(L, Lt, c, px, py, k) === 1) return k;
-  return -1;
+  for (let k = c.h + 7; k >= c.h - SKY_D; k--) if (raw(L, Lt, c, px, py, k) === 1) return k;
+  return c.h - SKY_D - 1;
 }
 
 // Блоки клітинки c на висотах k0…k0+n−1 у масив out (з позиції o, крок 1). sky — skyOf. Матеріали: шар, що
@@ -307,19 +337,27 @@ function fillCell(L, Lt, c, px, py, sky, k0, n, out, o) {
   }
 }
 
-// Відкритий небу верхній непорожній блок клітинки нижче за below (предмети, приземлення); −1 — немає
+// Відкритий небу верхній непорожній блок клітинки нижче за below (предмети); не знайшли за SKY_D блоків — null
 function surfaceAt(L, Lt, c, px, py, sky, below) {
   const one = new Uint8Array(1);
-  for (let k = below - 1; k >= 0; k--) { fillCell(L, Lt, c, px, py, sky, k, 1, one, 0); if (one[0] !== B_AIR) return k; }
-  return -1;
+  for (let k = below - 1; k >= c.h - SKY_D; k--) { fillCell(L, Lt, c, px, py, sky, k, 1, one, 0); if (one[0] !== B_AIR) return k; }
+  return null;
 }
 
 // Стовпець окремо (місце появи, перевірки): {c (поверхня), at(k) — блок на висоті k, B (блоки 0…H−1)}
 export function genColumn(L, x, y) {
-  const c = tile(L, x, y), px = x + 0.5, py = y + 0.5, Lt = lattice(L, x, y, x, y, -8, Math.max(H, c.h + 16));
+  const c = tile(L, x, y), px = x + 0.5, py = y + 0.5;
+  let kA = Math.min(-8, c.h - SKY_D - 8), kB = Math.max(H, c.h + 16), Lt = lattice(L, x, y, x, y, kA, kB);
   const sky = isBasin(c) ? -1 : skyOf(L, Lt, c, px, py), B = new Uint8Array(H), one = new Uint8Array(1);
   fillCell(L, Lt, c, px, py, sky, 0, H, B, 0);
-  return { c, B, at: (k) => { if (k < 0) return B_STONE; fillCell(L, Lt, c, px, py, sky, k, 1, one, 0); return one[0]; } };
+  const at = (k) => {
+    if (k < KMIN) return B_STONE;
+    if (k > KMAX) return B_AIR;
+    if (k - 1 < kA || k + 4 > kB) { kA = Math.min(kA, k - 64); kB = Math.max(kB, k + 64); Lt = lattice(L, x, y, x, y, kA, kB); }
+    fillCell(L, Lt, c, px, py, sky, k, 1, one, 0);
+    return one[0];
+  };
+  return { c, B, at };
 }
 
 // Стовпець чанка (cx, cy): клітинки (tile) з рамкою — поверхня h / t / v / bm (індекс ci; h — рівень поверхні),
@@ -334,7 +372,7 @@ export function genCol(L, cx, cy) {
     if (c.h < hmin) hmin = c.h;
     if (c.h > hmax) hmax = c.h;
   }
-  const Lt = lattice(L, x0 - 1, y0 - 1, x0 + CS, y0 + CS, Math.min(-8, hmin - 16), Math.max(H, hmax + 16));
+  const Lt = lattice(L, x0 - 1, y0 - 1, x0 + CS, y0 + CS, hmin - SKY_D - 8, hmax + 16);
   const obj = [], sp = [], spi = new Map();
   const spIndex = (g) => { let i = spi.get(g.id); if (i === undefined) { i = sp.length; sp.push(g); spi.set(g.id, i); } return i; };
   const one = new Uint8Array(3);
@@ -343,7 +381,7 @@ export function genCol(L, cx, cy) {
     sky[i] = isBasin(c) ? -1 : skyOf(L, Lt, c, px, py);
     if (!c.o || x < 0 || y < 0 || x >= CS || y >= CS) continue;
     const k = surfaceAt(L, Lt, c, px, py, sky[i], c.h + 7);   // предмет стоїть на верхньому твердому блоці біля поверхні
-    if (k < 0) continue;
+    if (k === null) continue;
     fillCell(L, Lt, c, px, py, sky[i], k, 3, one, 0);
     if (!solidB(one[0]) || one[1] !== B_AIR || (c.o !== O_COVER && one[2] !== B_AIR)) continue;
     // вид: з набору області в цьому біомі (каміння — стиль області)
@@ -374,11 +412,15 @@ export function genChunk(L, cx, cy) {
 }
 
 // Секція (cx, cy, cz) стовпця col: блоки SEC заввишки; порожня (усе повітря) — {empty: true}
+// Секція (cx, cy, cz) стовпця col: блоки SEC заввишки; усе повітря — {empty: true}, уся тверда (з рамкою: граней
+// немає) — {empty: true, solid: true}
 export function genSection(L, col, cz) {
   const V = genBlocks(L, col, cz * SEC, SEC);
-  let any = false;
-  for (let i = 0; i < V.b.length; i++) if (V.b[i] !== B_AIR) { any = true; break; }
-  return any ? V : { empty: true, k0: V.k0, nk: SEC };
+  let air = 0, solid = 0;
+  for (let i = 0; i < V.b.length; i++) { const b = V.b[i]; if (b === B_AIR) air++; else if (solidB(b)) solid++; }
+  if (air === V.b.length) return { empty: true, k0: V.k0, nk: SEC };
+  if (solid === V.b.length) return { empty: true, solid: true, k0: V.k0, nk: SEC };
+  return V;
 }
 
 // Клітинки з предметом, що заважає ходити (дерево, камінь на землі)
