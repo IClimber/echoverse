@@ -32,6 +32,28 @@ export function columnsInCircle(t, R) {
 // Пріоритет стовпця (менше — раніше): у піраміді видимості чи впритул — відстань, поза нею — утричі більше
 export const colPri = (dist, inF) => dist * (inF || dist < 48 ? 1 : 3);
 
+// Скільки видимого ще бракує (заміри часу після стрибка; ?dev eco.visMissing): стовпці поточного всесвіту в колі дальності
+// й у піраміді видимості (як в update) без зведення плюс їхні секції з поверхнею й островами, яких ще немає в GPU (черга
+// завантаження не рахується). Рослини зблизька й плитки далечі — не рахуються
+export function visibleMissing(g, camera, renderer) {
+  const W = g.world, t = g.cam, m = g.view.m, iso = camera.mode === ISO, rad = iso ? g.view.rad : VIEW_R, lodOn = LOD_ON && !iso;
+  let miss = 0;
+  for (const [cx, cy] of columnsInCircle(t, rad)) {
+    const C = W.col(g.d, g.n, cx, cy), ax = cx * CS - t[0], ay = cy * CS - t[1];
+    if (!boxInView(m, ax, ay, (C ? C.czLo * SEC * LEVEL : ZR[0]) - t[2], (C ? (C.czHi + 1) * SEC * LEVEL + 40 : ZR[1]) - t[2])) continue;
+    if (!C) { miss++; continue; }
+    const lod = lodOn ? lodOf(colDist(cx, cy, t)) : 0, czs = [];
+    for (let cz = C.czLo; cz <= C.czHi; cz++) czs.push(cz);
+    for (const cz of C.isl) if (cz < C.czLo || cz > C.czHi) czs.push(cz);
+    for (const cz of czs) {
+      const S = W.sec(g.d, g.n, cx, cy, cz), k = sk(cx, cy, cz);
+      if (lod ? (!S || !S.empty || S.solid) && !renderer.hasSection(g.d, g.n, k, lod, false)
+        : !S || (!S.empty && !renderer.hasSection(g.d, g.n, k, 0, false))) miss++;
+    }
+  }
+  return miss;
+}
+
 export function createStreamer() {
   let last = null, far = null, forced = true, vis = 0, ms = 0;
   return {

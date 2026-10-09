@@ -217,13 +217,27 @@ test('робота flora: рослини зблизька стовпця — т�
 });
 
 // ================= Стрімінг =================
-import { columnsInCircle, colPri } from '../js/stream.js';
+import { columnsInCircle, colPri, visibleMissing } from '../js/stream.js';
+import { createCamera, viewProj, THIRD } from '../js/camera.js';
 
 test('стрімінг: коло дальності 32 чанки, у піраміді — раніше', () => {
   const n = columnsInCircle([1000.5, -300.25], 512).length, a = Math.PI * (512 / 16) ** 2;
   assert.ok(n >= 0.95 * a && n <= 1.1 * a, `${n} / ${a}`);
   for (const d of [60, 200, 500]) assert.ok(colPri(d, true) < colPri(d, false));
   assert.equal(colPri(30, false), colPri(30, true));
+});
+
+test('visibleMissing: стовпці без зведення, секції не в GPU; усе є — 0', () => {
+  const cam = createCamera(THIRD), t = [8, 8, 10], cols = new Map(), state = { top: false };
+  const g = { d: 0, n: 0, cam: t, view: { m: viewProj(cam, 1280, 720).m, rad: 256 },
+    world: { col: (d, n, cx, cy) => cols.get(`${cx},${cy}`), sec: (d, n, cx, cy, cz) => ({ empty: cz === 1 && state.top }) } };
+  const yes = { hasSection: () => true }, no = { hasSection: () => false };
+  assert.ok(visibleMissing(g, cam, yes) > 30);                    // зведень немає — бракує кожного видимого стовпця
+  for (const [cx, cy] of columnsInCircle(t, 600)) cols.set(`${cx},${cy}`, { czLo: 0, czHi: 1, isl: [] });   // з запасом: VIEW_R ≤ 512
+  assert.equal(visibleMissing(g, cam, yes), 0);
+  const two = visibleMissing(g, cam, no);
+  state.top = true;                                               // верхня секція порожня — її не треба
+  assert.ok(two > 0 && visibleMissing(g, cam, no) * 2 === two);
 });
 
 // ================= Такт =================

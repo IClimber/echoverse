@@ -263,9 +263,10 @@ export function createRenderer(canvas) {
         for (const [k2, e2] of old) { R.free(e2.mesh); fars.delete(k2); }
       }
     },
-    hasSection(d, n, k, lod = 0) {
+    // queued = false — лише те, що вже в GPU (без черги завантаження: заміри)
+    hasSection(d, n, k, lod = 0, queued = true) {
       const U = uni(d, n), G = U && U.slots.get(k), E = G && G.secs.get(k);
-      return (!!E && !!E.L[lod]) || pend.has(pkey('s' + lod, d, n, k));
+      return (!!E && !!E.L[lod]) || (queued && pend.has(pkey('s' + lod, d, n, k)));
     },
     hasFlora(d, n, k) { const U = uni(d, n); return (!!U && U.flora.has(k)) || pend.has(pkey('f', d, n, k)); },
     hasFar: (key) => fars.has(key),

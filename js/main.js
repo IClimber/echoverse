@@ -16,7 +16,7 @@ import { animate } from './anim.js';
 import { clockStr } from './sky.js';
 import { weatherAt, localWeather, areaClimate } from './weather.js';
 import { createCamera, rotate, wheel, smooth, moveBasis, clipDist, camDist, facing, setYaw, basis, setViewChunks, setLod, ISO, THIRD, HEAD, VIEW_R } from './camera.js';
-import { createStreamer } from './stream.js';
+import { createStreamer, visibleMissing } from './stream.js';
 import { createTicker } from './ticker.js';
 
 const $ = (id) => document.getElementById(id);
@@ -82,6 +82,8 @@ function boot() {
     setLod(on) { setLod(on); streamer.force(); },
     // Відсікання задніх граней землі: false — усе з обох боків (порівняння)
     setCull(on) { renderer.R.setCull(on); },
+    // Видимого ще бракує (стовпців без зведення й секцій не в GPU) — заміри часу після стрибка
+    visMissing() { return g && g.view ? visibleMissing(g, camera, renderer) : -1; },
   };
 
   // ================= Меню =================
