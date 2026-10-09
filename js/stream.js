@@ -5,12 +5,13 @@
 // (поворот камери не відкриває порожнього сектора). Коло приземлення — під ногами й у сусідніх всесвітах (стрибок без
 // чекання), під час заряджання — усе видиме у всесвіті, куди стрибаємо. Далечінь (третя особа) — плитки за швом; поки
 // плитки нового всесвіту немає — та сама плитка попереднього (схожий рельєф: горизонт не порожніє).
+// Рівні деталізації (третя особа): секції стовпців далі LOD_R[0] — грубі (робота lod, без блоків), рівень — від відстані.
 import { CS, SEC } from './gen/chunk.js';
 import { LEVEL } from './iso.js';
 import { FT } from './gen/far.js';
 import { ck, sk } from './world.js';
 import { landingChunks } from './device.js';
-import { ISO, VIEW_R, FAR_R, SEAM, boxInView } from './camera.js';
+import { ISO, VIEW_R, FAR_R, SEAM, boxInView, LOD_ON, lodOf, colDist } from './camera.js';
 
 const ZR = [-200, 2100];                 // висоти (од.) для піраміди видимості ще не згенерованого стовпця
 const ZR_FAR = [-200, 2050];             // те саме для плитки далечі
@@ -42,14 +43,14 @@ export function createStreamer() {
       const W = g.world, me = g.me, t = g.cam, ch = g.dev.charge, iso = camera.mode === ISO;
       const czMe = Math.floor(Math.floor((me.z ?? 0) / LEVEL) / SEC), rad = iso ? g.view.rad : VIEW_R;
       const tcx = Math.floor(t[0] / CS), tcy = Math.floor(t[1] / CS), chTo = ch ? `${ch.to[0]}:${ch.to[1]}` : '';
-      const L = last;
-      const need = forced || !L || L.d !== g.d || L.n !== g.n || L.cx !== tcx || L.cy !== tcy || L.cz !== czMe || L.ch !== chTo
+      const L = last, lodOn = LOD_ON && !iso;
+      const need = forced || !L || L.lod !== lodOn || L.d !== g.d || L.n !== g.n || L.cx !== tcx || L.cy !== tcy || L.cz !== czMe || L.ch !== chTo
         || L.rad !== rad || L.mode !== camera.mode || Math.abs(L.yaw - camera.yaw) > TURN || Math.abs(L.pitch - (iso ? camera.pitch : camera.pitch3)) > TURN
         || now - L.at > 300 || (W.dirty && now - L.at > 50);
       if (!need) { W.gen.tick(); return { far }; }
       forced = false; W.dirty = false;
       const t0 = performance.now();
-      last = { d: g.d, n: g.n, cx: tcx, cy: tcy, cz: czMe, ch: chTo, rad, mode: camera.mode, yaw: camera.yaw, pitch: iso ? camera.pitch : camera.pitch3, at: now };
+      last = { d: g.d, n: g.n, cx: tcx, cy: tcy, cz: czMe, ch: chTo, rad, mode: camera.mode, lod: lodOn, yaw: camera.yaw, pitch: iso ? camera.pitch : camera.pitch3, at: now };
 
       const keys = new Set(), m = g.view.m;
       const col = (d, n, cx, cy, pri) => {
@@ -57,9 +58,15 @@ export function createStreamer() {
         if (!C) keys.add(W.wantCol(d, n, cx, cy, pri));
         return C;
       };
-      const sec = (d, n, cx, cy, cz, pri) => {
+      const sec = (d, n, cx, cy, cz, pri, lod) => {
+        const k = sk(cx, cy, cz);
+        if (lod) {                                             // груба: без блоків; відома порожня (усе повітря) — не треба
+          const S = W.sec(d, n, cx, cy, cz);
+          if ((!S || !S.empty || S.solid) && !renderer.hasSection(d, n, k, lod)) keys.add(W.wantLod(d, n, cx, cy, cz, lod, pri));
+          return;
+        }
         const S = W.touchSec(d, n, cx, cy, cz);               // меш могли звільнити з GPU — тоді наново
-        if (!S || (!S.empty && !renderer.hasSection(d, n, sk(cx, cy, cz)))) keys.add(W.wantSec(d, n, cx, cy, cz, pri));
+        if (!S || (!S.empty && !renderer.hasSection(d, n, k, 0))) keys.add(W.wantSec(d, n, cx, cy, cz, pri));
       };
       // секції стовпця: поверхня й острови; поруч з гравцем — ±2 секції від його висоти; під землею (великі порожнини) —
       // ще ±3 до UNDER_R клітинок; inView — лише ті, що в піраміді (для всесвіту, куди стрибаємо)
@@ -67,6 +74,7 @@ export function createStreamer() {
       const list = [];
       const secs = (d, n, C, pri, near, inView) => {
         list.length = 0;
+        const lod = near || !lodOn ? 0 : lodOf(colDist(C.cx, C.cy, t));
         const cave = under && Math.hypot(C.cx * CS + 8 - me.x, C.cy * CS + 8 - me.y) < UNDER_R;
         for (let cz = C.czLo; cz <= C.czHi; cz++) list.push(cz);
         for (const cz of C.isl) if (cz < C.czLo || cz > C.czHi) list.push(cz);
@@ -76,7 +84,7 @@ export function createStreamer() {
         for (const cz of list) {
           const z0 = cz * SEC * LEVEL - t[2];
           if (inView && !near && !boxInView(m, ax, ay, z0, z0 + SEC * LEVEL + 12)) continue;
-          sec(d, n, C.cx, C.cy, cz, pri + Math.abs(cz - czMe) * 2);
+          sec(d, n, C.cx, C.cy, cz, pri + Math.abs(cz - czMe) * 2, lod);
         }
         // рослини зблизька — окрема робота стовпця, лише біля цілі камери
         if (C.obj.length && Math.hypot(ax + 8, ay + 8) < FLORA_R && !renderer.hasFlora(d, n, ck(C.cx, C.cy))) keys.add(W.wantFlora(d, n, C.cx, C.cy, pri));

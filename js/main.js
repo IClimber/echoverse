@@ -15,7 +15,7 @@ import { debugText, fmtN } from './debug.js';
 import { animate } from './anim.js';
 import { clockStr } from './sky.js';
 import { weatherAt, localWeather, areaClimate } from './weather.js';
-import { createCamera, rotate, wheel, smooth, moveBasis, clipDist, camDist, facing, setYaw, basis, setViewChunks, ISO, THIRD, HEAD, VIEW_R } from './camera.js';
+import { createCamera, rotate, wheel, smooth, moveBasis, clipDist, camDist, facing, setYaw, basis, setViewChunks, setLod, ISO, THIRD, HEAD, VIEW_R } from './camera.js';
 import { createStreamer } from './stream.js';
 import { createTicker } from './ticker.js';
 
@@ -76,8 +76,10 @@ function boot() {
       frameStats();
       const st = g ? g.world.stats() : {}, R = renderer.R;
       return { fps: perf.fps, frameMs: perf.frameMs, p99: perf.p99, upd: perf.upd, drw: perf.drw, gpuMs: R.gpuMs, draws: R.stats.draws, tris: R.stats.tris,
-        gpuMB: (R.stats.gpuBytes + R.stats.arenaBytes) / 1048576, colsPerSec: st.colsPerSec, pending: st.pending, cols: st.cols, secs: st.secs, meshes: renderer.meshCount, workers: st.workers, streamMs: g ? g.streamMs : 0 };
+        gpuMB: (R.stats.gpuBytes + R.stats.arenaBytes) / 1048576, colsPerSec: st.colsPerSec, pending: st.pending, cols: st.cols, secs: st.secs, meshes: renderer.meshCount, lod: [...renderer.lodCounts], workers: st.workers, streamMs: g ? g.streamMs : 0 };
     },
+    // Рівні деталізації далекої землі: false — усе повне (порівняння)
+    setLod(on) { setLod(on); streamer.force(); },
   };
 
   // ================= Меню =================
@@ -444,7 +446,7 @@ function boot() {
       $('chargeBar').style.width = (ch.t / CHARGE * 100).toFixed(1) + '%';
     }
     if (toastUntil && now > toastUntil) { $('toast').hidden = true; toastUntil = 0; }
-    if (showDebug && now - (hudCache.dbgT || 0) > 250) { hudCache.dbgT = now; frameStats(); $('debug').textContent = debugText(g, perf, renderer.meshCount, camera, renderer.R); }
+    if (showDebug && now - (hudCache.dbgT || 0) > 250) { hudCache.dbgT = now; frameStats(); $('debug').textContent = debugText(g, perf, renderer.meshCount, camera, renderer.R, renderer.lodCounts); }
   }
 
   function toast(s) { $('toast').textContent = s; $('toast').hidden = false; toastUntil = performance.now() + 2800; }

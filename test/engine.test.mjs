@@ -305,3 +305,11 @@ test('робота lod: op = тверде + далекі рослини + обр
   assert.ok(sum[1] <= 0.4 * sum[0] && sum[2] <= 0.12 * sum[0], `${sum}`);
   console.log(`# LOD1 ×${(sum[1] / sum[0]).toFixed(3)}, LOD2 ×${(sum[2] / sum[0]).toFixed(3)}`);
 });
+
+import { lodOf, keepLod, colDist } from '../js/camera.js';
+test('рівні: пороги й гістерезис', () => {
+  assert.deepEqual([0, 191.9, 192, 383.9, 384].map(lodOf), [0, 0, 1, 1, 2]);
+  assert.equal(keepLod(200, 0), true); assert.equal(keepLod(230, 0), false);
+  assert.equal(keepLod(370, 2), true); assert.equal(keepLod(340, 2), false);
+  assert.equal(colDist(0, 0, [8, 8]), 0); assert.equal(colDist(2, 0, [8, 8]), 24);
+});

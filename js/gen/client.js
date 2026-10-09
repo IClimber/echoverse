@@ -1,5 +1,6 @@
 // gen/client.js — пул воркерів генератора з чергою пріоритетів (queue.js). Стовпець і його секції — завжди в того самого
-// воркера (там кеш стовпця), плитки далечі — будь-якому вільному. У воркера не більше IN_FLIGHT робіт одночасно,
+// воркера (там кеш стовпця), плитки далечі — будь-якому вільному. У воркера не більше IN_FLIGHT робіт одночасно (8: роботи
+// короткі, 1–3 мс — з 2 воркери простоювали, чекаючи головного потоку),
 // решта чекає в черзі: так новий важливіший запит (секція під ногами) не стоїть за сотнею далеких.
 // Запит q = {type: 'col' (зведення стовпця) | 'sec' (секція з мешем) | 'far' (плитка далечі), d, n, cx, cy, cz}.
 // Немає module worker (чи всі впали) — генерує в головному потоці (по кілька робіт за кадр).
@@ -7,7 +8,7 @@ import { lawsOf } from '../universe.js';
 import { runJob } from './job.js';
 import { createQueue, workerOf } from './queue.js';
 
-const IN_FLIGHT = 2;
+const IN_FLIGHT = 8;
 export const POOL = Math.max(1, Math.min(8, ((typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 4) - 2));
 
 export function createGen(seed, onDone) {

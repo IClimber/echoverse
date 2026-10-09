@@ -17,6 +17,19 @@ export const FOV = 55 * D2R;
 export let VIEW_R = 256;             // повні секції (клітинок)
 export let FAR_R = 1400;             // далечінь (плитки поверхні, gen/far.js), далі — туман і небо
 export let SEAM = VIEW_R - 8;        // шов: ближче — повні секції, далі — плитки далечі
+// Рівні деталізації секцій (третя особа; згори — усе повне): dn — від цілі камери до найближчої точки стовпця по
+// горизонталі (colDist). Ближче LOD_R[0] — повні секції, до LOD_R[1] — груба сітка з кроком 2 блоки, далі — 4
+// (gen/chunk.js genCoarse). Меш іншого рівня тримаємо, поки він потрібен на dn ± LOD_HYST; обрізи грубої секції
+// малюємо ближче LOD_R + LOD_CAP від внутрішньої межі її рівня
+export const LOD_R = [192, 384], LOD_HYST = 32, LOD_CAP = 48;
+export let LOD_ON = true;                        // перемикач для перевірок (?dev: eco.setLod)
+export function setLod(on) { LOD_ON = !!on; }
+export const lodOf = (dn) => dn < LOD_R[0] ? 0 : dn < LOD_R[1] ? 1 : 2;
+export const keepLod = (dn, l) => lodOf(dn - LOD_HYST) <= l && l <= lodOf(dn + LOD_HYST);
+export function colDist(cx, cy, t) {
+  const ax = cx * CS - t[0], ay = cy * CS - t[1];
+  return Math.hypot(ax > 0 ? ax : ax + CS < 0 ? -(ax + CS) : 0, ay > 0 ? ay : ay + CS < 0 ? -(ay + CS) : 0);
+}
 export function setViewChunks(c) {
   c = Math.max(8, Math.min(32, c | 0));
   VIEW_R = c * CS; SEAM = VIEW_R - 8; FAR_R = Math.max(1400, Math.round(VIEW_R * 2.75));

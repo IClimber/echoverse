@@ -1,7 +1,8 @@
 // world.js — світ у грі: зерно, закони всесвітів, стовпці й секції з генератора і запити до блоків (рух, приземлення
 // після стрибка, камера, F3). Стовпець (зведення: поверхня, предмети, межі секцій) — на кожні 16×16 клітинок; секція —
 // 16×16×16 блоків з рамкою. Геометрію віддає рендеру через onMesh(kind: 'sec' | 'flora' | 'far', d, n, ключ, запит, дані, меш):
-// ключ секції — sk, рослин — ck, плитки далечі — рядок.
+// ключ секції — sk, рослин — ck, плитки далечі — рядок. Груба секція (робота lod, рівень q.lod) — теж 'sec', без блоків:
+// у світі не зберігається.
 import { lawsOf, physOf, KMIN, KMAX } from './universe.js';
 import { CS, ci, bv, solidB, blocks, genColumn, B_AIR, B_STONE, O_FLOAT, SEC } from './gen/chunk.js';
 import { LEVEL } from './iso.js';
@@ -88,6 +89,7 @@ export function createWorld(seed, onMesh) {
       return;
     }
     if (q.type === 'flora') { onMesh('flora', q.d, q.n, ck(q.cx, q.cy), q, data, mesh); return; }
+    if (q.type === 'lod') { onMesh('sec', q.d, q.n, sk(q.cx, q.cy, q.cz), q, null, mesh); return; }
     const U = uni(q.d, q.n, true), k = sk(q.cx, q.cy, q.cz), was = U.secs.get(k);
     if (was) { was.dead = true; U.secs.delete(k); } else nSecs++;
     data.used = ++stamp;
@@ -183,6 +185,8 @@ export function createWorld(seed, onMesh) {
     far: (key) => { const F = fars.get(key); if (F) { fars.delete(key); fars.set(key, F); } return F; },
     // Рослини зблизька стовпця (меш — у рендері)
     wantFlora(d, n, cx, cy, pri) { const key = `p${d}:${n}:${cx}:${cy}`; gen.want(key, { type: 'flora', d, n, cx, cy }, pri); return key; },
+    // Груба секція рівня lod (1, 2) — лише меш для рендера
+    wantLod(d, n, cx, cy, cz, lod, pri) { const key = `l${lod}:${d}:${n}:${cx}:${cy}:${cz}`; gen.want(key, { type: 'lod', lod, d, n, cx, cy, cz }, pri); return key; },
     wantSec(d, n, cx, cy, cz, pri) { const key = skey(d, n, cx, cy, cz); gen.want(key, { type: 'sec', d, n, cx, cy, cz }, pri); return key; },
     stats: () => {
       const now = performance.now();

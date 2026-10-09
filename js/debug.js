@@ -7,6 +7,7 @@ import { jumpHeight } from './player.js';
 import { dayPhase, clockStr } from './sky.js';
 import { weatherAt, WEATHER_NAMES } from './weather.js';
 import { LEVEL } from './iso.js';
+import { LOD_ON } from './camera.js';
 
 // Рельєф 3.1: скелі, родини кривої, ерозія, куести, останці, карст, рифти
 function land3(L) {
@@ -25,7 +26,7 @@ function speciesLine(L, x, y, bm) {
 export const fmtN = (n) => n > 0 ? '+' + n : n < 0 ? '−' + -n : '0';
 
 const f1 = (v) => v.toFixed(1).replace('.', ',');
-export function debugText(g, perf, meshCount, cam, R) {
+export function debugText(g, perf, meshCount, cam, R, lod) {
   const { world, rec, me } = g, L = world.laws(g.d, g.n);
   const tx = Math.floor(me.x), ty = Math.floor(me.y), c = world.column(g.d, g.n, tx, ty);
   const kf = Math.floor((me.z ?? 0) / LEVEL + 1e-4), under = world.block(g.d, g.n, tx, ty, kf - 1);
@@ -54,7 +55,7 @@ export function debugText(g, perf, meshCount, cam, R) {
     `погода     ${WEATHER_NAMES[weatherAt(L, g.clock || 0).kind]} (зміна раз на ${L.air.segMin.toFixed(1)} хв; ${Object.entries(L.air.w).filter(([, v]) => v > 0.05).map(([k, v]) => k + ' ' + v.toFixed(1)).join(', ')})`,
     `камера     ${cam.mode === 'iso' ? `згори, масштаб ${cam.zoom.toFixed(2)}` : `третя особа, відстань ${cam.dist.toFixed(1)}`}, азимут ${Math.round(cam.yaw * 180 / Math.PI) % 360}°, видно стовпців ${g.visible || 0}`,
     `кадр       ${perf.fps.toFixed(0)} к/с · ${f1(perf.frameMs)} мс (p99 ${f1(perf.p99)}) · CPU ${perf.upd.toFixed(2).replace('.', ',')} + ${perf.drw.toFixed(2).replace('.', ',')} мс · GPU ${R && R.gpuMs !== null ? R.gpuMs.toFixed(2).replace('.', ',') + ' мс' : '—'}`,
-    `рендер     викликів ${R ? R.stats.draws : 0} · трикутників ${R ? (R.stats.tris / 1e6).toFixed(2).replace('.', ',') : 0} млн · завантажено ${R ? (R.stats.up / 1024).toFixed(0) : 0} КБ/кадр · у GPU ${R ? ((R.stats.gpuBytes + R.stats.arenaUsed) / 1048576).toFixed(0) : 0} з ${R ? ((R.stats.gpuBytes + R.stats.arenaBytes) / 1048576).toFixed(0) : 0} МБ · секцій ${meshCount}${R && R.stats.over ? ' · бюджет GPU перевищено' : ''}`,
+    `рендер     викликів ${R ? R.stats.draws : 0} · трикутників ${R ? (R.stats.tris / 1e6).toFixed(2).replace('.', ',') : 0} млн · завантажено ${R ? (R.stats.up / 1024).toFixed(0) : 0} КБ/кадр · у GPU ${R ? ((R.stats.gpuBytes + R.stats.arenaUsed) / 1048576).toFixed(0) : 0} з ${R ? ((R.stats.gpuBytes + R.stats.arenaBytes) / 1048576).toFixed(0) : 0} МБ · секцій ${meshCount}${lod ? ` (LOD 0/1/2: ${lod[0]}/${lod[1]}/${lod[2]})` : ''}${LOD_ON ? '' : ' · LOD вимкнено'}${R && R.stats.over ? ' · бюджет GPU перевищено' : ''}`,
     `генерація  воркерів ${st.workers} · ${st.colsPerSec} стовпців/с · ${st.genMs.toFixed(2).replace('.', ',')} мс/робота · стовпців ${st.cols}, секцій ${st.secs}, у черзі ${st.pending} · стрімінг ${(g.streamMs || 0).toFixed(1).replace('.', ',')} мс`,
   ].join('\n');
 }
