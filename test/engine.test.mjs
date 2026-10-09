@@ -231,3 +231,47 @@ test('тіла: камінь на камені під тяжінням — не 
   assert.ok(hi.z - hi.hz >= top - 0.02, `${hi.z - hi.hz} ${top}`);
   assert.ok(Math.abs(lo.z - lo.hz) < 0.05);
 });
+
+// ================= Рівні деталізації =================
+import { genCoarse, genBlocks, tile, bv, B_LIQ, B_AIR } from '../js/gen/chunk.js';
+
+// Точки грубої вибірки — ті самі блоки, що в повних секціях (зокрема рамка з сусідніх стовпців і секцій)
+function checkCoarse(L, cx, cy) {
+  const cols = new Map(), secs = new Map();
+  const colAt = (x, y) => { const k = `${x}:${y}`; let c = cols.get(k); if (!c) cols.set(k, (c = genCol(L, x, y))); return c; };
+  const fine = (wx, wy, wk) => {
+    const X = Math.floor(wx / CS), Y = Math.floor(wy / CS), Z = Math.floor(wk / SEC), k = `${X}:${Y}:${Z}`;
+    let V = secs.get(k);
+    if (!V) secs.set(k, (V = genBlocks(L, colAt(X, Y), Z * SEC, SEC)));
+    return V.b[bv(wx - X * CS, wy - Y * CS, wk - Z * SEC, SEC)];
+  };
+  const col = colAt(cx, cy), S = colSummary(col, L);
+  let n0 = 0;
+  for (const s of [2, 4]) for (let cz = S.czLo; cz <= S.czHi; cz++) {
+    const G = genCoarse(L, col, cz, s), n = G.n, W = n + 2;
+    for (let J = -1; J <= n; J++) for (let I = -1; I <= n; I++) {
+      const wx = cx * CS + I * s, wy = cy * CS + J * s, i = (J + 1) * W + I + 1, c = tile(L, wx, wy);
+      assert.equal(G.h[i], c.h); assert.equal(G.bm[i], c.bm); assert.equal(G.v[i], c.v);
+      for (let Q = -1; Q <= n; Q++) { assert.equal(G.b[i * W + Q + 1], fine(wx, wy, G.k0 + Q * s), `s${s} cz${cz} ${I},${J},${Q}`); n0++; }
+      if (I >= 0 && J >= 0 && I < n && J < n) {
+        let t = -1;
+        for (let k = G.k0 + SEC - 1; k >= G.k0; k--) if (fine(wx, wy, k) === B_LIQ && fine(wx, wy, k + 1) === B_AIR) { t = k; break; }
+        assert.equal(G.lt[i], t);
+      }
+    }
+  }
+  return n0;
+}
+
+test('genCoarse: точки — ті самі блоки, що в повних секціях', () => {
+  const seed = hashStr('test');
+  for (const i of [0, 2]) { const [d, n, cx, cy] = SPOTS[i]; assert.ok(checkCoarse(lawsOf(seed, d, n), cx, cy) > 0); }
+  // стовпець зі скелями в смузі рамки (x = −2)
+  let found = -1;
+  for (let n = 0; n <= 5000 && found < 0; n++) {
+    const L = lawsOf(seed, 0, n);
+    for (let y = -2; y <= 16; y++) if (tile(L, -2, y).fb > 0) { found = n; break; }
+  }
+  assert.ok(found >= 0);
+  checkCoarse(lawsOf(seed, 0, found), 0, 0);
+});

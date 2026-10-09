@@ -656,6 +656,54 @@ export function genSection(L, col, cz) {
   return V;
 }
 
+// Клітинки рамки грубої вибірки поза стовпцем (x чи y = −s): tile, скелі — смугою (рядок y = −s, x від −s до 16, і
+// стовпчик x = −s, y від 0 до 16; скелі клітинки від прямокутника не залежать — як на межах чанків), «небо». Кеш — col.ext
+function extCells(L, col, s) {
+  const C = col.ext || (col.ext = new Map());
+  let E = C.get(s);
+  if (E) return E;
+  const x0 = col.cx * CS, y0 = col.cy * CS, row = [], cl = [], cells = new Map(), sky = new Map(), key = (x, y) => (x + 8) * 64 + y + 8;
+  for (let x = -s; x <= CS; x++) row.push(tile(L, x0 + x, y0 - s));
+  for (let y = 0; y <= CS; y++) cl.push(tile(L, x0 - s, y0 + y));
+  cliffBands(L, x0 - s, y0 - s, CS + s + 1, 1, (i) => row[i]);
+  cliffBands(L, x0 - s, y0, 1, CS + 1, (i, j) => cl[j]);
+  const put = (x, y, c) => {
+    const kA = c.h - SKY_D - 1, kB = c.h + (c.fb || 0) + 1, Q = col.Lt;
+    const Lt = kA - 1 >= Q.q0 * G && kB + 4 <= (Q.q0 + Q.nk - 1) * G ? Q : lattice(L, x0 + x, y0 + y, x0 + x, y0 + y, kA - 8, kB + 16);
+    cells.set(key(x, y), c);
+    sky.set(key(x, y), isBasin(c) ? -1 : skyOf(L, Lt, c, x0 + x + 0.5, y0 + y + 0.5));
+  };
+  for (let x = -s; x <= CS; x += s) put(x, -s, row[x + s]);
+  for (let y = 0; y <= CS; y += s) put(-s, y, cl[y]);
+  C.set(s, (E = { cells, sky, key }));
+  return E;
+}
+
+// Груба вибірка секції cz стовпця col для далечі (рівні деталізації; лише вигляд): блоки в точках ґратки з кроком s
+// (2 чи 4) — світові x, y, k кратні s, тож сусідні секції мають ті самі точки (поверхні сходяться). Рамка — точка з
+// кожного боку: локальні x, y ∈ −s, 0, s, …, 16; k ∈ k0 − s … k0 + 16. Блок у точці — той самий, що в повній секції
+// (fillCell з тими самими клітинкою, «небом» і ґраткою шуму); клітинки рамки поза стовпцем — extCells. Рідина: у власних
+// точках — найвищий блок рідини з повітрям над ним у межах секції (−1 — немає).
+// → {b — Uint8Array(W³), W = n + 2, індекс ((J + 1)·W + I + 1)·W + Q + 1; h, bm, v — клітинки точок, lt — Int16Array,
+//    індекс (J + 1)·W + I + 1; n = 16 / s; s; k0; empty — ні граней, ні рідини}
+export function genCoarse(L, col, cz, s) {
+  const n = SEC / s, W = n + 2, k0 = cz * SEC, kA = k0 - s, NR = SEC + s + 1, x0 = col.cx * CS, y0 = col.cy * CS, E = extCells(L, col, s);
+  const Q0 = col.Lt, Lt = kA - 1 >= Q0.q0 * G && kA + NR + 4 <= (Q0.q0 + Q0.nk - 1) * G ? Q0
+    : lattice(L, x0 - s, y0 - s, x0 + CS, y0 + CS, kA - 1, kA + NR + 4);
+  const b = new Uint8Array(W * W * W), h = new Int16Array(W * W), bm = new Uint8Array(W * W), v = new Uint8Array(W * W);
+  const lt = new Int16Array(W * W).fill(-1), run = new Uint8Array(NR);
+  let air = 0, solid = 0, liq = 0;
+  for (let J = -1; J <= n; J++) for (let I = -1; I <= n; I++) {
+    const x = I * s, y = J * s, i = (J + 1) * W + I + 1, own = I >= 0 && J >= 0;
+    const c = own ? col.cells[ci(x, y)] : E.cells.get(E.key(x, y)), sky = own ? col.sky[ci(x, y)] : E.sky.get(E.key(x, y));
+    h[i] = c.h; bm[i] = c.bm; v[i] = c.v;
+    fillCell(L, Lt, c, x0 + x + 0.5, y0 + y + 0.5, sky, kA, NR, run, 0);     // run[j] — блок kA + j
+    for (let q = 0; q < W; q++) { const t = run[q * s]; b[i * W + q] = t; if (t === B_AIR) air++; else if (solidB(t)) solid++; }
+    if (own && I < n && J < n) for (let k = SEC - 1; k >= 0; k--) if (run[k + s] === B_LIQ && run[k + s + 1] === B_AIR) { lt[i] = k0 + k; liq++; break; }
+  }
+  return { b, h, bm, v, lt, n, s, k0, empty: !liq && (air === W * W * W || solid === W * W * W) };
+}
+
 // Клітинки з предметом, що заважає ходити (дерево, камінь на землі)
 export function solidMask(C) {
   const m = new Uint8Array(CS * CS);
