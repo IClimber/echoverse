@@ -89,6 +89,8 @@ export class Mesh {
 // Рівна грань (вершини — точно в кутах грані блоку: рівнина, пряма стіна) іде в жадібне злиття: однакові в одному
 // шарі зливаються в прямокутники (верх і низ — у двох напрямках, боки — уздовж ряду), так вершин у рази менше;
 // решта — два трикутники з власною нормаллю (пласкі грані, низькополігональний вигляд).
+// Трикутники твердого — проти годинникової ззовні (з повітря): рендер відсікає задні грані (gl.js frontFace); гладкі
+// орієнтує smoothTri, жадібні — порядок вершин у злитті.
 // Позиції — локальні (0…16 по x і y), висота — k · LEVEL. Меші: тверде, поверхня рідини (окремо, напівпрозоро),
 // рослини й каміння зблизька (flora: повна будова, трава й квіти) і здалеку (far: спрощені великі рослини й каміння).
 // Трава, степ і пустеля — відтінку біому клітинки (межі біомів — усереднення по сусідах 3×3)
@@ -265,8 +267,8 @@ export function chunkMesh(C, L, { near = true, far = true } = {}) {
         let h = 1;
         grow: while (y + h < N) { for (let q = 0; q < w; q++) if (mask[(y + h) * N + x + q] !== m) break grow; h++; }
         for (let yy = 0; yy < h; yy++) for (let q = 0; q < w; q++) mask[(y + yy) * N + x + q] = 0;
-        const [mt, c] = looks[y * N + x];
-        M.quad(mp(x, y, z), mp(x + w, y, z), mp(x + w, y + h, z), mp(x, y + h, z), 0, 0, nz, c, mt);
+        const [mt, c] = looks[y * N + x], p0 = mp(x, y, z), p1 = mp(x + w, y, z), p2 = mp(x + w, y + h, z), p3 = mp(x, y + h, z);
+        if (d === 4) M.quad(p0, p1, p2, p3, 0, 0, nz, c, mt); else M.quad(p0, p3, p2, p1, 0, 0, nz, c, mt);   // низ — навпаки
         x += w;
       }
     }
@@ -281,8 +283,14 @@ export function chunkMesh(C, L, { near = true, far = true } = {}) {
         const flush = (end) => {
           if (!run) return;
           const s0 = end - run, [mt, c] = rl;
-          if (dx) { const X = dx > 0 ? r + 1 : r; M.quad(mp(X, s0, z1), mp(X, end, z1), mp(X, end, z0), mp(X, s0, z0), dx, 0, 0, c, mt); }
-          else { const Y = dy > 0 ? r + 1 : r; M.quad(mp(s0, Y, z1), mp(end, Y, z1), mp(end, Y, z0), mp(s0, Y, z0), 0, dy, 0, c, mt); }
+          // порядок p0…p3 дає −x і +y; для +x і −y — навпаки (назовні)
+          if (dx) {
+            const X = dx > 0 ? r + 1 : r, p0 = mp(X, s0, z1), p1 = mp(X, end, z1), p2 = mp(X, end, z0), p3 = mp(X, s0, z0);
+            if (dx < 0) M.quad(p0, p1, p2, p3, dx, 0, 0, c, mt); else M.quad(p0, p3, p2, p1, dx, 0, 0, c, mt);
+          } else {
+            const Y = dy > 0 ? r + 1 : r, p0 = mp(s0, Y, z1), p1 = mp(end, Y, z1), p2 = mp(end, Y, z0), p3 = mp(s0, Y, z0);
+            if (dy > 0) M.quad(p0, p1, p2, p3, 0, dy, 0, c, mt); else M.quad(p0, p3, p2, p1, 0, dy, 0, c, mt);
+          }
           run = 0;
         };
         for (let s = 0; s < N; s++) {

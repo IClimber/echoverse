@@ -150,6 +150,42 @@ test('еталон мешів MESH_GOLD', () => {
   assert.equal(packStats.overflow, o0);
 });
 
+// Відсікання задніх граней (render.js): кожен трикутник твердого — проти годинникової ззовні, тобто (b − a) × (c − a)
+// дивиться туди ж, куди нормаль (у повітря). Повні секції стовпців SPOTS і грубі (крок 2 і 4, з обрізами)
+test('грані твердого — назовні (для відсікання задніх граней)', () => {
+  const seed = hashStr('test');
+  let n = 0;
+  const check = (m, tag) => {
+    if (!m) return;
+    const P = m.pos, Q = m.nor, I = m.idx;
+    for (let t = 0; t < m.count; t += 3) {
+      const a = I[t] * 3, b = I[t + 1] * 3, c = I[t + 2] * 3;
+      const ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2], vx = P[c] - P[a], vy = P[c + 1] - P[a + 1], vz = P[c + 2] - P[a + 2];
+      const dot = (uy * vz - uz * vy) * Q[a] + (uz * vx - ux * vz) * Q[a + 1] + (ux * vy - uy * vx) * Q[a + 2];
+      assert.ok(dot > 0, `${tag}: трикутник ${t / 3} навиворіт`);
+      n++;
+    }
+  };
+  SPOTS.forEach(([d, nn, cx, cy], i) => {
+    const L = lawsOf(seed, d, nn), col = genCol(L, cx, cy);
+    for (const o of col.obj) objPose(col, L, o);
+    const S = colSummary(col, L), czs = [];
+    for (let cz = S.czLo; cz <= S.czHi; cz++) czs.push(cz);
+    for (const cz of S.isl) if (!czs.includes(cz)) czs.push(cz);
+    for (const cz of czs) {
+      const sec = genSection(L, col, cz);
+      if (!sec.empty) check(chunkMesh({ cx, cy, h: col.h, bm: col.bm, v: col.v, b: sec.b, k0: sec.k0, nk: sec.nk, obj: col.obj, sp: col.sp }, L, { near: false, far: false }).solid, `${i}:${cz}`);
+      for (const s of [2, 4]) {
+        const G = genCoarse(L, col, cz, s);
+        if (G.empty) continue;
+        const m = chunkMesh({ cx, cy, step: s, b: G.b, h: G.h, bm: G.bm, v: G.v, lt: G.lt, k0: G.k0, nk: G.n, obj: [], sp: [] }, L, { near: false, far: false });
+        check(m.solid, `${i}:${cz}:крок ${s}`); check(m.caps, `${i}:${cz}:крок ${s}, обрізи`);
+      }
+    }
+  });
+  assert.ok(n > 4000, `${n}`);                   // повних ~5450 трикутників (MESH_GOLD) + грубі
+});
+
 // ================= Роботи генератора в щільному форматі =================
 import { runJob } from '../js/gen/job.js';
 
