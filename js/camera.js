@@ -22,7 +22,7 @@ export let SEAM = VIEW_R - 8;        // шов: ближче — повні се
 // (gen/chunk.js genCoarse). Меш іншого рівня тримаємо, поки він потрібен на dn ± LOD_HYST; обрізи грубої секції
 // малюємо ближче LOD_R + LOD_CAP від внутрішньої межі її рівня
 export const LOD_R = [192, 384], LOD_HYST = 32, LOD_CAP = 48;
-export let LOD_ON = true;                        // перемикач для перевірок (?dev: eco.setLod)
+export let LOD_ON = false;                       // вимкнено за замовчуванням (09.10.2026: GPU на 1440p лише −10 %, а далечінь помітно грубіша); ?dev: eco.setLod(true)
 export function setLod(on) { LOD_ON = !!on; }
 export const lodOf = (dn) => dn < LOD_R[0] ? 0 : dn < LOD_R[1] ? 1 : 2;
 export const keepLod = (dn, l) => lodOf(dn - LOD_HYST) <= l && l <= lodOf(dn + LOD_HYST);
