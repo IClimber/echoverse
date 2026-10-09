@@ -35,8 +35,10 @@ const NEAR = 44;                               // ближче (від цілі 
 const REF_Z = 0.77;                            // при сонці на цій висоті верхня грань — рівно колір палітри
 const rkey = (rx, ry, rz) => ((rx + 0x20000) * 0x40000 + (ry + 0x20000)) * 256 + (rz + 128);
 const m1024 = (v) => ((v % 1024) + 1024) % 1024;
-// Списки діапазонів на кадр: 0 — тверде біля «вікна», 1 — тверде, 2 — тверде на шві далечі, 3 — рідина, 4 — рідина на шві, 5 — рослини зблизька
-const L_CUT = 0, L_PLAIN = 1, L_RING = 2, L_LIQ = 3, L_LIQR = 4, L_FL = 5, NL = 6;
+// Списки діапазонів на кадр: 0 — тверде біля «вікна», 1 — тверде, 2 — тверде на шві далечі (0–2 — з відсіканням задніх
+// граней), 3 — рідина, 4 — рідина на шві, 5 — рослини зблизька, 6–8 — далекі рослини й каміння секцій (пара до 0–2, без
+// відсікання: грані рослин орієнтовані довільно, листя видно з обох боків)
+const L_CUT = 0, L_PLAIN = 1, L_RING = 2, L_LIQ = 3, L_LIQR = 4, L_FL = 5, L_OBJ = 6, NL = 9;   // L_OBJ + j — пара до списку j
 // Рівень деталізації, коли потрібного ще немає: спершу тонший
 const FALLBACK = [[1, 2], [0, 2], [1, 0]];
 
@@ -357,12 +359,14 @@ export function createRenderer(canvas) {
               if (inside || aabbInView(m, ox + b[0], oy + b[1], oz + b[2], ox + b[3], oy + b[4], oz + b[5])) {
                 const dc = Math.hypot(ax + CS / 2, ay + CS / 2), fk = ck(E.cx, E.cy);
                 // далекі рослини — далі за NEAR (чи поки рослин зблизька ще немає); груба — з рослинами, обрізи — біля
-                // межі зі своїм тоншим рівнем чи коли вона запасна
-                const n = lod === 0 ? sl.ns + (dc >= NEAR || !U.flora.has(fk) ? sl.nf : 0)
-                  : sl.ns + sl.nf + (lod !== want || dn < LOD_R[lod - 1] + LOD_CAP ? sl.nc : 0);
+                // межі зі своїм тоншим рівнем чи коли вона запасна. Тверде й обрізи — з відсіканням, рослини — без
+                const nf = lod === 0 && dc < NEAR && U.flora.has(fk) ? 0 : sl.nf;
+                const nc = lod > 0 && (lod !== want || dn < LOD_R[lod - 1] + LOD_CAP) ? sl.nc : 0;
                 let j = ring ? L_RING : L_PLAIN;
                 if (!ring && cut && (iso || dn <= camD + 8) && cutHit(m, cut, ox + b[0], oy + b[1], oz + b[2], ox + b[3], oy + b[4], oz + b[5])) j = L_CUT;
-                if (n) pushR(j, seg[j * 2], sl.off, n);
+                if (sl.ns) pushR(j, seg[j * 2], sl.off, sl.ns);
+                if (nc) pushR(j, seg[j * 2], sl.off + sl.ns + sl.nf, nc);
+                if (nf) pushR(L_OBJ + j, seg[(L_OBJ + j) * 2], sl.off + sl.ns, nf);
               }
             }
             if (sl.loff >= 0 && sl.lbb) {
@@ -392,14 +396,20 @@ export function createRenderer(canvas) {
         }
       };
       R.use(P.ring); R.ring(0, SEAM);
+      R.cull(true);                                   // тверде землі — без задніх граней (грані назовні: gen/mesh.js)
       pass(L_CUT, P.cut, 'op');
       pass(L_PLAIN, P.plain, 'op');
       pass(L_RING, P.ring, 'op');
-      // Далечінь: плитки поверхні — лише за швом (ближче — повні секції)
+      // Далечінь: плитки поверхні — лише за швом (ближче — повні секції); теж з відсіканням (верх — угору, спідниця двобічна)
       if (farOn) {
         R.use(P.lRing); R.ring(SEAM, 1e9);
         for (const f of st.far) { const e = fars.get(f.key); if (e) { e.used = frame; R.drawAt(e.mesh, f.x0 - t[0], f.y0 - t[1], -t[2]); } }
       }
+      R.cull(false);                                  // далі — з обох боків
+      // Далекі рослини й каміння секцій: ті самі програми й «вікно», що в їхнього твердого (uRing у P.ring — той самий 0…SEAM)
+      pass(L_OBJ + L_CUT, P.cut, 'op');
+      pass(L_OBJ + L_PLAIN, P.plain, 'op');
+      pass(L_OBJ + L_RING, P.ring, 'op');
       // Рослини зблизька (розчинення біля ока, ширше «вікно»)
       pass(L_FL, P.flora, 'fl');
       // Тіла (ширяюче каміння): шаблон з поворотом, нахилом і масштабом; низ коробки — основа шаблону

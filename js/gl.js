@@ -377,6 +377,11 @@ export function createGL(canvas) {
     gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 1, gl.UNSIGNED_BYTE, false, 16, 13);
   };
 
+  // Відсікання задніх граней (лише тверде землі й плитки далечі — R.cull): лицьові — за годинниковою на екрані, бо базис
+  // камери дзеркальний (camera.js: r × up = −u), а грані землі — проти годинникової ззовні (gen/mesh.js)
+  gl.frontFace(gl.CW);
+  let cullOn = true;                               // ?dev eco.setCull(false) — усе з обох боків (порівняння)
+
   const R = {
     gl, multi: !!multi,
     stats: { draws: 0, tris: 0, upBytes: 0, up: 0, gpuBytes: 0, arenaBytes: 0, arenaUsed: 0 },
@@ -384,6 +389,10 @@ export function createGL(canvas) {
     // Зробити програму поточною (кеш: без зайвих useProgram)
     use(P) { if (cur !== P) { gl.useProgram(P.p); cur = P; } return P; },
     get cur() { return cur; },
+    // Відсікання задніх граней для наступних викликів (on), якщо його не вимкнено для перевірок (setCull)
+    cull(on) { if (on && cullOn) gl.enable(gl.CULL_FACE); else gl.disable(gl.CULL_FACE); },
+    setCull(on) { cullOn = !!on; },
+    get cullOn() { return cullOn; },
     gpuMs: tq ? 0 : null,
     get width() { return W; }, get height() { return H; }, get dpr() { return dpr; },
     resize() {
@@ -437,6 +446,7 @@ export function createGL(canvas) {
     // Кадр: небо, світло, туман, камера (view — матриця з camera.viewProj); cut / cutF — «вікно» до гравця (рослини —
     // ширше) або null; fade — розчинення рослин біля ока [зникли, видно] або null, eye — око відносно цілі
     begin({ fogCol, light, amb, lightCol, fog, fogAxes = null, view, cut, cutF = null, fade = null, eye = [0, 0, 0], time = 0, sky = null, wind = [0, 0], curve = 0 }) {
+      gl.disable(gl.CULL_FACE);                     // кадр починається без відсікання (небо й решта)
       R.stats.up = R.stats.upBytes; R.stats.draws = 0; R.stats.tris = 0; R.stats.upBytes = 0;
       R.timeBegin();
       gl.clearColor(fogCol[0] / 255, fogCol[1] / 255, fogCol[2] / 255, 1);
