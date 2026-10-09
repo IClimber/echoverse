@@ -275,3 +275,33 @@ test('genCoarse: точки — ті самі блоки, що в повних �
   assert.ok(found >= 0);
   checkCoarse(lawsOf(seed, 0, found), 0, 0);
 });
+
+test('робота lod: op = тверде + далекі рослини + обрізи, у коробці; трикутників менше; обрізи — назовні', () => {
+  const L = lawsOf(hashStr('test'), 0, 0), o0 = packStats.overflow, sum = [0, 0, 0];
+  let caps = 0;
+  for (let cy = -2; cy <= 2; cy++) for (let cx = -2; cx <= 2; cx++) {
+    const cache = new Map(), C = runJob(L, { type: 'col', d: 0, n: 0, cx, cy }, cache).data;
+    for (let cz = C.czLo; cz <= C.czHi; cz++) {
+      const r0 = runJob(L, { type: 'sec', d: 0, n: 0, cx, cy, cz }, cache);
+      if (r0.mesh) sum[0] += r0.mesh.ns;
+      for (const lod of [1, 2]) {
+        const m = runJob(L, { type: 'lod', lod, d: 0, n: 0, cx, cy, cz }, cache).mesh, u = unpack(m.op);
+        assert.equal(u.n, m.ns + m.nf + m.nc);
+        for (let i = 0; i < u.n * 3; i++) assert.ok(u.pos[i] >= m.bb[i % 3] && u.pos[i] <= m.bb[i % 3 + 3]);
+        sum[lod] += m.ns;
+        if (m.nc) caps++;
+        const [dx, dy] = frameOf(cx, cy, cz);
+        for (let j = m.ns + m.nf; j < u.n; j++) {
+          const x = u.pos[j * 3] - dx, y = u.pos[j * 3 + 1] - dy, nx = u.nor[j * 3], ny = u.nor[j * 3 + 1];
+          const ex = x < 4 ? -1 : x > 12 ? 1 : 0, ey = y < 4 ? -1 : y > 12 ? 1 : 0;
+          if (ex && !ey) assert.ok(nx * ex > 0, `обріз x ${x} ${nx}`);
+          if (ey && !ex) assert.ok(ny * ey > 0, `обріз y ${y} ${ny}`);
+        }
+      }
+    }
+  }
+  assert.equal(packStats.overflow, o0);
+  assert.ok(caps > 0);
+  assert.ok(sum[1] <= 0.4 * sum[0] && sum[2] <= 0.12 * sum[0], `${sum}`);
+  console.log(`# LOD1 ×${(sum[1] / sum[0]).toFixed(3)}, LOD2 ×${(sum[2] / sum[0]).toFixed(3)}`);
+});
