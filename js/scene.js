@@ -89,7 +89,8 @@ export async function createScene(canvas, settings = {}) {
   const RG = createRegions(G, { size: [RW, RW, RH], PO, PQ, format: FMT, kinds, casters: [{ arena: 'op', material: mats.obj }, null, { arena: 'fl', material: mats.fl }], arena0: ARENA0, arenaMax: ARENA_MAX, stats });
 
   // ---- небо, світла, частинки ----
-  const sky = createSky(G, { glsl: SKY_GLSL, wgsl: SKY_WGSL });
+  // розсіяне з неба перепікається, коли сонце зсунулось на 2° (доба 6–40 хв × плин часу — до ~2°/с; розсіяне плавне)
+  const sky = createSky(G, { glsl: SKY_GLSL, wgsl: SKY_WGSL, lightingThreshold: 2 });
   const LG = createLights(G, { shadows: settings.shadows || 'pcf3' });
   const vols = {};
   const volume = (type) => {

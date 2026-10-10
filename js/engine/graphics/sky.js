@@ -108,8 +108,10 @@ fn fragmentMain(input: FragmentInput) -> FragmentOutput {
 }
 `;
 
-// G — застосунок (app.js); { glsl, wgsl } — функція неба гри
-export function createSky(G, { glsl, wgsl }) {
+// G — застосунок (app.js); { glsl, wgsl } — функція неба гри. Перепікання — як у ProceduralSky: коли головне світило
+// зсунулось більше ніж на lightingThreshold градусів (там 0,5°, діапазон 0…10: «Keeps the cost down during a continuous
+// day/night cycle»); решта підпису (погода тощо) — понад paramEps; не частіше minInterval мс (крім force)
+export function createSky(G, { glsl, wgsl, lightingThreshold = 0.5, paramEps = 0.03, minInterval = 1000 }) {
   const { pc, dev, scene } = G;
   pc.ShaderChunks.get(dev, pc.SHADERLANGUAGE_GLSL).set('skyboxPS', N_GLSL(glsl));
   pc.ShaderChunks.get(dev, pc.SHADERLANGUAGE_WGSL).set('skyboxPS', N_WGSL(wgsl));
@@ -118,6 +120,7 @@ export function createSky(G, { glsl, wgsl }) {
     vertexGLSL: EQ_VS_GLSL, fragmentGLSL: EQ_FS_GLSL(glsl), vertexWGSL: EQ_VS_WGSL, fragmentWGSL: EQ_FS_WGSL(wgsl),
   });
   scene.skyboxIntensity = 1; scene.exposure = 1;
+  const cosT = Math.cos(lightingThreshold * Math.PI / 180);
   let rt = null, src = null, atlas = null, last = null, lastAt = -1e9, dirty = true;
   dev.on('devicerestored', () => { dirty = true; });
 
@@ -140,17 +143,18 @@ export function createSky(G, { glsl, wgsl }) {
 
   return {
     bake,
-    // Запекти, якщо підпис неба (Float32Array від гри, перші 3 — напрям головного світила) змінився більше ніж на 0,005
-    // (напрям — понад 0,5°) і від попереднього минуло ≥ 100 мс; force — одразу (новий всесвіт). Уніформи вже стоять
+    // Запекти, якщо підпис неба (Float32Array від гри, перші 3 — напрям головного світила) змінився: напрям — понад
+    // lightingThreshold, решта — понад paramEps; і від попереднього минуло ≥ minInterval; force — одразу (новий
+    // всесвіт). Уніформи вже стоять
     maybeBake(sig, force = false) {
       const now = performance.now();
       let ch = dirty || force || !last || last.length !== sig.length;
       if (!ch) {
         const dot = sig[0] * last[0] + sig[1] * last[1] + sig[2] * last[2];
-        if (dot < Math.cos(0.5 * Math.PI / 180)) ch = true;
-        for (let i = 3; i < sig.length && !ch; i++) if (Math.abs(sig[i] - last[i]) > 0.005) ch = true;
+        if (dot < cosT) ch = true;
+        for (let i = 3; i < sig.length && !ch; i++) if (Math.abs(sig[i] - last[i]) > paramEps) ch = true;
       }
-      if (!ch || (!force && !dirty && now - lastAt < 100)) return false;
+      if (!ch || (!force && !dirty && now - lastAt < minInterval)) return false;
       bake();
       last = Float32Array.from(sig); lastAt = now;
       return true;
