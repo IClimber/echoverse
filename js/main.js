@@ -29,17 +29,19 @@ const AI_BUDGET = 2;                          // мс на такт світу: 
 const QS = new URLSearchParams(location.search);
 if (QS.has('strip')) import('./strip.js').then((m) => m.runStrip());
 else if (QS.has('flora')) import('./flora-stand.js').then((m) => m.runFlora());
-else boot();
+else if (QS.has('pc')) import('./pc/render.js').then((m) => boot(m.createRenderer)).catch((e) => showErr('PlayCanvas не завантажився: ' + e.message));
+else boot(createRenderer);
 
-function boot() {
+function boot(make) {
   let renderer;
-  try { renderer = createRenderer($('gl')); }
+  try { renderer = make($('gl')); }
   catch (e) {
     showErr('Браузер не підтримує WebGL2 — гра не запуститься. ' + e.message);
     $('create').disabled = true;
     return;
   }
   addEventListener('resize', () => renderer.resize());
+  const raf = renderer.raf || ((f) => requestAnimationFrame(f));   // ?pc — кадр гри з такту PlayCanvas
   initInput();
 
   let g = null;                              // поточна гра
@@ -76,8 +78,11 @@ function boot() {
       frameStats();
       const st = g ? g.world.stats() : {}, R = renderer.R;
       return { fps: perf.fps, frameMs: perf.frameMs, p99: perf.p99, upd: perf.upd, drw: perf.drw, gpuMs: R.gpuMs, draws: R.stats.draws, tris: R.stats.tris,
-        gpuMB: (R.stats.gpuBytes + R.stats.arenaBytes) / 1048576, colsPerSec: st.colsPerSec, pending: st.pending, cols: st.cols, secs: st.secs, meshes: renderer.meshCount, lod: [...renderer.lodCounts], workers: st.workers, streamMs: g ? g.streamMs : 0 };
+        gpuMB: (R.stats.gpuBytes + R.stats.arenaBytes) / 1048576, colsPerSec: st.colsPerSec, pending: st.pending, cols: st.cols, secs: st.secs, meshes: renderer.meshCount, lod: [...renderer.lodCounts], workers: st.workers, streamMs: g ? g.streamMs : 0,
+        pcMs: R.cpuRenderMs, gpuPass: R.gpuPass, shTris: R.stats.shTris };
     },
+    // ?pc: тіні сонця — 'off' | 'pcss' | 'pcf3' | {властивості світла PlayCanvas}
+    shadows(m) { return renderer.setShadows ? renderer.setShadows(m) : null; },
     // Рівні деталізації далекої землі: false — усе повне (порівняння)
     setLod(on) { setLod(on); streamer.force(); },
     // Відсікання задніх граней землі: false — усе з обох боків (порівняння)
@@ -472,9 +477,9 @@ function boot() {
     }
     fpsN++;
     if (now - fpsT > 500) { perf.fps = fpsN * 1000 / (now - fpsT); fpsN = 0; fpsT = now; }
-    requestAnimationFrame(frame);
+    raf(frame);
   }
-  requestAnimationFrame(frame);
+  raf(frame);
   showMenu();
 }
 
