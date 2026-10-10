@@ -368,14 +368,14 @@ export function createGL(canvas) {
   const multi = gl.getExtension('WEBGL_multi_draw');
   const inst = gl.createBuffer();
   let instCap = 0;
-  // Щільна вершина (pack.js, 16 Б, елементи по 4 Б): позиція u16 ×4 (0), нормаль i8 ×4 (8, нормовано), колір u8 ×3 (12,
-  // нормовано), матеріал u8 (15)
+  // Щільна вершина (pack.js, 16 Б, елементи по 4 Б): позиція u16 ×4 (0; четвертий — матеріал, 6), нормаль i8 ×4 (8,
+  // нормовано), колір u8 ×3 (12, нормовано); AO (15) старий рендер не читає
   const packedAttrs = (buf) => {
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
     gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.UNSIGNED_SHORT, false, 16, 0);
     gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.BYTE, true, 16, 8);
     gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 3, gl.UNSIGNED_BYTE, true, 16, 12);
-    gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 1, gl.UNSIGNED_BYTE, false, 16, 15);
+    gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 1, gl.UNSIGNED_SHORT, false, 16, 6);   // матеріал — pos.w (AO в color.a старий рендер не читає)
   };
 
   // Відсікання задніх граней (лише тверде землі й плитки далечі — R.cull): лицьові — за годинниковою на екрані, бо базис

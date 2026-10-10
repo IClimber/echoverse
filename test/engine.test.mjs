@@ -49,7 +49,7 @@ import { createAlloc } from '../js/engine/graphics/arena.js';
 import { SPOTS, MESH_GOLD } from '../js/golden.js';
 import { LEVEL } from '../js/iso.js';
 
-test('щільна вершина: позиції з точністю 1/256, нормаль, колір, матеріал — точно', () => {
+test('щільна вершина: позиції з точністю 1/256, нормаль, колір, матеріал (pos.w), AO (color.a) — точно', () => {
   const L = lawsOf(hashStr('меш'), 0, 4);
   let cx = 3;
   while (Math.min(...genChunk(L, cx, 3).h) < 1) cx++;
@@ -66,9 +66,10 @@ test('щільна вершина: позиції з точністю 1/256, н�
       assert.equal(u.col[j * 3 + a], m.col[v * 3 + a]);
     }
     assert.equal(u.mat[j], m.mat[v]);
+    assert.equal(u.ao[j], m.ao[v]);
   }
   const b = new Uint8Array(P.buf);
-  for (let j = 0; j < P.n; j++) assert.ok(!b[j * 16 + 6] && !b[j * 16 + 7] && !b[j * 16 + 11]);
+  for (let j = 0; j < P.n; j++) assert.ok(!b[j * 16 + 7] && !b[j * 16 + 11]);
 });
 
 test('meshHash не залежить від порядку трикутників і повороту вершин', () => {
@@ -133,7 +134,7 @@ export function meshDigests(seedText) {
     for (const cz of czs) {
       const sec = genSection(L, col, cz);
       if (sec.empty) continue;
-      const m = chunkMesh({ cx, cy, h: col.h, bm: col.bm, v: col.v, b: sec.b, k0: sec.k0, nk: sec.nk, obj: col.obj, sp: col.sp }, L);
+      const m = chunkMesh({ cx, cy, h: col.h, bm: col.bm, v: col.v, top: col.top, b: sec.b, k0: sec.k0, nk: sec.nk, obj: col.obj, sp: col.sp }, L);
       const dz = cz * SEC * LEVEL - rz0 * RS * SEC * LEVEL;
       out[`${i}:${cz}:solid`] = meshDigest(meshHash(packMesh(m.solid, dx, dy, dz).buf));
       if (m.liquid) out[`${i}:${cz}:liq`] = meshDigest(meshHash(packMesh(m.liquid, dx, dy, dz).buf));
@@ -368,4 +369,48 @@ test('рівні: пороги й гістерезис', () => {
   assert.equal(keepLod(200, 0), true); assert.equal(keepLod(230, 0), false);
   assert.equal(keepLod(370, 2), true); assert.equal(keepLod(340, 2), false);
   assert.equal(colDist(0, 0, [8, 8]), 0); assert.equal(colDist(2, 0, [8, 8]), 24);
+});
+
+// ---- AO у вершинах (10.10.2026): кути Surface Nets, відкритість неба (C.top), рослини ----
+import { B_ROCK as B_R } from '../js/gen/chunk.js';
+import { template as tmpl } from '../js/gen/plants.js';
+import { speciesOf as spOf, regionAt as regAt } from '../js/gen/flora.js';
+const NWa = CS + 2, NKa = 16;
+// синтетична секція: solid(x, y, k) → тверде; top — верх укриття (блоки) чи null
+function aoSection(solid, top) {
+  const b = new Uint8Array(NWa * NWa * (NKa + 2));
+  for (let y = -1; y <= CS; y++) for (let x = -1; x <= CS; x++) for (let k = -1; k <= NKa; k++)
+    if (solid(x, y, k)) b[((y + 1) * NWa + x + 1) * (NKa + 2) + k + 1] = B_R;
+  const T = top === null ? null : new Int16Array(NWa * NWa);
+  if (T) for (let y = -1; y <= CS; y++) for (let x = -1; x <= CS; x++) T[(y + 1) * NWa + x + 1] = typeof top === 'function' ? top(x, y) : top;
+  return { cx: 0, cy: 0, b, h: new Int16Array(NWa * NWa).fill(4), bm: new Uint8Array(NWa * NWa), v: new Uint8Array(NWa * NWa), top: T, k0: 0, nk: NKa, obj: [], sp: [] };
+}
+const upVerts = (m) => { const r = []; for (let v = 0; v < m.mat.length; v++) if (m.nor[v * 3 + 2] > 100) r.push(v); return r; };
+test('AO: рівна відкрита поверхня — 255 і одним прямокутником; кут біля стіни — темніше; під укриттям — темно', () => {
+  const L = lawsOf(hashStr('ao'), 0, 0);
+  const flat = chunkMesh(aoSection((x, y, k) => k < 4, 4), L).solid, up = upVerts(flat);
+  assert.equal(up.length, 4);
+  for (const v of up) assert.equal(flat.ao[v], 255);
+  const wall = chunkMesh(aoSection((x, y, k) => k < 4 || (x >= 8 && k < 6), (x) => x >= 8 ? 6 : 4), L).solid;
+  const foot = [], far = [];
+  for (let v = 0; v < wall.mat.length; v++) {
+    const x = wall.pos[v * 3], z = wall.pos[v * 3 + 2];
+    if (z < 2.3 && Math.abs(x - 8) < 1.1) foot.push(wall.ao[v]);
+    if (z < 2.05 && x < 5 && wall.nor[v * 3 + 2] > 100) far.push(wall.ao[v]);
+  }
+  assert.ok(foot.length && Math.min(...foot) < 255 && Math.min(...foot) >= 140, 'підніжжя стіни темніше');
+  assert.ok(far.length && far.every((a) => a === 255), 'далі від стіни — відкрито');
+  const deep = chunkMesh(aoSection((x, y, k) => k < 4, 16), L).solid;
+  for (const v of upVerts(deep)) assert.equal(deep.ao[v], 0);
+  const mid = chunkMesh(aoSection((x, y, k) => k < 4, 9), L).solid;
+  for (const v of upVerts(mid)) assert.equal(mid.ao[v], 128);
+});
+test('AO шаблону рослини: темніше знизу, у 0…255', () => {
+  const L = lawsOf(hashStr('ao'), 0, 0), reg = regAt(L, 10, 10);
+  let T = null;
+  for (let bm = 0; bm < 40 && !T; bm++) { const S = spOf(L, reg, bm); if (S && S.big.length) T = tmpl(S.big[0], 0, 0); }
+  assert.ok(T && T.a && T.a.length === T.verts);
+  let lo = 255, hi = 0;
+  for (const a of T.a) { lo = Math.min(lo, a); hi = Math.max(hi, a); }
+  assert.ok(lo < hi);
 });

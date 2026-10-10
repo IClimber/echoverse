@@ -638,10 +638,23 @@ export function genBlocks(L, col, k0, nk) {
   return { b, k0, nk };
 }
 
+// Верх укриття кожної клітинки стовпця з рамкою (блоки): водойма — рівень рідини (сухо — дно), суходіл — над найвищим
+// ґрунтом біля поверхні (острови — ні); у печеристому суходолі нижче моря при рідині — рівень моря. Для опадів (під дахом
+// не падають) і AO мешів (відкритість неба над вершиною). Кеш у стовпці
+export function shelterTop(col, L) {
+  if (col.top) return col.top;
+  const top = new Int16Array(CW * CW), pit = L.liquid.kind !== L_DRY;
+  for (let i = 0; i < CW * CW; i++) {
+    const c = col.cells[i], basin = c.t === T_WATER || c.t === T_ICE || c.t === T_BED, sky = col.sky[i];
+    top[i] = basin ? Math.max(c.bed, c.t === T_BED ? 0 : SEA) : sky < SEA - 1 && pit ? SEA : sky + 1;
+  }
+  return (col.top = top);
+}
+
 // Чанк (cx, cy) стовпцем 0…H−1 (тести, відбитки, стенди): поверхня, блоки (індекс bi), предмети
 export function genChunk(L, cx, cy) {
   const col = genCol(L, cx, cy), V = genBlocks(L, col, 0, H);
-  return { d: L.d, n: L.n, cx, cy, h: col.h, t: col.t, v: col.v, bm: col.bm, b: V.b, k0: 0, nk: H, obj: col.obj, sp: col.sp };
+  return { d: L.d, n: L.n, cx, cy, h: col.h, t: col.t, v: col.v, bm: col.bm, top: shelterTop(col, L), b: V.b, k0: 0, nk: H, obj: col.obj, sp: col.sp };
 }
 
 // Секція (cx, cy, cz) стовпця col: блоки SEC заввишки; порожня (усе повітря) — {empty: true}

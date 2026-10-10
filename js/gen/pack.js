@@ -1,6 +1,6 @@
 // gen/pack.js — щільна вершина регіону (16 Б), без індексів: вершина на кожен кут трикутника.
-// Позиція — u16 ×4 (x, y, z, 0) = (локальна від кута регіону + PO) × PQ; нормаль — i8 ×4 (x, y, z, 0); колір — u8 ×3;
-// матеріал — u8 (четвертий байт кольору). Кожен елемент — по 4 Б (PlayCanvas, WebGPU). Регіон — RS×RS стовпців × RS секцій (128 × 128 клітинок × 64 од.). Діапазон локальних: x, y ∈ [−192, 320),
+// Позиція — u16 ×4 (x, y, z, матеріал): (локальна від кута регіону + PO) × PQ, четвертий u16 — номер матеріалу; нормаль —
+// i8 ×4 (x, y, z, 0); колір — u8 ×4 (r, g, b, AO: 255 — відкрито, 0 — темно). Кожен елемент — по 4 Б (PlayCanvas, WebGPU). Регіон — RS×RS стовпців × RS секцій (128 × 128 клітинок × 64 од.). Діапазон локальних: x, y ∈ [−192, 320),
 // z ∈ [−64, 448) — запас на крони й велетнів, що виходять за регіон; точність 1/128. Лише вигляд (Math.round можна).
 import { CS, SEC } from './chunk.js';
 import { LEVEL } from '../iso.js';
@@ -37,7 +37,8 @@ export function packMesh(m, dx = 0, dy = 0, dz = 0) {
       i8[j * 16 + 8 + a] = m.nor[v * 3 + a];
       u8[j * 16 + 12 + a] = m.col[v * 3 + a];
     }
-    u8[j * 16 + 15] = m.mat[v];
+    u16[j * 8 + 3] = m.mat[v];
+    u8[j * 16 + 15] = m.ao ? m.ao[v] : 255;
   }
   return { buf, n, bb };
 }
@@ -53,19 +54,21 @@ export function concat(a, b) {
 // Назад у масиви (тести): позиції — локальні регіону
 export function unpack(buf) {
   const n = buf.byteLength / VB, u16 = new Uint16Array(buf), i8 = new Int8Array(buf), u8 = new Uint8Array(buf);
-  const pos = new Float32Array(n * 3), nor = new Int8Array(n * 3), col = new Uint8Array(n * 3), mat = new Uint8Array(n);
+  const pos = new Float32Array(n * 3), nor = new Int8Array(n * 3), col = new Uint8Array(n * 3), mat = new Uint8Array(n), ao = new Uint8Array(n);
   for (let j = 0; j < n; j++) {
     for (let a = 0; a < 3; a++) { pos[j * 3 + a] = u16[j * 8 + a] / PQ - PO[a]; nor[j * 3 + a] = i8[j * 16 + 8 + a]; col[j * 3 + a] = u8[j * 16 + 12 + a]; }
-    mat[j] = u8[j * 16 + 15];
+    mat[j] = u16[j * 8 + 3];
+    ao[j] = u8[j * 16 + 15];
   }
-  return { pos, nor, col, mat, n };
+  return { pos, nor, col, mat, ao, n };
 }
 
 // Відбиток меша, що не залежить від порядку трикутників і циклічного повороту вершин: сума (mod 2^32) FNV-1a кожного
 // трикутника (48 Б), повернутого так, що першою йде найменша вершина (лексикографічно за 16 байтами).
 // Канонічний порядок байтів вершини для відбитка — розкладка до 10.10.2026 (позиція 0–5, нормаль 6–8, колір 10–12,
-// матеріал 13, решта — нулі): MESH_GOLD не залежить від розкладки. CANON[i] — звідки взяти канонічний байт i (−1 — нуль)
-const CANON = [0, 1, 2, 3, 4, 5, 8, 9, 10, -1, 12, 13, 14, 15, -1, -1];
+// матеріал 13 — молодший байт pos.w, AO 14, решта — нулі): MESH_GOLD не залежить від розкладки. CANON[i] — звідки взяти
+// канонічний байт i (−1 — нуль)
+const CANON = [0, 1, 2, 3, 4, 5, 8, 9, 10, -1, 12, 13, 14, 6, 15, -1];
 export function meshHash(buf) {
   const src = new Uint8Array(buf), nv = buf.byteLength / VB, nt = nv / 3, u8 = new Uint8Array(nv * VB);
   for (let j = 0; j < nv; j++) for (let i = 0; i < VB; i++) if (CANON[i] >= 0) u8[j * VB + i] = src[j * VB + CANON[i]];

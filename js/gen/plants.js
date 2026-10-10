@@ -497,6 +497,19 @@ const STONE = {
 };
 
 // ================= Шаблони й розміщення =================
+// AO вершин шаблону (u8, 255 — відкрито): великі й малі рослини — темніші знизу (крона й трава затіняють основу),
+// каміння — за нормаллю (низ і боки темніші, верх — відкритий)
+function templateAO(T, kind) {
+  const P = T.p, N = T.n, n = T.verts, a = new Uint8Array(n);
+  let z0 = Infinity, z1 = -Infinity;
+  for (let i = 0; i < n; i++) { const z = P[i * 3 + 2]; if (z < z0) z0 = z; if (z > z1) z1 = z; }
+  const dz = z1 - z0 || 1;
+  for (let i = 0; i < n; i++) {
+    const hr = (P[i * 3 + 2] - z0) / dz;
+    a[i] = Math.round(255 * (kind === 'big' ? 0.55 + 0.45 * hr : kind === 'small' ? 0.75 + 0.25 * hr : 0.7 + 0.3 * (N[i * 3 + 2] / 127 * 0.5 + 0.5)));
+  }
+  return a;
+}
 const cache = new Map();
 // Шаблон виду g (варіант будови variant, lod 1 — спрощений для далечі); для каміння — стиль style
 export function template(g, variant, lod, style) {
@@ -506,6 +519,7 @@ export function template(g, variant, lod, style) {
   const G = new Geo(rng((g.id ^ Math.imul(variant + 1, 0x9e3779b9) ^ (lod ? 0x51ed : 0)) >>> 0), lod);
   if (style) STONE[style](G, g); else FORM[g.form](G, g);
   T = G.finish();
+  T.a = templateAO(T, style ? 'stone' : g.big ? 'big' : 'small');
   if (cache.size >= 1500) cache.delete(cache.keys().next().value);
   cache.set(key, T);
   return T;
@@ -528,10 +542,10 @@ export function footprint(T) {
 
 // Шаблон T у меш M (gen/mesh.js Mesh) у точці (x, y, z): поворот rot навколо вертикалі, нахил tl, масштаб s,
 // множники кольору cj [r, g, b]
-export function place(M, T, x, y, z, rot, s, tl, cj) {
-  const c = Math.cos(rot), sn = Math.sin(rot), ct = Math.cos(tl), st = Math.sin(tl), P = T.p, N = T.n, C = T.c, base = M.n;
+export function place(M, T, x, y, z, rot, s, tl, cj, sky = 1) {
+  const c = Math.cos(rot), sn = Math.sin(rot), ct = Math.cos(tl), st = Math.sin(tl), P = T.p, N = T.n, C = T.c, base = M.n, TA = T.a;
   M.room(T.verts, T.verts);
-  const MP = M.p, MN = M.nr, MC = M.c, MM = M.mt, MI = M.i, ni = M.ni;
+  const MP = M.p, MN = M.nr, MC = M.c, MM = M.mt, MA = M.a, MI = M.i, ni = M.ni;
   for (let i = 0, j = 0; i < T.verts; i++, j += 3) {
     const px = P[j], y1 = P[j + 1] * ct - P[j + 2] * st, z1 = P[j + 1] * st + P[j + 2] * ct, o = (base + i) * 3;
     MP[o] = x + (px * c - y1 * sn) * s; MP[o + 1] = y + (px * sn + y1 * c) * s; MP[o + 2] = z + z1 * s;
@@ -539,6 +553,7 @@ export function place(M, T, x, y, z, rot, s, tl, cj) {
     MN[o] = nx * c - ny * sn | 0; MN[o + 1] = nx * sn + ny * c | 0; MN[o + 2] = nz | 0;
     MC[o] = Math.min(255, C[j] * cj[0] | 0); MC[o + 1] = Math.min(255, C[j + 1] * cj[1] | 0); MC[o + 2] = Math.min(255, C[j + 2] * cj[2] | 0);
     MM[base + i] = T.m[i];
+    MA[base + i] = TA ? TA[i] * sky | 0 : 255 * sky | 0;
     MI[ni + i] = base + i;
   }
   M.n += T.verts; M.ni += T.verts;
