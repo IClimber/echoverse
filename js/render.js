@@ -7,7 +7,7 @@ import { CS, SEC } from './gen/chunk.js';
 import { WORLD_H, SEA, MAX_AMP } from './universe.js';
 import { figureParts, Mesh } from './gen/mesh.js';
 import { poseMatrices } from './anim.js';
-import { chain, translate, scale, invert } from './mat.js';
+import { chain, translate, scale, invert } from './engine/core/mat.js';
 import { skyState, applyWeather } from './sky.js';
 import { ISO, VIEW_R, FAR_R, SEAM, viewProj, isoRadius, project, basis, aabbInView, aabbInside, LOD_R, LOD_CAP, LOD_ON, lodOf, keepLod, colDist } from './camera.js';
 import { regionOf, RS, RW, RH } from './gen/pack.js';

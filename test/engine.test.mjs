@@ -45,7 +45,7 @@ import { genChunk, genCol, genSection, CS, SEC } from '../js/gen/chunk.js';
 import { chunkMesh, objPose } from '../js/gen/mesh.js';
 import { colSummary } from '../js/gen/job.js';
 import { packMesh, unpack, meshHash, meshDigest, regionOf, frameOf, packStats, VB, RS } from '../js/gen/pack.js';
-import { createAlloc } from '../js/arena.js';
+import { createAlloc } from '../js/engine/graphics/arena.js';
 import { SPOTS, MESH_GOLD } from '../js/golden.js';
 import { LEVEL } from '../js/iso.js';
 
@@ -243,7 +243,7 @@ test('visibleMissing: стовпці без зведення, секції не 
 });
 
 // ================= Такт =================
-import { createTicker } from '../js/ticker.js';
+import { createTicker } from '../js/engine/core/ticker.js';
 
 test('такт: 240 к/с → 120 Гц, alpha у [0, 1), довгий кадр — не більше 8 кроків', () => {
   const T = createTicker(1 / 120);
@@ -254,7 +254,11 @@ test('такт: 240 к/с → 120 Гц, alpha у [0, 1), довгий кадр �
 });
 
 // ================= Зіткнення тіл =================
-import { makeBody, stepBody, collideBodies } from '../js/bodies.js';
+import { makeBody, stepBody, collideBodies, configureBodies } from '../js/engine/physics/bodies.js';
+import { GRAVITY as G_, PLAYER_MASS as PM_, PLAYER_AREA as PA_ } from '../js/player.js';
+import { solidB as SB_ } from '../js/gen/chunk.js';
+import { LEVEL as LV_ } from '../js/iso.js';
+configureBodies({ level: LV_, solid: SB_, gravity: G_, refMass: PM_, refArea: PA_ });
 
 const AIR = { block: () => 0 }, FLOOR = { block: (x, y, k) => k < 0 ? 8 : 0 };
 const box = (x, y, z, h, o = {}) => { const b = makeBody({ x, y, z, hx: h, hy: h, hz: h, ...o }); b.sleep = false; return b; };

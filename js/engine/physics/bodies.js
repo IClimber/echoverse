@@ -1,19 +1,20 @@
-// bodies.js — тіла з масою (власна фізика, без рушія): ширяюче каміння, пізніше — речі, істоти. Без DOM.
+// js/engine/physics/bodies.js — тіла з масою (власна фізика, без рушія): ширяюче каміння, пізніше — речі, істоти. Без DOM.
 // Тіло — коробка (піврозміри hx, hy, hz навколо центру x, y, z) з масою. Сили: тяжіння (місцева гравітація × (1 − підйом
 // породи)), для левітуючих (lift > 1) — пружина до висоти ширяння над ґрунтом, опір повітря з вітром (як у гравця; межа падіння — від маси на площу).
 // Зіткнення з блоками — рух по осях окремо, відскок і тертя від законів всесвіту. Тіло, що спокійно висить чи лежить,
 // «спить» (не рахується), поки його не зачеплять. Удар — імпульс / маса: важке ледь зрушить.
 // Інтерфейс (положення, швидкість, маса, форма) — такий, щоб за потреби пересадити на фізичний рушій.
-import { LEVEL } from './iso.js';
-import { solidB } from './gen/chunk.js';
-import { GRAVITY } from './player.js';
+
+// Сталі гри (висота блоку, що тверде, прискорення при 1 g, еталон маси й площі для межі падіння) — задає гра через
+// configureBodies; рушій від гри не залежить
+let LEVEL = 0.5, solidB = (v) => v > 0, GRAVITY = 25.6, REF_MASS = 70, REF_AREA = 0.47;
+export function configureBodies({ level, solid, gravity, refMass = 70, refArea = 0.47 }) {
+  LEVEL = level; solidB = solid; GRAVITY = gravity; REF_MASS = refMass; REF_AREA = refArea;
+}
 
 const EPS = 1e-4;
 const SLEEP_V = 0.06, SLEEP_T = 1.2;         // спокій: швидкість нижче й стільки секунд — засинає
-const DENSITY = 1800;                         // маса одиниці об'єму каменю (умовна; гравець — PLAYER_MASS)
-export const PLAYER_MASS = 70;
-const PLAYER_AREA = 0.47;                     // площа гравця проти вітру (2 · FOOT × BODY)
-export const HIT_IMPULSE = 150;               // удар гравця (маса × швидкість): камінчик — ~6 од/с, брила — ледь
+const DENSITY = 1800;                         // маса одиниці об'єму каменю (умовна; еталон — REF_MASS)
 
 // Тіло з опису: {x, y, z (низ), hx, hy, hz, dens (×), lift, hover (висота ширяння низу над ґрунтом)}
 export function makeBody(o) {
@@ -48,7 +49,7 @@ function groundBelow(P, x, y, z) {
 
 const ANCHOR = 2;                             // пружність поля, що тримає левітуюче тіло біля місця (1/с²)
 // Межа падіння тіла: від маси на площу (важке й компактне падає швидше й менше зноситься вітром)
-const vTof = (b, vT) => vT * Math.sqrt((b.mass / (4 * b.hx * b.hz)) / (PLAYER_MASS / PLAYER_AREA));
+const vTof = (b, vT) => vT * Math.sqrt((b.mass / (4 * b.hx * b.hz)) / (REF_MASS / REF_AREA));
 // Чи зрушить вітер тіло, що спить: левітуюче — помітне прискорення, на ґрунті — сильніше за тертя
 export function windMoves(b, env) {
   const w = env.wind ? Math.hypot(env.wind[0], env.wind[1]) : 0;

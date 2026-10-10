@@ -12,6 +12,9 @@ import { KMIN } from './universe.js';
 export const SPEED = 4.2;            // клітинок за секунду (при 1 g)
 export const FOOT = 0.24;            // півширина габариту
 export const BODY = 0.98;            // висота габариту (2 блоки)
+export const PLAYER_MASS = 70;                // маса гравця (тисне тіло, на якому стоїть; штовхає)
+export const PLAYER_AREA = 0.47;              // площа гравця проти вітру (2 · FOOT × BODY)
+export const HIT_IMPULSE = 150;               // удар гравця (маса × швидкість): камінчик — ~6 од/с, брила — ледь
 export const GRAVITY = 25.6;         // прискорення при 1 g, одиниць/с²
 export const JUMP_V = 7.67;          // поштовх стрибка: при 1 g — 1,15 одиниці (2 блоки) і 0,6 с у повітрі
 export const FLOAT_Z = 0.6;          // той, хто пливе у воді, тримається ногами на стільки нижче поверхні (густіша — вище)

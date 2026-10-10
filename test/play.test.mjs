@@ -399,7 +399,9 @@ test('нові сили: вітер — чесний опір (на землі �
 });
 
 test('тіла: левітуюче висить на висоті ширяння, звичайне падає й лежить; удар — легке відлітає, важке ледь зрушить; на тіло можна стати', async () => {
-  const { makeBody, stepBody, push, rayBody, HIT_IMPULSE } = await import('../js/bodies.js');
+  const { configureBodies } = await import('../js/engine/physics/bodies.js'); const { solidB: sB } = await import('../js/gen/chunk.js'); const pl = await import('../js/player.js'); const { LEVEL: LV } = await import('../js/iso.js');
+  configureBodies({ level: LV, solid: sB, gravity: pl.GRAVITY, refMass: pl.PLAYER_MASS, refArea: pl.PLAYER_AREA });
+  const { makeBody, stepBody, push, rayBody } = await import('../js/engine/physics/bodies.js'); const { HIT_IMPULSE } = pl;
   const P = world(Array(40).fill('4'.repeat(40))), env = { g: 1, vT: 20, bounce: 0, friction: 1, wind: [0, 0] };
   const run = (b, n) => { for (let i = 0; i < n; i++) stepBody(b, 1 / 60, P, env); };
   const fl = makeBody({ x: 20.5, y: 20.5, z: 4 * LEVEL + 2, hx: 0.2, hy: 0.2, hz: 0.15, lift: 1.3, hover: 1.5 });
@@ -473,7 +475,9 @@ test('вітер: затишок за стіною, деревом чи каме
 });
 
 test('тіла й вітер: сплячий левітуючий камінь вітер будить і відхиляє (легкий — далі, важкий — ледь), поле не дає відлетіти', async () => {
-  const { makeBody, stepBody } = await import('../js/bodies.js');
+  const { configureBodies } = await import('../js/engine/physics/bodies.js'); const { solidB: sB } = await import('../js/gen/chunk.js'); const pl = await import('../js/player.js'); const { LEVEL: LV } = await import('../js/iso.js');
+  configureBodies({ level: LV, solid: sB, gravity: pl.GRAVITY, refMass: pl.PLAYER_MASS, refArea: pl.PLAYER_AREA });
+  const { makeBody, stepBody } = await import('../js/engine/physics/bodies.js');
   const P = world(Array(60).fill('4'.repeat(60))), env = { g: 1.28, vT: 18, bounce: 0, friction: 1, wind: [9, 0] };
   const mk = (h) => makeBody({ x: 30.5, y: 30.5, z: 4 * LEVEL + 1.5, hx: h, hy: h, hz: h * 0.6, lift: 1.4, hover: 1.5 });
   const small = mk(0.15), big = mk(1.2);

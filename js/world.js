@@ -7,10 +7,13 @@ import { lawsOf, physOf, KMIN, KMAX } from './universe.js';
 import { CS, ci, bv, solidB, blocks, genColumn, B_AIR, B_STONE, O_FLOAT, SEC } from './gen/chunk.js';
 import { LEVEL } from './iso.js';
 import { createGen } from './gen/client.js';
-import { standable } from './player.js';
+import { standable, GRAVITY, PLAYER_MASS, PLAYER_AREA } from './player.js';
 import { floatPose } from './gen/mesh.js';
 import { footprint } from './gen/plants.js';
-import { makeBody } from './bodies.js';
+import { makeBody, configureBodies } from './engine/physics/bodies.js';
+
+// тіла рушія — зі сталими гри (блок, тверде, тяжіння, еталон маси й площі — гравець)
+configureBodies({ level: LEVEL, solid: solidB, gravity: GRAVITY, refMass: PLAYER_MASS, refArea: PLAYER_AREA });
 
 // Числові ключі: стовпець (|cx|, |cy| < 2^20 — точно, < 2^42) і секція (cz ∈ −512…511, < 2^52)
 export const ck = (cx, cy) => (cx + 0x100000) * 0x200000 + (cy + 0x100000);

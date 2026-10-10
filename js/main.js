@@ -3,8 +3,8 @@
 import { createRenderer, BODY_R, budgetFor } from './render.js';
 import { createWorld, findSpawn, keepFor } from './world.js';
 import { createDevice, landing, landingChunks, CHARGE } from './device.js';
-import { step, support, windShelter, SPRINT, GRAVITY, FOOT } from './player.js';
-import { stepBody, windMoves, push, rayBody, collideBodies, PLAYER_MASS, HIT_IMPULSE } from './bodies.js';
+import { step, support, windShelter, SPRINT, GRAVITY, FOOT, PLAYER_MASS, HIT_IMPULSE } from './player.js';
+import { stepBody, windMoves, push, rayBody, collideBodies } from './engine/physics/bodies.js';
 import { initInput, moveAxis, turnAxis, sprintHeld, vertAxis, takeActions, takeWheel, takeDrag, clearInput, lockPointer, unlockPointer, locked } from './input.js';
 import { listWorlds, putWorld, deleteWorld, serialize, deserialize, newId } from './save.js';
 import { hashStr } from './rng.js';
@@ -17,7 +17,7 @@ import { clockStr } from './sky.js';
 import { weatherAt, localWeather, areaClimate } from './weather.js';
 import { createCamera, rotate, wheel, smooth, moveBasis, clipDist, camDist, facing, setYaw, basis, setViewChunks, setLod, ISO, THIRD, HEAD, VIEW_R } from './camera.js';
 import { createStreamer, visibleMissing } from './stream.js';
-import { createTicker } from './ticker.js';
+import { createTicker } from './engine/core/ticker.js';
 
 const $ = (id) => document.getElementById(id);
 const SAVE_MS = 10000;                     // автозбереження

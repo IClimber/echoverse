@@ -4,7 +4,7 @@
 // ноги часто б'ють; на місці — тіло вертикально, руки повільно розводяться, ноги ступають у воді; ширяння — руки розкинуті;
 // удар — права рука вперед.
 // Стан — у me.anim; кути плавно наздоганяють ціль, тож переходи без ривків.
-import { chain, translate, rotZ, rotY, rotX, scale } from './mat.js';
+import { chain, translate, rotZ, rotY, rotX, scale } from './engine/core/mat.js';
 import { PIVOT } from './gen/mesh.js';
 
 const RATE = 14;                     // як швидко кути наздоганяють ціль, 1/с

@@ -7,13 +7,13 @@
 // планети, світіння лави, підсвічування фігури під час заряджання.
 import * as pc from 'https://cdn.jsdelivr.net/npm/playcanvas@2.23.2/build/playcanvas.mjs';
 import { DECL_PS, DIFFUSE_PS, SKY_VS, SKY_FS, DECL_WGSL, DIFFUSE_WGSL, SKY_VS_WGSL, SKY_FS_WGSL } from './shaders.js';
-import { createAlloc } from '../arena.js';
+import { createAlloc } from '../engine/graphics/arena.js';
 import { CS } from '../gen/chunk.js';
 import { SEA, MAX_AMP } from '../universe.js';
 import { LEVEL, S } from '../iso.js';
 import { figureParts } from '../gen/mesh.js';
 import { poseMatrices } from '../anim.js';
-import { invert } from '../mat.js';
+import { invert } from '../engine/core/mat.js';
 import { skyState, applyWeather } from '../sky.js';
 import { ISO, VIEW_R, FAR_R, SEAM, viewProj, isoRadius, basis, aabbInView, aabbInside, colDist } from '../camera.js';
 import { regionOf, RS, RW, RH, PO, PQ } from '../gen/pack.js';
