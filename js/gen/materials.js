@@ -7,3 +7,12 @@ export const LAYERS = 25;
 export const TOP_MAT = [M_BED, M_ICE, M_SAND, M_LUSH, M_DRY, M_DESERT, M_SNOW, M_ROCK, M_MUD];
 export const SIDE_MAT = [M_SOIL, M_SOIL, M_SANDSIDE, M_SOIL, M_SOIL, M_SANDSIDE, M_CLIFF, M_CLIFF, M_SOIL];
 export const LIP_MAT = [M_SOIL, M_ICE, M_SAND, M_LIP, M_LIP, M_DESERT, M_SNOW, M_CLIFF, M_SOIL];
+// Таблиця матеріалів для рушія (engine/graphics/chunks.js, eco_mat): [номер, емісія 0…1, гойдання вітром, поворот клітинок
+// текстури (0 — будь-який, 1 — лише 180°, 2 — без повороту), плин текстури (× (0,05; 0,03) за секунду)]. Решта — нулі.
+// Вода й лава пливуть (лава — повільно й світиться сама), край дерну — без повороту; брижі, пласти й кора — лише на 180°;
+// листя, пелюстки й трава гойдаються. Що ще світиться — п. 5 roadmap (матеріали)
+export const MAT_TABLE = [
+  [M_WATER, 0, 0, 2, 1], [M_LAVA, 1, 0, 2, 0.16], [M_LIP, 0, 0, 2, 0],
+  [M_SAND, 0, 0, 1, 0], [M_DESERT, 0, 0, 1, 0], [M_CLIFF, 0, 0, 1, 0], [M_SANDSIDE, 0, 0, 1, 0], [M_BARK, 0, 0, 1, 0],
+  [M_LEAF, 0, 1, 0, 0], [M_PETAL, 0, 1, 0, 0], [M_BLADE, 0, 1, 0, 0],
+];

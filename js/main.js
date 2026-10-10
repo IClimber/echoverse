@@ -1,5 +1,6 @@
 // main.js — запуск: меню світів, ігровий цикл (рух, стрибки, камера, підвантаження чанків), HUD, автозбереження.
-// ?strip — замість гри стенд «смуга всесвітів» (js/strip.js), ?flora — галерея видів рослин (js/flora-stand.js).
+// ?strip — замість гри стенд «смуга всесвітів» (js/strip.js), ?flora — галерея видів рослин (js/flora-stand.js),
+// ?light — світло й тіні рушія (js/light-stand.js).
 import { createRenderer, BODY_R, budgetFor } from './render.js';
 import { createWorld, findSpawn, keepFor } from './world.js';
 import { createDevice, landing, landingChunks, CHARGE } from './device.js';
@@ -29,6 +30,7 @@ const AI_BUDGET = 2;                          // мс на такт світу: 
 const QS = new URLSearchParams(location.search);
 if (QS.has('strip')) import('./strip.js').then((m) => m.runStrip());
 else if (QS.has('flora')) import('./flora-stand.js').then((m) => m.runFlora());
+else if (QS.has('light')) import('./light-stand.js').then((m) => m.runLight()).catch((e) => showErr('Стенд ?light: ' + e.message));
 else if (QS.has('pc')) import('./pc/render.js').then((m) => m.createRenderer($('gl'), { gpu: QS.get('gpu') })).then((r) => boot(() => r)).catch((e) => showErr('PlayCanvas не завантажився: ' + e.message));   // ?gpu=webgpu (типово — WebGL2: на еталонній машині швидший)
 else boot(createRenderer);
 
