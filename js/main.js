@@ -2,7 +2,7 @@
 // ?strip — замість гри стенд «смуга всесвітів» (js/strip.js), ?flora — галерея видів рослин (js/flora-stand.js),
 // ?light — світло й тіні рушія (js/light-stand.js).
 import { createScene, BODY_R, budgetFor } from './scene.js';
-import { loadSettings } from './settings.js';
+import { loadSettings, saveSetting } from './settings.js';
 import { createWorld, findSpawn, keepFor } from './world.js';
 import { createDevice, landing, landingChunks, CHARGE } from './device.js';
 import { step, support, standable, windShelter, SPRINT, GRAVITY, FOOT, PLAYER_MASS, HIT_IMPULSE } from './player.js';
@@ -34,6 +34,7 @@ else if (QS.has('flora')) import('./flora-stand.js').then((m) => m.runFlora());
 else if (QS.has('light')) import('./light-stand.js').then((m) => m.runLight()).catch((e) => showErr('Стенд ?light: ' + e.message));
 else if (QS.has('old')) import('./render.js').then((m) => boot(m.createRenderer($('gl')))).catch(fail);   // старий рендер (до кроку 14 плану п. 1)
 else createScene($('gl'), loadSettings(QS)).then(boot).catch(fail);
+const RESUME_KEY = 'echoverse-resume';       // світ, у який повернутися після перезавантаження (зміна графіки)
 
 function fail(e) {
   showErr('Графіка не запустилась — гра не працюватиме. ' + e.message);
@@ -157,7 +158,40 @@ function boot(renderer) {
   }
 
   // ================= Меню =================
-  function showMenu() { unlockPointer(); $('menu').hidden = false; $('resume').hidden = !g; renderWorlds(); }
+  function showMenu() { unlockPointer(); $('menu').hidden = false; $('settings').hidden = true; $('menu').firstElementChild.hidden = false; $('resume').hidden = !g; renderWorlds(); }
+
+  // ---- Налаштування: графіка (після перезавантаження), тіні й дальність (одразу) ----
+  const info = renderer.R.info || null, cfg = loadSettings(QS);
+  const radios = (name) => [...document.querySelectorAll(`input[name=${name}]`)];
+  const showCard = (set) => { $('settings').hidden = !set; $('menu').firstElementChild.hidden = set; };
+  $('openSettings').onclick = () => showCard(true);
+  $('back').onclick = () => showCard(false);
+  for (const r of radios('gpu')) {
+    r.checked = r.value === (info ? info.device : 'webgl2');
+    if (r.value === 'webgpu' && !navigator.gpu) { r.disabled = true; $('gpuNote').hidden = false; }
+    r.onchange = () => { saveSetting('gpu', r.value); $('reload').hidden = !info || r.value === info.device; };
+  }
+  for (const r of radios('shadows')) {
+    r.checked = r.value === cfg.shadows;
+    r.onchange = () => {
+      saveSetting('shadows', r.value);
+      if (renderer.setShadows) { renderer.setShadows(r.value); if (renderer.warmUp) renderer.warmUp(); }   // перекомпіляція — поки відкрите меню
+    };
+  }
+  if (info && !info.pcss) $('pcssNote').hidden = false;
+  $('reload').onclick = async () => {
+    if (g) { await putWorld(snapshot()); try { sessionStorage.setItem(RESUME_KEY, g.rec.id); } catch { /* недоступне */ } }
+    location.reload();
+  };
+  if (info && cfg.gpu === 'webgpu' && info.device !== 'webgpu') setTimeout(() => toast('WebGPU недоступний — WebGL2'), 0);
+  // після перезавантаження через зміну графіки — одразу в той самий світ і місце
+  (async () => {
+    let id = null;
+    try { id = sessionStorage.getItem(RESUME_KEY); sessionStorage.removeItem(RESUME_KEY); } catch { /* недоступне */ }
+    if (!id) return;
+    const rec = (await listWorlds()).find((w) => w.id === id);
+    if (rec) startWorld(rec);
+  })();
   // Третя особа: клацання по світу захоплює мишу; браузер відпустив (Esc) — меню, як і на Esc без захоплення
   $('gl').addEventListener('mousedown', (e) => { if (e.button === 0 && g && g.me.placed && camera.mode === THIRD && $('menu').hidden) lockPointer($('gl')); });
   let unlockQuiet = false, unlockedAt = 0;

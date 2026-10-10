@@ -67,6 +67,11 @@
   .row input { flex: 1; }
   .range { align-items: center; font-size: 13px; }
   .range span { min-width: 210px; }
+  button.wide { width: 100%; margin-top: 20px; }
+  .seg { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+  .seg label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+  .seg label:has(input:disabled) { opacity: .5; cursor: default; }
+  .note { font-size: 12px; color: var(--muted); margin-top: 6px; }
   #worlds { display: grid; gap: 8px; }
   .world { display: flex; align-items: center; gap: 8px; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
   .world .info { flex: 1; min-width: 0; }
@@ -109,11 +114,33 @@
     <h2>Світи</h2>
     <div id="worlds"></div>
     <div id="err" hidden></div>
-    <h2>Налаштування</h2>
-    <label class="row range"><span id="viewLabel">Дальність</span><input id="view" type="range" min="8" max="32" step="1"></label>
+    <button id="openSettings" class="wide">Налаштування</button>
     <div class="foot">
       <span>Зберігається в цьому браузері</span>
       <span><button id="import">Імпорт з файлу</button><input id="file" type="file" accept=".json,application/json" hidden></span>
+    </div>
+  </div>
+  <div class="card" id="settings" hidden>
+    <h1>Налаштування</h1>
+    <div class="sub">Баланс якості й швидкості — на ваш вибір; зберігається в цьому браузері</div>
+    <h2>Графіка</h2>
+    <div class="seg" id="gpuSeg">
+      <label><input type="radio" name="gpu" value="webgl2"> WebGL2</label>
+      <label><input type="radio" name="gpu" value="webgpu"> WebGPU</label>
+    </div>
+    <div class="note" id="gpuNote" hidden>Браузер не підтримує WebGPU</div>
+    <h2>Тіні</h2>
+    <div class="seg" id="shSeg">
+      <label><input type="radio" name="shadows" value="pcf3"> PCF3 — чіткі краї, швидше</label>
+      <label><input type="radio" name="shadows" value="pcss"> PCSS — м'які, повільніше</label>
+    </div>
+    <div class="note" id="pcssNote" hidden>Відеокарта не підтримує — буде PCF3</div>
+    <h2>Дальність</h2>
+    <label class="row range"><span id="viewLabel">Дальність</span><input id="view" type="range" min="8" max="32" step="1"></label>
+    <div class="note">Зміна графіки — після перезавантаження (гру буде збережено)</div>
+    <div class="row foot">
+      <button id="back">Назад</button>
+      <button id="reload" class="main" hidden>Перезавантажити</button>
     </div>
   </div>
 </div>
