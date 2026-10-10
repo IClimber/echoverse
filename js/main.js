@@ -122,7 +122,7 @@ function boot(renderer) {
     toggleCamera() { toggleCam(); return camera.mode; },
     // Скинути кільця замірів (інтервали кадрів, час GPU) — заміри з чистого аркуша
     resetFrames() { frameN = 0; frameI = 0; if (renderer.R.gpuHist) renderer.R.gpuHistI = 0; },
-    // ?pc: тіні сонця — 'off' | 'pcss' | 'pcf3' | {властивості світла PlayCanvas}
+    // Тип тіней головного світла — 'pcf3' | 'pcss' (як у налаштуваннях) → фактичний
     shadows(m) { return renderer.setShadows(m); },
     // Рівні деталізації далекої землі: false — усе повне (порівняння)
     setLod(on) { setLod(on); streamer.force(); },

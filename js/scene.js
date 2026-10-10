@@ -466,7 +466,7 @@ export async function createScene(canvas, settings = {}) {
       // числа минулого кадру: виклики, тіні (кидачі й трикутники, що пішли в каскади)
       stats.up = stats.upBytes; stats.upBytes = 0; stats.draws = G.R.draws;
       let shTris = 0, shDraws = 0;
-      for (const s of LG.slots) if (s.on) for (let c = 0; c < s.l.numCascades; c++) {
+      for (const s of LG.slots) if (s.on && s.l.castShadows) for (let c = 0; c < s.l.numCascades; c++) {
         const rd = s.l.light.getRenderData(cam.camera, c);
         for (const m of rd.visibleCasters) { shDraws++; shTris += (m.shV ?? m.mesh.primitive[0].count) / 3; }
       }

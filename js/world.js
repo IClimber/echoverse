@@ -35,7 +35,7 @@ export function createWorld(seed, onMesh) {
   const entsOf = (d, n) => {
     const k = `${d}:${n}`;
     let E = ents.get(k);
-    if (!E) ents.set(k, (E = createEntities({ chunk: CS, zone: 2, keyOf: ck, catchUp: (b) => settle(b, W.probe(d, n)) })));
+    if (!E) ents.set(k, (E = createEntities({ chunk: CS, zone: 2, keyOf: ck, catchUp: (b) => { if (!b.sleep) settle(b, W.probe(d, n)); } })));
     return E;
   };
   let keep = keepFor(256);

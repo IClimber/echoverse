@@ -147,7 +147,7 @@ export function createLights(G, { shadows = 'pcf3' } = {}) {
     // напрямлені з тінями на кадр: [{dir — до світила, shD}] (для regions.cullCasters)
     dirs(out = []) {
       out.length = 0;
-      for (const s of slots) if (s.on && s.l.castShadows) out.push({ dir: s.dir, shD: s.l.shadowDistance });
+      for (const s of slots) if (s.on && s.l.castShadows) { s.sh ??= { dir: s.dir, shD: 0 }; s.sh.shD = s.l.shadowDistance; out.push(s.sh); }
       return out;
     },
     // увімкнені точкові джерела й прожектори з тінями: [{pos, range}] (наші координати)
