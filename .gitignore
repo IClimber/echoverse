@@ -4,3 +4,4 @@ echoverse-prompts/
 docs/playcanvas/*
 !docs/playcanvas/README.md
 !docs/playcanvas/fetch.sh
+tmp/

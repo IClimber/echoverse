@@ -1,0 +1,264 @@
+// js/engine/graphics/chunks.js — шматки шейдерів StandardMaterial PlayCanvas (GLSL і WGSL), як у прикладі
+// engine/examples/shaders/trees (material.getShaderChunks(мова).add). Типові шматки — engine/src/scene/shader-lib/*/chunks.
+// Своє — лише де PlayCanvas не має свого:
+// - альбедо з масиву текстур (шар — номер матеріалу у вершині), поворот клітинок, плин; шов далечі (ECO_RING_IN / OUT);
+// - таблиця матеріалів eco_mat[32] (x — емісія, y — гойдання вітром, z — поворот клітинок: 0 будь-який, 1 лише 180°,
+//   2 без повороту; w — плин текстури);
+// - емісія: лава (eco_mat.x) і мінімум світла (eco_minLight) — поверх освітлення PlayCanvas;
+// - вітер і кривизна планети — у transformVS (світові координати; тіньовий прохід — той самий шматок, тож тіні теж);
+// - розчинення біля ока (ECO_FADE) і «вікно» до гравця (ECO_CUT / ECO_CUTF) — через opacityPS і дизеринг PlayCanvas
+//   (opacityDither, transparency.md).
+// Варіанти: ECO_MATCOL — матеріал у color.a (float-меші), інакше — у pos.w, а AO — у color.a (aoVertexColor)
+import { pc } from './app.js';
+
+export const MAT_N = 32;
+
+// ---------------- GLSL ----------------
+const DECL_VS = `
+uniform vec4 eco_wind;
+uniform float eco_curve;
+uniform vec3 eco_target;
+uniform vec4 eco_mat[${MAT_N}];
+varying float vEcoMat;
+`;
+const MAIN_END_VS = `
+#ifdef ECO_MATCOL
+  #ifdef VERTEX_COLOR
+    vEcoMat = floor(vertex_color.a * 255.0 + 0.5);
+  #else
+    vEcoMat = 0.0;
+  #endif
+#else
+  vEcoMat = floor(vertex_position.w * 65535.0 + 0.5);
+#endif
+`;
+const TRANSFORM_ADD = `
+	#ifdef ECO_WIND
+		float eco_wm = floor(vertex_position.w * 65535.0 + 0.5);
+		if (eco_wm < ${MAT_N}.0 && eco_mat[int(eco_wm)].y > 0.5) posW.xz += eco_wind.xy * (0.55 + 0.45 * sin(eco_wind.z * 1.9 + posW.x * 0.9 + posW.z * 1.3 + posW.y * 0.7));
+	#endif
+	#ifdef ECO_CURVE
+		vec2 eco_dc = posW.xz - eco_target.xz;
+		posW.y -= dot(eco_dc, eco_dc) * eco_curve;
+	#endif
+`;
+const DECL_PS = `
+uniform sampler2DArray uTexArr;
+uniform vec3 eco_target;
+uniform float eco_seam;
+uniform float eco_time;
+uniform float eco_minLight;
+uniform vec4 eco_mat[${MAT_N}];
+uniform vec3 eco_eye;
+uniform vec2 eco_fade;
+uniform vec4 eco_cut;
+uniform vec4 eco_cut2;
+uniform vec2 eco_cut3;
+varying float vEcoMat;
+vec3 eco_col;
+`;
+// Альбедо: колір вершини (лінійний — vertexColorGamma) × текстура шару «матеріал» (sRGB — вибірка лінійна; 128 = ×1:
+// (128/255)^2,2 × 4,595 = 1). Координати — проєкція світової позиції на площину грані (PlayCanvas y — угору); кожна
+// клітинка — зі своїм поворотом і віддзеркаленням (за хешем клітинки й матеріалу), градієнти — до повороту (textureGrad)
+const DIFFUSE_PS = `
+void getAlbedo() {
+  #ifdef ECO_RING_IN
+    if (length(vPositionW.xz - eco_target.xz) > eco_seam) discard;
+  #endif
+  #ifdef ECO_RING_OUT
+    if (length(vPositionW.xz - eco_target.xz) < eco_seam) discard;
+  #endif
+  float eco_m = vEcoMat;
+  vec4 eco_p = eco_mat[int(min(eco_m, ${MAT_N - 1}.0))];
+  vec3 an = abs(vNormalW), tp = vPositionW;
+  vec2 uv = an.y >= max(an.x, an.z) ? tp.xz : (an.x >= an.z ? vec2(tp.z, -tp.y) : vec2(tp.x, -tp.y));
+  uv += eco_time * eco_p.w * vec2(0.05, 0.03);
+  vec2 g1 = dFdx(uv), g2 = dFdy(uv), cell = floor(uv), f = uv - cell - 0.5;
+  if (eco_p.z < 1.5) {
+    float h = fract(sin(dot(vec3(cell, eco_m), vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+    bool dir = eco_p.z > 0.5;
+    int k = dir ? (h < 0.5 ? 0 : 2) : int(h * 4.0);
+    mat2 Rm = k == 0 ? mat2(1.0, 0.0, 0.0, 1.0) : k == 1 ? mat2(0.0, 1.0, -1.0, 0.0) : k == 2 ? mat2(-1.0, 0.0, 0.0, -1.0) : mat2(0.0, -1.0, 1.0, 0.0);
+    if (!dir && fract(h * 7.31) > 0.5) Rm = Rm * mat2(-1.0, 0.0, 0.0, 1.0);
+    f = Rm * f; g1 = Rm * g1; g2 = Rm * g2;
+  }
+  eco_col = vVertexColor.rgb * textureGrad(uTexArr, vec3(f + 0.5, eco_m), g1, g2).rgb * 4.595;
+  dAlbedo = eco_col * (1.0 - eco_p.x);
+}
+`;
+const EMISSIVE_PS = `
+void getEmission() {
+  float eco_e = eco_mat[int(min(vEcoMat, ${MAT_N - 1}.0))].x;
+  dEmission = eco_col * max(eco_e, eco_minLight);
+}
+`;
+// Розчинення й «вікно». Дизеринг PlayCanvas (opacityDitherPS) відкидає піксель, коли alpha < шум^2,2 (шум рівномірний),
+// тож лишається частка alpha^(1/2,2): частка t — alpha = t^2,2 (половина пікселів — 0,5^2,2 = 0,2176).
+// eco_fade — від, до (відстань від ока); вимкнено — (−2, −1). eco_cut: xyz — точка гравця, w — cos кута конуса
+// (перспектива) чи радіус (орто); eco_cut2: xyz — напрям погляду (орто), w — 0 вимкнено, 1 перспектива, 2 орто;
+// eco_cut3: x — як eco_cut.w для рослин (ширше), y — висота колін (PlayCanvas y)
+const OPACITY_PS = `
+uniform float material_alphaDitherScale;
+void getOpacity() {
+  dAlpha = 1.0;
+  float eco_d = distance(vPositionW, eco_eye);
+  #ifdef ECO_FADE
+    dAlpha = pow(clamp((eco_d - eco_fade.x) / (eco_fade.y - eco_fade.x), 0.0, 1.0), 2.2);
+  #endif
+  #if defined(ECO_CUT) || defined(ECO_CUTF)
+    if (eco_cut2.w > 0.5 && vPositionW.y > eco_cut3.y && eco_d < distance(eco_cut.xyz, eco_eye)) {
+      #ifdef ECO_CUTF
+        float eco_k = eco_cut3.x;
+      #else
+        float eco_k = eco_cut.w;
+      #endif
+      bool eco_in = eco_cut2.w < 1.5 ? dot(normalize(vPositionW - eco_eye), normalize(eco_cut.xyz - eco_eye)) > eco_k
+                                     : length(cross(vPositionW - eco_cut.xyz, eco_cut2.xyz)) < eco_k;
+      if (eco_in) dAlpha = min(dAlpha, 0.2176);
+    }
+  #endif
+}
+`;
+
+// ---------------- WGSL: уніформи — uniform.ім'я, текстура — пара ім'я + ім'яSampler, варіації в PS — глобальні ----------------
+const DECL_VS_W = `
+uniform eco_wind: vec4f;
+uniform eco_curve: f32;
+uniform eco_target: vec3f;
+uniform eco_mat: array<vec4f, ${MAT_N}>;
+varying vEcoMat: f32;
+`;
+const MAIN_END_VS_W = `
+#ifdef ECO_MATCOL
+  #ifdef VERTEX_COLOR
+    output.vEcoMat = floor(vertex_color.a * 255.0 + 0.5);
+  #else
+    output.vEcoMat = 0.0;
+  #endif
+#else
+  output.vEcoMat = floor(vertex_position.w * 65535.0 + 0.5);
+#endif
+`;
+const TRANSFORM_ADD_W = `
+	#ifdef ECO_WIND
+		let eco_wm: f32 = floor(vertex_position.w * 65535.0 + 0.5);
+		if (eco_wm < ${MAT_N}.0) {
+			if (uniform.eco_mat[i32(eco_wm)].y > 0.5) {
+				let eco_s: f32 = 0.55 + 0.45 * sin(uniform.eco_wind.z * 1.9 + posW.x * 0.9 + posW.z * 1.3 + posW.y * 0.7);
+				posW.x = posW.x + uniform.eco_wind.x * eco_s;
+				posW.z = posW.z + uniform.eco_wind.y * eco_s;
+			}
+		}
+	#endif
+	#ifdef ECO_CURVE
+		let eco_dc: vec2f = posW.xz - uniform.eco_target.xz;
+		posW.y = posW.y - dot(eco_dc, eco_dc) * uniform.eco_curve;
+	#endif
+`;
+const DECL_PS_W = `
+var uTexArr: texture_2d_array<f32>;
+var uTexArrSampler: sampler;
+uniform eco_target: vec3f;
+uniform eco_seam: f32;
+uniform eco_time: f32;
+uniform eco_minLight: f32;
+uniform eco_mat: array<vec4f, ${MAT_N}>;
+uniform eco_eye: vec3f;
+uniform eco_fade: vec2f;
+uniform eco_cut: vec4f;
+uniform eco_cut2: vec4f;
+uniform eco_cut3: vec2f;
+varying vEcoMat: f32;
+var<private> eco_col: vec3f;
+`;
+// Похідні (dpdx) — лише в рівномірному потоці керування: координати — через select, шов (discard) — у кінці
+const DIFFUSE_PS_W = `
+fn getAlbedo() {
+  let eco_m: f32 = vEcoMat;
+  let eco_p: vec4f = uniform.eco_mat[i32(min(eco_m, ${MAT_N - 1}.0))];
+  let an: vec3f = abs(vNormalW);
+  let tp: vec3f = vPositionW;
+  var uv: vec2f = select(select(vec2f(tp.x, -tp.y), vec2f(tp.z, -tp.y), an.x >= an.z), tp.xz, an.y >= max(an.x, an.z));
+  uv = uv + uniform.eco_time * eco_p.w * vec2f(0.05, 0.03);
+  var g1: vec2f = dpdx(uv);
+  var g2: vec2f = dpdy(uv);
+  let cell: vec2f = floor(uv);
+  var f: vec2f = uv - cell - 0.5;
+  if (eco_p.z < 1.5) {
+    let h: f32 = fract(sin(dot(vec3f(cell, eco_m), vec3f(12.9898, 78.233, 37.719))) * 43758.5453);
+    let dir: bool = eco_p.z > 0.5;
+    var k: i32 = i32(h * 4.0);
+    if (dir) { k = select(2, 0, h < 0.5); }
+    var Rm: mat2x2f = mat2x2f(1.0, 0.0, 0.0, 1.0);
+    if (k == 1) { Rm = mat2x2f(0.0, 1.0, -1.0, 0.0); } else if (k == 2) { Rm = mat2x2f(-1.0, 0.0, 0.0, -1.0); } else if (k == 3) { Rm = mat2x2f(0.0, -1.0, 1.0, 0.0); }
+    if (!dir && fract(h * 7.31) > 0.5) { Rm = Rm * mat2x2f(-1.0, 0.0, 0.0, 1.0); }
+    f = Rm * f; g1 = Rm * g1; g2 = Rm * g2;
+  }
+  eco_col = vVertexColor.rgb * textureSampleGrad(uTexArr, uTexArrSampler, f + 0.5, i32(eco_m), g1, g2).rgb * 4.595;
+  dAlbedo = eco_col * (1.0 - eco_p.x);
+  #ifdef ECO_RING_IN
+    if (length(vPositionW.xz - uniform.eco_target.xz) > uniform.eco_seam) { discard; }
+  #endif
+  #ifdef ECO_RING_OUT
+    if (length(vPositionW.xz - uniform.eco_target.xz) < uniform.eco_seam) { discard; }
+  #endif
+}
+`;
+const EMISSIVE_PS_W = `
+fn getEmission() {
+  let eco_e: f32 = uniform.eco_mat[i32(min(vEcoMat, ${MAT_N - 1}.0))].x;
+  dEmission = eco_col * max(eco_e, uniform.eco_minLight);
+}
+`;
+const OPACITY_PS_W = `
+uniform material_alphaDitherScale: f32;
+fn getOpacity() {
+  dAlpha = 1.0;
+  let eco_d: f32 = distance(vPositionW, uniform.eco_eye);
+  #ifdef ECO_FADE
+    dAlpha = pow(clamp((eco_d - uniform.eco_fade.x) / (uniform.eco_fade.y - uniform.eco_fade.x), 0.0, 1.0), 2.2);
+  #endif
+  #if defined(ECO_CUT) || defined(ECO_CUTF)
+    if (uniform.eco_cut2.w > 0.5 && vPositionW.y > uniform.eco_cut3.y && eco_d < distance(uniform.eco_cut.xyz, uniform.eco_eye)) {
+      #ifdef ECO_CUTF
+        let eco_k: f32 = uniform.eco_cut3.x;
+      #else
+        let eco_k: f32 = uniform.eco_cut.w;
+      #endif
+      var eco_in: bool;
+      if (uniform.eco_cut2.w < 1.5) { eco_in = dot(normalize(vPositionW - uniform.eco_eye), normalize(uniform.eco_cut.xyz - uniform.eco_eye)) > eco_k; }
+      else { eco_in = length(cross(vPositionW - uniform.eco_cut.xyz, uniform.eco_cut2.xyz)) < eco_k; }
+      if (eco_in) { dAlpha = min(dAlpha, 0.2176); }
+    }
+  #endif
+}
+`;
+
+// transformVS — типовий шматок рушія з нашим кодом після рядка-якоря (обчислення світової позиції)
+const ANCHOR = {
+  [pc.SHADERLANGUAGE_GLSL]: 'vec4 posW = modelMatrix * vec4(localPos, 1.0);',
+  [pc.SHADERLANGUAGE_WGSL]: 'var posW: vec4f = modelMatrix * vec4f(localPos, 1.0);',
+};
+const cache = new Map();
+// Шматки для мови lang; opacity — лише для варіантів з дизерингом (розчинення, «вікно»)
+export function chunksFor(dev, lang, { opacity = false } = {}) {
+  let C = cache.get(lang);
+  if (!C) {
+    const W = lang === pc.SHADERLANGUAGE_WGSL;
+    const base = pc.ShaderChunks.get(dev, lang).get('transformVS'), a = ANCHOR[lang];
+    if (!base || !base.includes(a)) throw new Error('transformVS PlayCanvas змінився');
+    C = {
+      litUserDeclarationVS: W ? DECL_VS_W : DECL_VS,
+      litUserMainEndVS: W ? MAIN_END_VS_W : MAIN_END_VS,
+      transformVS: base.replace(a, a + (W ? TRANSFORM_ADD_W : TRANSFORM_ADD)),
+      litUserDeclarationPS: W ? DECL_PS_W : DECL_PS,
+      diffusePS: W ? DIFFUSE_PS_W : DIFFUSE_PS,
+      emissivePS: W ? EMISSIVE_PS_W : EMISSIVE_PS,
+      opacityPS: W ? OPACITY_PS_W : OPACITY_PS,
+    };
+    cache.set(lang, C);
+  }
+  if (opacity) return C;
+  const { opacityPS: _o, ...rest } = C;
+  return rest;
+}
