@@ -1,10 +1,12 @@
-// js/pc/render.js — прототип ?pc: той самий API, що в js/render.js, але кадр малює PlayCanvas 2.23.2. Регіони секцій —
+// js/pc/render.js — прототип ?pc: той самий API, що в js/render.js, але кадр малює PlayCanvas 2.23.2 — на WebGL2 або WebGPU
+// (?gpu=webgpu; пристрій — createGraphicsDevice + AppBase, як в офіційних прикладах). Регіони секцій —
 // арени щільних вершин (один pc.Mesh на арену) і сітки регіону з командами multi-draw: камера — свої (видимі діапазони),
-// тіні сонця — спільні (кидачі в межах видимого). Світло, тіні (каскади, PCSS), туман, гама й тональна компресія —
-// PlayCanvas; своє — альбедо з масиву текстур, шов далечі, небо (js/pc/shaders.js). Не малює: тіла, опади, гойдання від
-// вітру, розчинення біля ока, «вікно», LOD, кривизну планети, світіння лави, підсвічування фігури під час заряджання.
+// тіні сонця — спільні (кидачі блоками, лише попереду й ближче за дальність тіней — cullShadow). Світло, тіні (каскади,
+// PCF / PCSS), туман, гама й тональна компресія — PlayCanvas; своє — альбедо з масиву текстур, шов далечі, небо
+// (js/pc/shaders.js, GLSL і WGSL). Не малює: тіла, опади, гойдання від вітру, розчинення біля ока, «вікно», LOD, кривизну
+// планети, світіння лави, підсвічування фігури під час заряджання.
 import * as pc from 'https://cdn.jsdelivr.net/npm/playcanvas@2.23.2/build/playcanvas.mjs';
-import { DECL_PS, DIFFUSE_PS, SKY_VS, SKY_FS } from './shaders.js';
+import { DECL_PS, DIFFUSE_PS, SKY_VS, SKY_FS, DECL_WGSL, DIFFUSE_WGSL, SKY_VS_WGSL, SKY_FS_WGSL } from './shaders.js';
 import { createAlloc } from '../arena.js';
 import { CS } from '../gen/chunk.js';
 import { SEA, MAX_AMP } from '../universe.js';
@@ -42,29 +44,40 @@ const MK = {
 // Кидачі тіней — окремі сітки в шарі «Тіні» (його бачить світло, не камера), по блоку BS×BS стовпців регіону: кожна зі своєю
 // AABB, тож PlayCanvas сам відсікає кидачів для кожного каскаду (стовпець уздовж світла навколо частини піраміди камери,
 // ShadowRendererDirectional.cull). Види: 0 — тверде разом з далекими рослинами й камінням секції (в арені вони поруч —
-// один діапазон замість двох; матеріал без відсікання граней), 2 — рослини зблизька. Ціна тіней — переважно кількість
-// діапазонів (карта 256 замість 2048 майже не дешевша), тож менше діапазонів — дешевше
+// один діапазон замість двох; матеріал без відсікання граней), 2 — рослини зблизька
 const BS = 2, NB = RS / BS, SK = [['obj', 'op'], null, ['fl', 'fl']];
-// Тіні — лише ближче SHADOW_D (від камери вздовж погляду; далі — без тіней, як у рушіях: Unreal — 200 м на 3 каскади)
+// Тіні — лише ближче SHADOW_D (глибина від камери вздовж погляду, як shadowDistance PlayCanvas; далі — без тіней). Шейдерпаки
+// Minecraft (OptiFine / Iris, «Shadow Distance») — так само: типово ~128 блоків, кидачі далі не малюються
 const SHADOW_D = 128;
 // Тіні сонця — як в офіційних прикладах PlayCanvas (engine/examples graphics/shadow-cascades і shadow-soft): 4 каскади
-// в одній карті 2048, розподіл 0,5, змішування 0,1, PCF3; зміщення 0,3 / 0,2; м'які — PCSS 16 / 16 семплів, penumbraFalloff 4.
-// penumbraSize у PCSS напрямленого — частка глибини каскаду (радіус пошуку = penumbraSize × глибина / ширина каскаду):
-// 0,03 з прикладу (сцена 1000 одиниць) у нас розмиває, 0,01 — м'яка без сходинок.
-// stagger — дальні каскади рідше, як у прикладі: 1-й щокадру, 2-й раз на 5 кадрів, 3-й — на 10, 4-й — на 15;
-// 'spread' — ті самі періоди з рознесеними фазами (кадри ≡ 0 mod 5, 2 mod 10, 4 mod 15 не збігаються ніколи: за кадр — не
-// більше одного дальнього каскаду), true — фази з прикладу (раз на 30 кадрів оновлюються всі разом)
+// в одній карті 2048, розподіл 0,5, змішування 0,1, PCF3; зміщення 0,3 / 0,2; м'які — PCSS 16 / 16 семплів, penumbraFalloff 4;
+// усі каскади щокадру (типово в прикладі й рушії). penumbraSize у PCSS напрямленого — частка глибини каскаду: 0,03 з
+// прикладу (сцена 1000 одиниць) у нас розмиває, 0,01 — м'яка без сходинок.
+// stagger (не типово) — дальні каскади рідше, як перемикач у прикладі: 1-й щокадру, 2-й раз на 5 кадрів, 3-й — на 10,
+// 4-й — на 15; 'spread' — ті самі періоди з рознесеними фазами, true — фази з прикладу
 const CASC = { castShadows: true, numCascades: 4, shadowResolution: 2048, cascadeDistribution: 0.5, cascadeBlend: 0.1, shadowBias: 0.3, normalOffsetBias: 0.2 };
 const SHADOW = {                               // ?dev eco.shadows(назва | {властивості світла, stagger, casters})
   off: { castShadows: false },
-  pcf3: { ...CASC, shadowType: pc.SHADOW_PCF3_32F, stagger: 'spread', shadowDistance: SHADOW_D, casters: true },
-  pcss: { ...CASC, shadowType: pc.SHADOW_PCSS_32F, shadowSamples: 16, shadowBlockerSamples: 16, penumbraSize: 0.01, penumbraFalloff: 4, stagger: 'spread', shadowDistance: SHADOW_D, casters: true },
+  pcf3: { ...CASC, shadowType: pc.SHADOW_PCF3_32F, stagger: false, shadowDistance: SHADOW_D, casters: true },
+  pcss: { ...CASC, shadowType: pc.SHADOW_PCSS_32F, shadowSamples: 16, shadowBlockerSamples: 16, penumbraSize: 0.01, penumbraFalloff: 4, stagger: false, shadowDistance: SHADOW_D, casters: true },
+  // дешевші варіанти: PCF5 — ширше розмиття PCF (м'якший край без контактного твердіння), PCSS на 8 / 8 семплах
+  pcf5: { ...CASC, shadowType: pc.SHADOW_PCF5_32F, stagger: false, shadowDistance: SHADOW_D, casters: true },
+  pcss8: { ...CASC, shadowType: pc.SHADOW_PCSS_32F, shadowSamples: 8, shadowBlockerSamples: 8, penumbraSize: 0.01, penumbraFalloff: 4, stagger: false, shadowDistance: SHADOW_D, casters: true },
 };
 
-export function createRenderer(canvas) {
-  const app = new pc.Application(canvas, { graphicsDeviceOptions: { antialias: true, alpha: false, powerPreference: 'high-performance' } });
-  const dev = app.graphicsDevice;
+// gpu: 'webgpu' — WebGPU, а без нього — WebGL2 (createGraphicsDevice сам відкочується); інакше WebGL2: на еталонній машині
+// на екрані (GTX 1660 Ti, Chrome 155, Linux, полотно 3840×2160) він швидший — гори на дальності 512 з PCF3: 161 проти
+// 131 к/с (10.10.2026)
+export async function createRenderer(canvas, { gpu } = {}) {
+  const deviceTypes = gpu === 'webgpu' ? [pc.DEVICETYPE_WEBGPU, pc.DEVICETYPE_WEBGL2] : [pc.DEVICETYPE_WEBGL2];
+  const dev = await pc.createGraphicsDevice(canvas, { deviceTypes, antialias: true, alpha: false, powerPreference: 'high-performance' });
   dev.maxPixelRatio = Math.min(2, devicePixelRatio || 1);
+  const ao = new pc.AppOptions();
+  ao.graphicsDevice = dev;
+  ao.componentSystems = [pc.CameraComponentSystem, pc.LightComponentSystem];
+  ao.resourceHandlers = [];
+  const app = new pc.AppBase(canvas);
+  app.init(ao);
   app.setCanvasFillMode(pc.FILLMODE_NONE); app.setCanvasResolution(pc.RESOLUTION_AUTO);
   if (dev.gpuProfiler) dev.gpuProfiler.enabled = true;
   const layer = app.scene.layers.getLayerByName('World'), skyLayer = app.scene.layers.getLayerByName('Skybox');
@@ -101,9 +114,10 @@ export function createRenderer(canvas) {
     m.cull = cull;
     if (blend) { m.blendType = pc.BLEND_NORMAL; m.depthWrite = false; }
     if (ring) m.setDefine(ring, true);
-    const ch = m.getShaderChunks(pc.SHADERLANGUAGE_GLSL);
-    ch.set('litUserDeclarationPS', DECL_PS); ch.set('diffusePS', DIFFUSE_PS);
-    m.shaderChunksVersion = pc.CHUNKAPI_2_8;
+    const gl = m.getShaderChunks(pc.SHADERLANGUAGE_GLSL), wg = m.getShaderChunks(pc.SHADERLANGUAGE_WGSL);
+    gl.set('litUserDeclarationPS', DECL_PS); gl.set('diffusePS', DIFFUSE_PS);
+    wg.set('litUserDeclarationPS', DECL_WGSL); wg.set('diffusePS', DIFFUSE_WGSL);
+    m.shaderChunksVersion = '2.23';
     m.update();
     return (mats[name] = m);
   };
@@ -125,7 +139,8 @@ export function createRenderer(canvas) {
     },
     get cullOn() { return cullOn; },
     setRainMap() {},
-    info: { multiDraw: !!dev.extMultiDraw, floatRT: !!dev.textureFloatRenderable, floatFilter: !!dev.textureFloatFilterable },
+    app,                                           // для замірів і знімків (?dev)
+    info: { device: dev.deviceType, multiDraw: dev.isWebGPU ? 'drawIndirect' : !!dev.extMultiDraw, floatRT: !!dev.textureFloatRenderable, floatFilter: !!dev.textureFloatFilterable },
   };
 
   // Кадр гри — з подією 'update' PlayCanvas (рендер іде одразу після неї)
@@ -365,20 +380,63 @@ export function createRenderer(canvas) {
       if (!SK[j]) continue;
       const i = b * 3 + j, key = i, [mk, arena] = SK[j];
       let m = G.sh.get(key);
-      if (!SN[i] || !G[arena]) { if (m) m.visible = false; continue; }
+      if (!SN[i] || !G[arena]) { if (m) { m.visible = false; m.shV = 0; } continue; }
       if (!m) {
         m = new pc.MeshInstance(G[arena].mesh, mats[mk], G.node);
-        m.castShadow = true; m.sh = md(m, null, 16); m.shCap = 16; m.kind = j;
+        m.castShadow = true; m.sh = md(m, null, 16); m.shCap = 16; m.kind = j; m.b = new Float64Array(6);
         shLayer.addMeshInstances([m]);
         G.sh.set(key, m);
       }
       const o = b * 6, bb = new pc.BoundingBox();
       bb.setMinMax(new pc.Vec3((SB[o] + PO[0]) / S16, (SB[o + 1] + PO[1]) / S16, (SB[o + 2] + PO[2]) / S16), new pc.Vec3((SB[o + 3] + PO[0]) / S16, (SB[o + 4] + PO[1]) / S16, (SB[o + 5] + PO[2]) / S16));
       m.setCustomAabb(bb);
+      m.b.set(SB.subarray(o, o + 6));                 // межі блоку в клітинках від кута регіону — для cullShadow
       m.shV = fill(m, 'sh', SF[i], SC[i], 0, SN[i]);
-      m.visible = true;
+      m.visible = false;                              // вмикає cullShadow щокадру
     }
     G.shDirty = false;
+  }
+
+  // Кидачі тіней на кадр (усе інше PlayCanvas не бачить). Кидач потрібен, лише якщо його тінь може впасти в зріз піраміди
+  // камери до глибини shD (там PlayCanvas малює тіні): коробка блоку, витягнута вздовж світла, перетинає зріз. Перевірка —
+  // площинами зрізу, повернутими від сонця (n·L ≤ 0: уздовж світла ними не вийти), — зріз, «розтягнутий до світла», як
+  // у Cyberpunk 2077 (SIGGRAPH 2021, «Shadows Optimizations in Cyberpunk 2077»). Плюс межа відстані від ока (cap): у
+  // шейдерпаках Minecraft кидачі далі за Shadow Distance не малюються — так само й тут (тіні далеких гір не падають).
+  // Без цього каскад PlayCanvas бере все в нескінченному стовпці вздовж світла: ~2 млн трикутників у дальньому каскаді
+  const shOn = [], PL = new Float64Array(24);
+  function cullShadow(U, m, eye, ud, L, t, shD) {
+    for (const s of shOn) s.visible = false;
+    shOn.length = 0;
+    if (!U || !sun.castShadows) return;
+    let np = 0;
+    const plane = (a, b, c, d) => {
+      if (a * L[0] + b * L[1] + c * L[2] > 1e-6 * Math.hypot(a, b, c)) return;   // до сонця — площина не обмежує
+      PL[np * 4] = a; PL[np * 4 + 1] = b; PL[np * 4 + 2] = c; PL[np * 4 + 3] = d; np++;
+    };
+    // площини піраміди камери з m (внутрішні; Gribb — Hartmann): ліва, права, низ, верх, ближня; дальня — на глибині shD
+    plane(m[3] + m[0], m[7] + m[4], m[11] + m[8], m[15] + m[12]); plane(m[3] - m[0], m[7] - m[4], m[11] - m[8], m[15] - m[12]);
+    plane(m[3] + m[1], m[7] + m[5], m[11] + m[9], m[15] + m[13]); plane(m[3] - m[1], m[7] - m[5], m[11] - m[9], m[15] - m[13]);
+    plane(m[3] + m[2], m[7] + m[6], m[11] + m[10], m[15] + m[14]);
+    plane(ud[0], ud[1], ud[2], shD - (ud[0] * eye[0] + ud[1] * eye[1] + ud[2] * eye[2]));
+    const cap = shD * 1.46 + 16;                   // найдальша точка зрізу (кут екрана 16:9, FOV 55°) + запас
+    const outside = (x0, y0, z0, x1, y1, z1) => {
+      if (Math.hypot(Math.max(x0 - eye[0], 0, eye[0] - x1), Math.max(y0 - eye[1], 0, eye[1] - y1)) > cap) return true;
+      for (let i = 0; i < np; i++) {
+        const a = PL[i * 4], b = PL[i * 4 + 1], c = PL[i * 4 + 2];
+        if (a * (a >= 0 ? x1 : x0) + b * (b >= 0 ? y1 : y0) + c * (c >= 0 ? z1 : z0) + PL[i * 4 + 3] < 0) return true;
+      }
+      return false;
+    };
+    for (const G of U.regions.values()) {
+      if (!G.sh.size) continue;
+      const ox = G.rx * RW - t[0], oy = G.ry * RW - t[1], oz = G.rz * RH - t[2], g = G.bb;
+      if (!(g[0] <= g[3]) || outside(ox + g[0], oy + g[1], oz + g[2], ox + g[3], oy + g[4], oz + g[5])) continue;
+      for (const s of G.sh.values()) {
+        const b = s.b;
+        if (!s.shV || outside(ox + b[0], oy + b[1], oz + b[2], ox + b[3], oy + b[4], oz + b[5])) continue;
+        s.visible = true; shOn.push(s);
+      }
+    }
   }
 
   // ---- кадр: діапазони за списками, без виділень ----
@@ -432,7 +490,7 @@ export function createRenderer(canvas) {
   };
 
   // ---- небо: ShaderMaterial на весь екран, шар Skybox ----
-  const skyMat = new pc.ShaderMaterial({ uniqueName: 'eco-sky', vertexGLSL: SKY_VS, fragmentGLSL: SKY_FS, attributes: { aPosition: pc.SEMANTIC_POSITION } });
+  const skyMat = new pc.ShaderMaterial({ uniqueName: 'eco-sky', vertexGLSL: SKY_VS, fragmentGLSL: SKY_FS, vertexWGSL: SKY_VS_WGSL, fragmentWGSL: SKY_FS_WGSL, attributes: { aPosition: pc.SEMANTIC_POSITION } });
   skyMat.depthWrite = false; skyMat.cull = pc.CULLFACE_NONE; skyMat.update();
   const skyMesh = new pc.Mesh(dev);
   skyMesh.setPositions([-1, -1, 0, 3, -1, 0, -1, 3, 0]); skyMesh.setIndices([0, 1, 2]); skyMesh.update();
@@ -462,7 +520,7 @@ export function createRenderer(canvas) {
     P('uAur', [au.dir[0], au.dir[1], au.k, au.t % 10000]); P('uAurCol', c3(au.col));
   }
 
-  let stagger = 'spread', updMask = 15, shadowD = SHADOW_D;
+  let stagger = false, updMask = 15, shadowD = SHADOW_D;
   const UPD = [pc.SHADOWUPDATE_REALTIME, pc.SHADOWUPDATE_NONE, pc.SHADOWUPDATE_NONE, pc.SHADOWUPDATE_NONE];
   const M4 = new pc.Mat4(), Q = new pc.Quat(), Q2 = new pc.Quat(), V3 = new pc.Vec3();
   let shownU = null, lastCol = '', lastRad = 0;
@@ -686,6 +744,7 @@ export function createRenderer(canvas) {
           }
         }
       }
+      cullShadow(U, m, view.eye, b.u, [-lx, -ly, -lz], t, sun.shadowDistance);
       // Далечінь: плитки поверхні — лише за швом
       for (const s of farShown) s.e.mi.visible = false;
       farShown.length = 0;

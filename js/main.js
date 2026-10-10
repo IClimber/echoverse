@@ -29,7 +29,7 @@ const AI_BUDGET = 2;                          // мс на такт світу: 
 const QS = new URLSearchParams(location.search);
 if (QS.has('strip')) import('./strip.js').then((m) => m.runStrip());
 else if (QS.has('flora')) import('./flora-stand.js').then((m) => m.runFlora());
-else if (QS.has('pc')) import('./pc/render.js').then((m) => boot(m.createRenderer)).catch((e) => showErr('PlayCanvas не завантажився: ' + e.message));
+else if (QS.has('pc')) import('./pc/render.js').then((m) => m.createRenderer($('gl'), { gpu: QS.get('gpu') })).then((r) => boot(() => r)).catch((e) => showErr('PlayCanvas не завантажився: ' + e.message));   // ?gpu=webgpu (типово — WebGL2: на еталонній машині швидший)
 else boot(createRenderer);
 
 function boot(make) {
@@ -81,6 +81,8 @@ function boot(make) {
         gpuMB: (R.stats.gpuBytes + R.stats.arenaBytes) / 1048576, colsPerSec: st.colsPerSec, pending: st.pending, cols: st.cols, secs: st.secs, meshes: renderer.meshCount, lod: [...renderer.lodCounts], workers: st.workers, streamMs: g ? g.streamMs : 0,
         pcMs: R.cpuRenderMs, gpuPass: R.gpuPass, shTris: R.stats.shTris, shDraws: R.stats.shDraws };
     },
+    // Скинути кільця замірів (інтервали кадрів, час GPU) — заміри з чистого аркуша
+    resetFrames() { frameN = 0; frameI = 0; if (renderer.R.gpuHist) renderer.R.gpuHistI = 0; },
     // ?pc: тіні сонця — 'off' | 'pcss' | 'pcf3' | {властивості світла PlayCanvas}
     shadows(m) { return renderer.setShadows ? renderer.setShadows(m) : null; },
     // Рівні деталізації далекої землі: false — усе повне (порівняння)
