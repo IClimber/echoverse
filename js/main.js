@@ -167,7 +167,19 @@ function boot(renderer) {
   $('back').onclick = () => showCard(false);
   for (const r of radios('gpu')) {
     r.checked = r.value === (info ? info.device : 'webgl2');
-    if (r.value === 'webgpu' && !navigator.gpu) { r.disabled = true; $('gpuNote').hidden = false; }
+    // navigator.gpu браузер дає лише в захищеному контексті (localhost, 127.0.0.1, https); http://0.0.0.0:8123 — посилання,
+    // яке друкує python3 -m http.server, — не захищений: WebGPU там немає, хоч браузер його й підтримує
+    if (r.value === 'webgpu' && !navigator.gpu) {
+      r.disabled = true;
+      const n = $('gpuNote'), here = `${location.protocol}//${location.host}`;
+      if (isSecureContext) n.textContent = 'Браузер не надав WebGPU на цій сторінці (navigator.gpu немає)';
+      else {
+        const to = `http://localhost:${location.port || 80}${location.pathname}${location.search}`;
+        n.innerHTML = `WebGPU браузер дає лише на захищених адресах (localhost, 127.0.0.1, https), а сторінку відкрито з ${here}. ` +
+          `Відкрийте <a href="${to}">${to.replace(/\/$/, '')}</a>. Світи зберігаються окремо для кожної адреси — перенести: експорт тут, імпорт там`;
+      }
+      n.hidden = false;
+    }
     r.onchange = () => { saveSetting('gpu', r.value); $('reload').hidden = !info || r.value === info.device; };
   }
   for (const r of radios('shadows')) {
