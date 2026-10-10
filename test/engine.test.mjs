@@ -67,6 +67,8 @@ test('щільна вершина: позиції з точністю 1/256, н�
     }
     assert.equal(u.mat[j], m.mat[v]);
   }
+  const b = new Uint8Array(P.buf);
+  for (let j = 0; j < P.n; j++) assert.ok(!b[j * 16 + 6] && !b[j * 16 + 7] && !b[j * 16 + 11]);
 });
 
 test('meshHash не залежить від порядку трикутників і повороту вершин', () => {
