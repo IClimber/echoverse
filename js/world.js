@@ -10,7 +10,8 @@ import { createGen } from './gen/client.js';
 import { standable, GRAVITY, PLAYER_MASS, PLAYER_AREA } from './player.js';
 import { floatPose } from './gen/mesh.js';
 import { footprint } from './gen/plants.js';
-import { makeBody, configureBodies } from './engine/physics/bodies.js';
+import { makeBody, configureBodies, settle } from './engine/physics/bodies.js';
+import { createEntities } from './engine/world/entities.js';
 
 // тіла рушія — зі сталими гри (блок, тверде, тяжіння, еталон маси й площі — гравець)
 configureBodies({ level: LEVEL, solid: solidB, gravity: GRAVITY, refMass: PLAYER_MASS, refArea: PLAYER_AREA });
@@ -28,6 +29,15 @@ export function createWorld(seed, onMesh) {
   // Всесвіти: 'd:n' → {d, n, cols: Map(ck → стовпець), secs: Map(sk → секція), at — коли був поточним}. Давність —
   // мітка used (touch* ставить нову; сортування — лише під час витіснення)
   const unis = new Map();
+  // Сутності (тіла) — реєстр на всесвіт (engine/world/entities.js): власник — чанк, де тіло зараз; змінені переживають
+  // вивантаження стовпця. Не витісняється: у ньому лише живі й змінені (їх мало)
+  const ents = new Map();
+  const entsOf = (d, n) => {
+    const k = `${d}:${n}`;
+    let E = ents.get(k);
+    if (!E) ents.set(k, (E = createEntities({ chunk: CS, zone: 2, keyOf: ck, catchUp: (b) => settle(b, W.probe(d, n)) })));
+    return E;
+  };
   let keep = keepFor(256);
   let genMs = 0, genN = 0, objR = 0.5, nCols = 0, nSecs = 0, cur = null, lastU = null;   // objR — найбільша півширина перешкоди серед завантажених
   const colTimes = [];                       // мітки часу готових стовпців за останню секунду (F3: стовпців/с)
@@ -48,6 +58,7 @@ export function createWorld(seed, onMesh) {
       for (const [k, o] of [...map].sort((a, b) => a[1].used - b[1].used)) {
         if (total <= keep * 0.9) break;
         o.dead = true; map.delete(k); total--;
+        if (kind === 'cols') entsOf(U.d, U.n).unload(k);       // змінені тіла стовпця — у сховище сесії
       }
       if (!U.cols.size && !U.secs.size && U !== cur) { unis.delete(`${U.d}:${U.n}`); if (lastU === U) lastU = null; }
       if (total <= keep * 0.9) break;
@@ -65,12 +76,13 @@ export function createWorld(seed, onMesh) {
       c.obst[o.y * CS + o.x] = { cx: c.cx * CS + o.cx, cy: c.cy * CS + o.cy, z0, z1: z0 + o.top, r: o.r };
       if (o.r > objR) objR = o.r;
     }
-    c.bodies = [];
+    const bodies = [];
     const L = W.laws(c.d, c.n), key = ck(c.cx, c.cy);
     for (const o of c.obj) if (o.k === O_FLOAT) {
       const pose = floatPose(L, c.sp[o.s], o, o.x + 0.5, o.y + 0.5, o.z * LEVEL), fp = footprint(pose.T), st = L.stones[(o.st || 1) - 1];
       const h = Math.max(0.08, fp.r * pose.s * 0.75), hz = Math.max(0.06, fp.top * pose.s * 0.5);
-      c.bodies.push(makeBody({
+      bodies.push(makeBody({
+        id: key * 256 + o.y * CS + o.x,               // клітинка появи: одне тіло на клітинку, детерміновано
         x: c.cx * CS + pose.x, y: c.cy * CS + pose.y, z: pose.z, hx: h, hy: h, hz, dens: 0.8 + 0.6 * ((o.v >> 5 & 7) / 7),
         lift: st ? st.lift : 1.2, hover: pose.z - o.z * LEVEL, T: pose.T, s: pose.s, tilt: pose.tilt, yaw: (o.v >> 8 & 255) / 256 * Math.PI * 2, key,
       }));
@@ -81,6 +93,8 @@ export function createWorld(seed, onMesh) {
     if (was) { was.dead = true; U.cols.delete(key); } else nCols++;
     c.used = ++stamp;
     U.cols.set(key, c);
+    for (const b of bodies) { b.x0 = b.x; b.y0 = b.y; b.z0 = b.z; }
+    entsOf(c.d, c.n).load(key, c.cx, c.cy, bodies);
     nCols = trim('cols', nCols, keep.cols);
   }
   const gen = createGen(seed, (key, q, data, mesh, ms) => {
@@ -165,16 +179,9 @@ export function createWorld(seed, onMesh) {
       return { h: C.h[i], t: C.t[i], v: C.v[i], bm: C.bm[i] };
     },
     // Тіла стовпців навколо (x, y) у радіусі r клітинок
-    bodiesNear(d, n, x, y, r = 3) {
-      const out = [];
-      const U = uni(d, n);
-      if (!U) return out;
-      for (let cy = Math.floor((y - r) / CS); cy <= Math.floor((y + r) / CS); cy++) for (let cx = Math.floor((x - r) / CS); cx <= Math.floor((x + r) / CS); cx++) {
-        const C = U.cols.get(ck(cx, cy));
-        if (C) for (const b of C.bodies) if (Math.abs(b.x - x) < r + b.hx && Math.abs(b.y - y) < r + b.hy) out.push(b);
-      }
-      return out;
-    },
+    bodiesNear(d, n, x, y, r = 3) { return entsOf(d, n).near(x, y, r, []); },
+    // Реєстр сутностей всесвіту (d, n)
+    ents: (d, n) => entsOf(d, n),
     // «Щуп» для фізики гравця у всесвіті (d, n) — див. player.js
     probe(d, n) {
       return {

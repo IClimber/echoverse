@@ -414,3 +414,68 @@ test('AO шаблону рослини: темніше знизу, у 0…255', 
   for (const a of T.a) { lo = Math.min(lo, a); hi = Math.max(hi, a); }
   assert.ok(lo < hi);
 });
+
+// ---- сутності (engine/world/entities.js) і дорахунок тіл (settle) ----
+import { createEntities } from '../js/engine/world/entities.js';
+import { settle as settleBody, makeBody as mkB, configureBodies as cfgB } from '../js/engine/physics/bodies.js';
+const ent = (id, x, y) => ({ id, x, y, hx: 0.2, hy: 0.2 });
+const KE = (cx, cy) => (cx + 0x8000) * 0x10000 + (cy + 0x8000);   // типовий keyOf
+test('сутності: власник — чанк за позицією, near, зона 5×5', () => {
+  const E = createEntities({ chunk: 16, zone: 2 });
+  const k = KE;
+  for (let cy = -4; cy <= 4; cy++) for (let cx = -4; cx <= 4; cx++) E.load(k(cx, cy), cx, cy, [ent(cx * 100 + cy + 1000, cx * 16 + 8, cy * 16 + 8)]);
+  E.update(0, 0, 0);
+  assert.equal(E.awake().length, 25);
+  const e = E.get(1000);
+  e.x = 20; e.dirty = true; E.moved(e);
+  assert.equal(e.ek, k(1, 0));
+  assert.ok(E.near(20, 8, 1).includes(e));
+  assert.ok(!E.near(8, 8, 1).includes(e));
+  E.load(k(0, 0), 0, 0, [ent(1000, 8, 8)]);           // повторний load — без копій
+  assert.equal(E.stats().live, 81);
+});
+test('сутності: сон поза зоною і дорахунок при поверненні', () => {
+  const calls = [];
+  const E = createEntities({ chunk: 16, zone: 0, catchUp: (e, dt) => calls.push([e.id, dt]) });
+  E.load(KE(0, 0), 0, 0, [ent(1, 8, 8)]); E.load(KE(5, 0), 5, 0, [ent(2, 88, 8)]);
+  E.update(0, 0, 1000);
+  assert.deepEqual(calls, []);                          // з даних — у спокої
+  E.update(5, 0, 3000);                                  // 1 заснула о 3000, 2 прокинулась (з даних — без дорахунку)
+  E.update(0, 0, 7500);
+  assert.deepEqual(calls, [[1, 4500]]);
+});
+test('сутності: змінена переживає unload / load, незмінена — з даних, видалена — ні', () => {
+  const E = createEntities({ chunk: 16, zone: 2 });
+  E.load(KE(0, 0), 0, 0, [ent(1, 4, 4), ent(2, 6, 6), ent(3, 8, 8)]);
+  const a = E.get(1); a.x = 5; a.dirty = true; a.hp = 7; E.moved(a);
+  E.remove(3);
+  E.unload(KE(0, 0));
+  E.load(KE(0, 0), 0, 0, [ent(1, 4, 4), ent(2, 6, 6), ent(3, 8, 8)]);
+  assert.equal(E.get(1), a); assert.equal(E.get(1).x, 5);
+  assert.equal(E.get(2).x, 6);
+  assert.equal(E.get(3), undefined);
+});
+test('сутності: змінена переїхала в сусідній чанк — немає ні її, ні копії з даних, поки той не завантажено', () => {
+  const E = createEntities({ chunk: 16, zone: 2 });
+  const A = (cx) => [ent(cx === 0 ? 1 : 9, cx * 16 + 8, 8)];
+  E.load(KE(0, 0), 0, 0, A(0)); E.load(KE(1, 0), 1, 0, A(1));
+  const e = E.get(1); e.x = 20; e.dirty = true; E.moved(e);
+  assert.equal(e.ek, KE(1, 0));
+  E.unload(KE(0, 0)); E.unload(KE(1, 0));
+  E.load(KE(0, 0), 0, 0, A(0));
+  assert.equal(E.get(1), undefined);
+  E.load(KE(1, 0), 1, 0, A(1));
+  assert.equal(E.get(1), e); assert.equal(E.get(1).x, 20);
+});
+test('settle: тіло в повітрі лягає на ґрунт, левітуюче — на висоту ширяння', () => {
+  cfgB({ level: 0.5, solid: (v) => v > 0, gravity: 25.6 });
+  const P = { block: (x, y, k) => (k < 10 ? 1 : 0) };   // ґрунт до висоти 5
+  const b = mkB({ x: 1.5, y: 1.5, z: 9, hx: 0.3, hy: 0.3, hz: 0.25, dens: 1, lift: 0 });
+  b.vz = -3; b.sleep = false;
+  assert.ok(settleBody(b, P));
+  assert.equal(b.z, 5.25); assert.equal(b.vz, 0); assert.ok(b.sleep);
+  const f = mkB({ x: 1.5, y: 1.5, z: 12, hx: 0.3, hy: 0.3, hz: 0.25, dens: 1, lift: 1.5, hover: 2 });
+  f.x = 3.5;
+  assert.ok(settleBody(f, P));
+  assert.equal(f.z, 7.25); assert.equal(f.ax, 3.5);
+});

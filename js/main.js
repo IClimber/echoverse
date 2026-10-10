@@ -277,6 +277,8 @@ function boot(renderer) {
       cam: [p.x, p.y, p.z || 0], lastSave: performance.now(), view: null, clock: rec.clock || 0,
       stamp: 0, ai: [], aiAt: 0,                 // крок фізики (інтерполяція тіл); системи світу (моби, NPC) — (dt, g)
     };
+    // сутності: зона симуляції 5×5 чанків навколо гравця (поточний всесвіт; інші сплять і дорахуються при поверненні)
+    g.ai.push((dt, G) => G.world.ents(G.d, G.n).update(Math.floor(G.me.x / CS), Math.floor(G.me.y / CS), G.clock * 1000));
     g.world.setCurrent(g.d, g.n);
     g.world.setKeep(keepFor(VIEW_R));
     streamer.force();
@@ -372,13 +374,13 @@ function boot(renderer) {
   // Тіла біля гравця (ширяюче каміння): крок фізики; гравець, що стоїть на тілі, тисне його вагою й їде разом з ним;
   // тіло, у яке йде гравець, штовхається (легке — відкотиться, важке — ні)
   function simBodies(dt, L, W) {
-    const me = g.me, near = g.world.bodiesNear(g.d, g.n, me.x, me.y, 40), ob = me.ground ? me.onBody : null;
+    const me = g.me, reg = g.world.ents(g.d, g.n), near = reg.awake(), ob = me.ground ? me.onBody : null;
     const ox = ob && ob.x, oy = ob && ob.y;
     if (ob) { ob.vz -= PLAYER_MASS * GRAVITY * (g.ph ? g.ph.g : L.grav) * dt / ob.mass; ob.sleep = false; ob.calm = 0; }
     if (me.moving && !me.fly) for (const b of g.world.bodiesNear(g.d, g.n, me.x, me.y, 1.5)) {
       if (b === ob || Math.abs(me.x - b.x) > b.hx + FOOT + 0.08 || Math.abs(me.y - b.y) > b.hy + FOOT + 0.08 || me.z > b.z + b.hz || me.z + 0.98 < b.z - b.hz) continue;
       const dx = b.x - me.x, dy = b.y - me.y, l = Math.hypot(dx, dy) || 1, mv = Math.hypot(me.vx || 0, me.vy || 0);
-      if (mv > 0.1 && (dx * me.vx + dy * me.vy) > 0) push(b, [dx / l * PLAYER_MASS * 5 * dt, dy / l * PLAYER_MASS * 5 * dt, 0]);
+      if (mv > 0.1 && (dx * me.vx + dy * me.vy) > 0) { push(b, [dx / l * PLAYER_MASS * 5 * dt, dy / l * PLAYER_MASS * 5 * dt, 0]); b.dirty = true; }
     }
     const P = g.world.probe(g.d, g.n);
     for (const b of near) { b.px = b.x; b.py = b.y; b.pz = b.z; b.ps = g.stamp; }   // стан до кроку — інтерполяція кадру
@@ -390,6 +392,13 @@ function boot(renderer) {
       stepBody(b, dt, P, env);
     }
     collideBodies(near, P, { bounce: L.phys.bounce, friction: L.phys.friction });   // між собою (сплячі — перешкоди)
+    // зрушене далі за 0,1 від місця появи — змінене (переживе вивантаження); інший чанк — інший власник
+    for (let i = near.length - 1; i >= 0; i--) {
+      const b = near[i];
+      if (b.ps !== g.stamp || (b.x === b.px && b.y === b.py && b.z === b.pz)) continue;
+      if (!b.dirty && Math.hypot(b.x - b.x0, b.y - b.y0, b.z - b.z0) > 0.1) b.dirty = true;
+      reg.moved(b);
+    }
     if (ob) { me.x += ob.x - ox; me.y += ob.y - oy; me.z = ob.z + ob.hz; }
   }
   // Удар: промінь з грудей уперед (у третій особі — куди дивиться камера, згори — куди обернений гравець)
@@ -403,6 +412,7 @@ function boot(renderer) {
     const r = rayBody(g.world.bodiesNear(g.d, g.n, me.x, me.y, 4), me.x, me.y, me.z + 0.65, d, 3);
     if (!r) return;
     push(r.b, [d[0] * HIT_IMPULSE, d[1] * HIT_IMPULSE, (d[2] + 0.25) * HIT_IMPULSE]);
+    r.b.dirty = true;
     const dv = HIT_IMPULSE / r.b.mass;
     if (dv < 0.3) toast('Камінь заважкий — ледь зрушив');
   }

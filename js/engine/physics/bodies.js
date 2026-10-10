@@ -47,6 +47,18 @@ function groundBelow(P, x, y, z) {
   return null;
 }
 
+// Дорахунок тіла, що заснуло в русі (сутності: повернулось у зону симуляції): левітуюче — на висоті ширяння над ґрунтом,
+// поле тримає його тут; решта — на опорі. Швидкості — нуль, сон. Ґрунту не знайдено (стовпець не завантажено) — де є
+export function settle(b, P) {
+  const gz = groundBelow(P, b.x, b.y, b.z);
+  if (gz === null) return false;
+  const lev = (b.lift || 0) > 1;
+  b.z = gz + (lev ? b.hover || 0 : 0) + b.hz;
+  if (lev) { b.ax = b.x; b.ay = b.y; }
+  b.vx = b.vy = b.vz = 0; b.sleep = true; b.calm = 0;
+  return true;
+}
+
 const ANCHOR = 2;                             // пружність поля, що тримає левітуюче тіло біля місця (1/с²)
 // Межа падіння тіла: від маси на площу (важке й компактне падає швидше й менше зноситься вітром)
 const vTof = (b, vT) => vT * Math.sqrt((b.mass / (4 * b.hx * b.hz)) / (REF_MASS / REF_AREA));
