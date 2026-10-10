@@ -70,7 +70,7 @@ export function createStreamer() {
         || L.rad !== rad || L.mode !== camera.mode || Math.abs(L.yaw - camera.yaw) > TURN || Math.abs(L.pitch - (iso ? camera.pitch : camera.pitch3)) > TURN
         || now - L.at > 300 || (W.dirty && now - L.at > 50);
       if (!need) { W.gen.tick(); return { far }; }
-      forced = false; W.dirty = false;
+      forced = false; W.dirty = false; W.pass();
       const t0 = performance.now();
       last = { d: g.d, n: g.n, cx: tcx, cy: tcy, cz: czMe, ch: chTo, rad, mode: camera.mode, lod: lodOn, yaw: camera.yaw, pitch: iso ? camera.pitch : camera.pitch3, at: now };
 

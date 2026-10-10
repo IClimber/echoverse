@@ -48,7 +48,11 @@ export function createWorld(seed, onMesh) {
     if (U) lastU = U;
     return U;
   };
-  // Витіснити найдавніше понад keep (до 0,9·keep): спершу всесвіти, що давно не були поточними, потім поточний
+  // Витіснити найдавніше понад keep (до 0,9·keep): спершу всесвіти, що давно не були поточними, потім поточний.
+  // Потрібне останньому перерахунку стрімінгу (торкнулось після початку попереднього, pass()) не витісняється: інакше
+  // коло приземлення сусідніх всесвітів і цілі стрибка (не поточні) витіснялось щойно згенерованим — стрибок чекав
+  // «Стабілізації», поки генерація й витіснення випадково не розминуться
+  let safe = 0, passAt = 0;
   const trim = (kind, total, keep) => {
     if (total <= keep) return total;
     const order = [...unis.values()].filter((U) => U !== cur).sort((a, b) => a.at - b.at);
@@ -57,6 +61,7 @@ export function createWorld(seed, onMesh) {
       const map = U[kind];
       for (const [k, o] of [...map].sort((a, b) => a[1].used - b[1].used)) {
         if (total <= keep * 0.9) break;
+        if (o.used > safe) continue;
         o.dead = true; map.delete(k); total--;
         if (kind === 'cols') entsOf(U.d, U.n).unload(k);       // змінені тіла стовпця — у сховище сесії
       }
@@ -144,6 +149,8 @@ export function createWorld(seed, onMesh) {
     hasCol(d, n, cx, cy) { const U = uni(d, n); return !!U && U.cols.has(ck(cx, cy)); },
     hasSec(d, n, cx, cy, cz) { const U = uni(d, n); return !!U && U.secs.has(sk(cx, cy, cz)); },
     // Давність для витіснення (кличе стрімінг для потрібного)
+    // Початок перерахунку стрімінгу: що торкнеться в ньому чи в попередньому — не витісняти
+    pass() { safe = passAt; passAt = stamp; },
     touchCol(d, n, cx, cy) { const U = uni(d, n); return U && touch(U.cols, ck(cx, cy)); },
     touchSec(d, n, cx, cy, cz) { const U = uni(d, n); return U && touch(U.secs, sk(cx, cy, cz)); },
     setKeep(k) { keep = k; },
