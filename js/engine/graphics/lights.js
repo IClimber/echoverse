@@ -1,0 +1,162 @@
+// js/engine/graphics/lights.js — світла засобами PlayCanvas (graphics/lighting/lights.md, shadows.md, clustered-lighting.md):
+// - напрямлені (сонця, місяці) — слоти з каскадними тінями. Напрямлені світла не кластерні: зміна їх кількості
+//   перекомпільовує шейдери, тож кількість слотів стала на всесвіт (setDirectionalCount), порожній слот — intensity 0
+//   без оновлення тіні; warmUp — прогріти шейдери для 3, 2, 1 слотів (за екраном завантаження);
+// - точкові й прожектори — кластерні (шейдери не перекомпільовуються), тіні — в атласі, тип для всіх —
+//   scene.lighting.shadowType (лише PCF); нерухомі оновлюють тінь лише при змінах (SHADOWUPDATE_THISFRAME), як радить
+//   shadows.md. Налаштування й зміщення — з прикладів graphics/shadow-cascades, shadow-soft, clustered-omni-shadows.
+// Кидачі — шари World і «Тіні» (app.js); що з кидачів «Тіней» увімкнено на кадр — regions.cullCasters
+export const SHADOW_D = 128;                   // тіні — лише ближче (глибина від камери, shadowDistance PlayCanvas)
+const MAX_DIR = 3;
+
+// G — застосунок (app.js); shadows — 'pcf3' | 'pcss'
+export function createLights(G, { shadows = 'pcf3' } = {}) {
+  const { pc, app, scene, layers, O } = G;
+  const pcss = () => q === 'pcss' && G.info.pcss;
+  let q = shadows;
+  scene.clusteredLightingEnabled = true;
+  const L = scene.lighting;
+  L.shadowsEnabled = true; L.cookiesEnabled = false; L.areaLightsEnabled = false;
+  L.shadowAtlasResolution = 2048;
+  const LAY = [layers.world.id, layers.shadow.id];
+
+  // Поворот світла: +Y — до джерела (напрямлене світить уздовж −Y сутності; код _updateSunLight скрипта ProceduralSky)
+  const X = new pc.Vec3(), Z = new pc.Vec3(), S = new pc.Vec3(), M4 = new pc.Mat4(), Q = new pc.Quat();
+  const orient = (e, src) => {
+    const ref = Math.abs(src.y) > 0.99 ? pc.Vec3.RIGHT : pc.Vec3.UP;
+    X.cross(src, ref).normalize(); Z.cross(X, src).normalize();
+    M4.set([X.x, X.y, X.z, 0, src.x, src.y, src.z, 0, Z.x, Z.y, Z.z, 0, 0, 0, 0, 1]);
+    e.setRotation(Q.setFromMat4(M4));
+  };
+
+  // ---- напрямлені: слоти ----
+  // Каскади (приклад shadow-cascades): розподіл 0,5, змішування 0,1; зміщення 0,3 / 0,2. Головне — 4 каскади 2048,
+  // решта — 2 по 1024. PCSS (приклад shadow-soft): 16 / 16 семплів, penumbraFalloff 4; penumbraSize — частка глибини
+  // каскаду, 0,01 (0,03 з прикладу на сцені 1000 одиниць у нас розмиває)
+  const typeOf = () => pcss() ? { shadowType: pc.SHADOW_PCSS_32F, shadowSamples: 16, shadowBlockerSamples: 16, penumbraSize: 0.01, penumbraFalloff: 4 } : { shadowType: pc.SHADOW_PCF3_32F };
+  const slots = [];
+  let shD = SHADOW_D, nDir = 0;
+  const makeSlot = (i) => {
+    const e = new pc.Entity(`світло ${i}`);
+    e.addComponent('light', {
+      type: 'directional', intensity: 0, castShadows: true, shadowDistance: shD, layers: LAY,
+      cascadeDistribution: 0.5, cascadeBlend: 0.1, shadowBias: 0.3, normalOffsetBias: 0.2,
+      numCascades: i ? 2 : 4, shadowResolution: i ? 1024 : 2048, shadowUpdateMode: pc.SHADOWUPDATE_NONE, ...typeOf(),
+    });
+    app.root.addChild(e);
+    return { e, l: e.light, on: false, dir: [0, 0, 1] };
+  };
+  function setDirectionalCount(k) {
+    k = Math.max(1, Math.min(MAX_DIR, k | 0));
+    while (slots.length < k) slots.push(makeSlot(slots.length));
+    while (slots.length > k) { const s = slots.pop(); s.e.destroy(); }
+    nDir = k;
+  }
+  // i — слот; dir — до світила (наші координати), color — у гамі (0…1), intensity — як у LightComponent
+  const V = new pc.Vec3(), C = new pc.Color();
+  function setDirectional(i, o) {
+    const s = slots[i];
+    if (!s) return;
+    const on = !!o && o.intensity > 0;
+    if (on) {
+      s.dir[0] = o.dir[0]; s.dir[1] = o.dir[1]; s.dir[2] = o.dir[2];
+      orient(s.e, G.dirToPC(o.dir, V).normalize());
+      s.l.color = C.set(o.color[0], o.color[1], o.color[2]);
+      s.l.intensity = o.intensity;
+    } else s.l.intensity = 0;
+    if (on !== s.on) { s.l.shadowUpdateMode = on ? pc.SHADOWUPDATE_REALTIME : pc.SHADOWUPDATE_NONE; s.on = on; }
+  }
+  function setShadowDistance(d) { shD = d; for (const s of slots) s.l.shadowDistance = d; }
+  // Прогрів: кадр із 3, 2, 1 слотом (кожна кількість — свій набір шейдерів), далі — як було, cb()
+  function warmUp(cb) {
+    const keep = nDir || 1, seq = [3, 2, 1];
+    const step = () => {
+      if (!seq.length) { setDirectionalCount(keep); if (cb) cb(); return; }
+      setDirectionalCount(seq.shift());
+      for (const s of slots) { s.l.intensity = 0.001; s.l.shadowUpdateMode = pc.SHADOWUPDATE_THISFRAME; s.on = false; }
+      app.once('postrender', step);
+    };
+    step();
+  }
+
+  // ---- точкові й прожектори (кластерні) ----
+  const locals = new Set();
+  const P = new pc.Vec3();
+  // { type: 'omni' | 'spot', pos, dir (spot, куди світить), color, intensity, range, inner, outer, castShadows, moving }
+  function addLight(o) {
+    const e = new pc.Entity('джерело');
+    e.addComponent('light', {
+      type: o.type || 'omni', color: new pc.Color(...(o.color || [1, 1, 1])), intensity: o.intensity ?? 1, range: o.range ?? 8,
+      innerConeAngle: o.inner ?? 30, outerConeAngle: o.outer ?? 45, castShadows: o.castShadows !== false,
+      shadowBias: 0.2, normalOffsetBias: 0.2,                       // приклад clustered-omni-shadows
+      shadowUpdateMode: o.moving ? pc.SHADOWUPDATE_REALTIME : pc.SHADOWUPDATE_THISFRAME, layers: o.layers || LAY,
+    });
+    app.root.addChild(e);
+    const H = { e, pos: [...o.pos], dir: o.dir ? [...o.dir] : [0, 0, -1], range: o.range ?? 8, moving: !!o.moving };
+    const place = () => {
+      e.setPosition(G.toPC(H.pos[0], H.pos[1], H.pos[2], P));
+      if (e.light.type === 'spot') orient(e, G.dirToPC([-H.dir[0], -H.dir[1], -H.dir[2]], V).normalize());   // прожектор світить уздовж −Y
+    };
+    const redo = () => { if (!H.moving && e.light.castShadows) e.light.shadowUpdateMode = pc.SHADOWUPDATE_THISFRAME; };
+    H.place = place; H.redo = redo;
+    H.set = (p) => {
+      if (p.pos) { H.pos = [...p.pos]; redo(); }
+      if (p.dir) { H.dir = [...p.dir]; redo(); }
+      if (p.color) e.light.color = new pc.Color(...p.color);
+      if (p.intensity !== undefined) e.light.intensity = p.intensity;
+      if (p.range !== undefined) { e.light.range = H.range = p.range; redo(); }
+      if (p.moving !== undefined) { H.moving = !!p.moving; e.light.shadowUpdateMode = H.moving ? pc.SHADOWUPDATE_REALTIME : pc.SHADOWUPDATE_THISFRAME; }
+      if (p.enabled !== undefined) e.enabled = !!p.enabled;
+      place();
+    };
+    H.remove = () => { locals.delete(H); e.destroy(); };
+    place();
+    locals.add(H);
+    return H;
+  }
+  G.on('origin', () => { for (const H of locals) H.place(); });
+  // кидачі змінились у коробці (наші координати) — нерухомим джерелам поруч оновити тінь
+  G.on('casters', (b) => {
+    for (const H of locals) {
+      if (H.moving) continue;
+      const [x, y, z] = H.pos, r = H.range;
+      if (Math.hypot(Math.max(b[0] - x, 0, x - b[3]), Math.max(b[1] - y, 0, y - b[4]), Math.max(b[2] - z, 0, z - b[5])) <= r) H.redo();
+    }
+  });
+
+  // Якість: тип тіней напрямлених і кластерів (PCSS — лише напрямлені; кластерні — PCF5, найм'якший доступний)
+  function setQuality(s) {
+    q = s;
+    const t = typeOf();
+    for (const s2 of slots) Object.assign(s2.l, t);
+    L.shadowType = pcss() ? pc.SHADOW_PCF5_32F : pc.SHADOW_PCF3_32F;
+  }
+  setQuality(q);
+  setDirectionalCount(1);
+
+  const LOC = [];
+  return {
+    setDirectionalCount, setDirectional, setShadowDistance, warmUp, addLight, setQuality,
+    get quality() { return pcss() ? 'pcss' : 'pcf3'; },
+    get slots() { return slots; },
+    // напрямлені з тінями на кадр: [{dir — до світила, shD}] (для regions.cullCasters)
+    dirs(out = []) {
+      out.length = 0;
+      for (const s of slots) if (s.on) out.push({ dir: s.dir, shD: s.l.shadowDistance });
+      return out;
+    },
+    // увімкнені точкові джерела й прожектори з тінями: [{pos, range}] (наші координати)
+    locals() {
+      LOC.length = 0;
+      for (const H of locals) if (H.e.enabled && H.e.light.castShadows && H.e.light.intensity > 0) LOC.push(H);
+      return LOC;
+    },
+    info() {
+      let dir = 0, shadowed = 0;
+      for (const s of slots) if (s.on) { dir++; shadowed++; }
+      let local = 0;
+      for (const H of locals) if (H.e.enabled) { local++; if (H.e.light.castShadows) shadowed++; }
+      return { dir, local, shadowed };
+    },
+  };
+}
