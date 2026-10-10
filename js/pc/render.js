@@ -5,7 +5,7 @@
 // PCF / PCSS), туман, гама й тональна компресія — PlayCanvas; своє — альбедо з масиву текстур, шов далечі, небо
 // (js/pc/shaders.js, GLSL і WGSL). Не малює: тіла, опади, гойдання від вітру, розчинення біля ока, «вікно», LOD, кривизну
 // планети, світіння лави, підсвічування фігури під час заряджання.
-import * as pc from 'https://cdn.jsdelivr.net/npm/playcanvas@2.23.2/build/playcanvas.mjs';
+import * as pc from 'playcanvas';
 import { DECL_PS, DIFFUSE_PS, SKY_VS, SKY_FS, DECL_WGSL, DIFFUSE_WGSL, SKY_VS_WGSL, SKY_FS_WGSL } from './shaders.js';
 import { createAlloc } from '../engine/graphics/arena.js';
 import { CS } from '../gen/chunk.js';

@@ -118,6 +118,14 @@
   </div>
 </div>
 
+<!-- PlayCanvas — import map, як у посібнику (user-manual/engine/standalone.md, «Import Map and CDN»); версія — та сама,
+     що в docs/playcanvas/fetch.sh. Другий рядок — офіційні скрипти (playcanvas/scripts/esm/…) -->
+<script type="importmap">
+{ "imports": {
+  "playcanvas": "https://cdn.jsdelivr.net/npm/playcanvas@2.23.2/build/playcanvas.mjs",
+  "playcanvas/": "https://cdn.jsdelivr.net/npm/playcanvas@2.23.2/"
+} }
+</script>
 <script type="module" src="js/main.js"></script>
 </body>
 </html>
