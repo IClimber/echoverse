@@ -124,7 +124,9 @@ export async function createScene(canvas, settings = {}) {
         figNor[o] = nx / l; figNor[o + 1] = ny / l; figNor[o + 2] = nz / l;
       }
     }
-    figMesh.setPositions(figPos); figMesh.setNormals(figNor); figMesh.update(pc.PRIMITIVE_TRIANGLES, false);
+    // update(…, true) — PlayCanvas перераховує AABB з позицій (Mesh.update): поза змінює межі, інакше камера відсікає
+    // фігуру за AABB першого кадру (тінь лишалась, фігури не було)
+    figMesh.setPositions(figPos); figMesh.setNormals(figNor); figMesh.update(pc.PRIMITIVE_TRIANGLES, true);
   };
 
   // ---- тіла: шаблон → меш і група екземплярів ----
