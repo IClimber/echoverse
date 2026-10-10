@@ -81,7 +81,7 @@ export function skyState(L, clock) {
   const M = L.mag || { k: 0, tilt: 0, hue: 0.35 }, ct = Math.cos(M.tilt), stl = Math.sin(M.tilt);
   const aurora = { dir: [A.nn[0] * ct - A.nn[1] * stl, A.nn[0] * stl + A.nn[1] * ct], k: Math.max(0, M.k - 0.25) * 1.6 * (1 - day), col: hsl3(M.hue), t: localTime(L, clock) };
   return {
-    phase, day, dusk, suns, moons, main, light, lightK: [tint[0] * I, tint[1] * I, tint[2] * I], amb: L.light.amb,
+    phase, day, dusk, suns, moons, main, light, lightK: [tint[0] * I, tint[1] * I, tint[2] * I], amb: L.light.amb, I, tint, lock: !!S.lock,
     aurora, zenith, horizon, fog: horizon, duskCol: S.dusk, stars: S.stars * (1 - day) * (1 - dusk * 0.5), starHue: S.starHue, rings: S.rings, pole: A.pole, cel,
   };
 }
@@ -113,6 +113,7 @@ export function applyWeather(st, L, W, clock) {
   st.zenith = mix(st.zenith, gray, W.dim * 1.4);
   if (W.dust > 0) st.horizon = mix(st.horizon, L.pal.desert.map((v) => v * (0.3 + 0.7 * I)), W.dust * 0.75);
   const dimK = 1 - W.dim * 0.55, fl = W.flash * 1.6;
+  st.dimK = dimK;
   st.lightK = [st.lightK[0] * dimK + fl, st.lightK[1] * dimK + fl, st.lightK[2] * dimK + fl * 1.1];
   st.fog = st.horizon;
   const cw = 0.0012 + 0.0004 * Math.min(1, A.wind / 6);         // хмари пливуть за вітром (зсув текстури — проти)
@@ -122,3 +123,27 @@ export function applyWeather(st, L, W, clock) {
   st.visK = vac ? 1.15 : W.vis * (1 - 0.45 * A.haze);
   return st;
 }
+
+// Світла для рушія (лінійні, як у PlayCanvas). Числа законів (I — ніч/день, amb — частка розсіяного, MIN) задано для
+// екрана, як у старому рендері: лінійне = екранне^2,2 — тож ніч, тінь і мінімум на екрані — як раніше.
+// Напрямлені — сонця над обрієм і місяці (найсильніші, не більше max): dir — до світила, col — колір (у гамі), k — лінійна
+// сила; amb — лінійне розсіяне (верх при сонці на REF_Z: Ea + Ed·REF_Z = S → колір палітри), min — мінімум яскравості
+export const REF_Z = 0.77, MIN_LIGHT = 0.03, NIGHT_TINT = [0.62, 0.72, 1.0];
+export function lightsOf(sk, max = 3) {
+  const L = [];
+  for (const s of sk.suns) {
+    const w = s.bright * smooth(-0.05, 0.25, s.dir[2]);
+    if (w <= 0) continue;
+    const dk = Math.max(0, 1 - Math.abs(s.dir[2] - 0.02) / 0.22) * (sk.lock ? 0.5 : 1), warm = Math.max(0, dk - 0.2);
+    L.push({ dir: s.dir, w, col: mix(mix([1, 1, 1], s.col.map((v) => v / 255), 0.6), sk.duskCol.map((v) => v / 255), warm * 0.5) });
+  }
+  for (const m of sk.moons) if (m.dir[2] > 0) L.push({ dir: m.dir, w: (1 - sk.day) * 0.5 * m.size / 0.08, col: NIGHT_TINT });
+  L.sort((a, b) => b.w - a.w); L.length = Math.min(L.length, max);
+  const W = L.reduce((s, l) => s + l.w, 0), S = (sk.I * (sk.dimK ?? 1)) ** 2.2, rho = sk.amb / (sk.amb + (1 - sk.amb) * REF_Z);
+  const Ea = S * rho ** 2.2, Ed = S * (1 - rho ** 2.2) / REF_Z;
+  for (const l of L) l.k = Ed * l.w / W;
+  return { dirs: L, amb: (W > 0 ? Ea : Ea + Ed * REF_Z) + (sk.flash ? (sk.flash * 1.6) ** 2.2 : 0), min: MIN_LIGHT ** 2.2 };
+}
+// Лінійна сила → intensity PlayCanvas: менша за 1 множить колір до переведення в лінійне ((колір·i)^2,2), тож корінь
+// 2,2-го степеня; від 1 — як є (src/scene/light.js, Light._updateLinearColor)
+export const pcIntensity = (k) => k < 1 ? k ** (1 / 2.2) : k;

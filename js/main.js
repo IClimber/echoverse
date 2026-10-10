@@ -1,10 +1,11 @@
 // main.js — запуск: меню світів, ігровий цикл (рух, стрибки, камера, підвантаження чанків), HUD, автозбереження.
 // ?strip — замість гри стенд «смуга всесвітів» (js/strip.js), ?flora — галерея видів рослин (js/flora-stand.js),
 // ?light — світло й тіні рушія (js/light-stand.js).
-import { createRenderer, BODY_R, budgetFor } from './render.js';
+import { createScene, BODY_R, budgetFor } from './scene.js';
+import { loadSettings } from './settings.js';
 import { createWorld, findSpawn, keepFor } from './world.js';
 import { createDevice, landing, landingChunks, CHARGE } from './device.js';
-import { step, support, windShelter, SPRINT, GRAVITY, FOOT, PLAYER_MASS, HIT_IMPULSE } from './player.js';
+import { step, support, standable, windShelter, SPRINT, GRAVITY, FOOT, PLAYER_MASS, HIT_IMPULSE } from './player.js';
 import { stepBody, windMoves, push, rayBody, collideBodies } from './engine/physics/bodies.js';
 import { initInput, moveAxis, turnAxis, sprintHeld, vertAxis, takeActions, takeWheel, takeDrag, clearInput, lockPointer, unlockPointer, locked } from './input.js';
 import { listWorlds, putWorld, deleteWorld, serialize, deserialize, newId } from './save.js';
@@ -14,7 +15,7 @@ import { CS, SEC, solidB, B_LIQ, B_MAGMA } from './gen/chunk.js';
 import { LEVEL } from './iso.js';
 import { debugText, fmtN } from './debug.js';
 import { animate } from './anim.js';
-import { clockStr } from './sky.js';
+import { clockStr, skyState, lightsOf } from './sky.js';
 import { weatherAt, localWeather, areaClimate } from './weather.js';
 import { createCamera, rotate, wheel, smooth, moveBasis, clipDist, camDist, facing, setYaw, basis, setViewChunks, setLod, ISO, THIRD, HEAD, VIEW_R } from './camera.js';
 import { createStreamer, visibleMissing } from './stream.js';
@@ -31,19 +32,17 @@ const QS = new URLSearchParams(location.search);
 if (QS.has('strip')) import('./strip.js').then((m) => m.runStrip());
 else if (QS.has('flora')) import('./flora-stand.js').then((m) => m.runFlora());
 else if (QS.has('light')) import('./light-stand.js').then((m) => m.runLight()).catch((e) => showErr('Стенд ?light: ' + e.message));
-else if (QS.has('pc')) import('./pc/render.js').then((m) => m.createRenderer($('gl'), { gpu: QS.get('gpu') })).then((r) => boot(() => r)).catch((e) => showErr('PlayCanvas не завантажився: ' + e.message));   // ?gpu=webgpu (типово — WebGL2: на еталонній машині швидший)
-else boot(createRenderer);
+else if (QS.has('old')) import('./render.js').then((m) => boot(m.createRenderer($('gl')))).catch(fail);   // старий рендер (до кроку 14 плану п. 1)
+else createScene($('gl'), loadSettings(QS)).then(boot).catch(fail);
 
-function boot(make) {
-  let renderer;
-  try { renderer = make($('gl')); }
-  catch (e) {
-    showErr('Браузер не підтримує WebGL2 — гра не запуститься. ' + e.message);
-    $('create').disabled = true;
-    return;
-  }
+function fail(e) {
+  showErr('Графіка не запустилась — гра не працюватиме. ' + e.message);
+  $('create').disabled = true;
+}
+
+function boot(renderer) {
   addEventListener('resize', () => renderer.resize());
-  const raf = renderer.raf || ((f) => requestAnimationFrame(f));   // ?pc — кадр гри з такту PlayCanvas
+  const raf = renderer.raf || ((f) => requestAnimationFrame(f));   // рушій PlayCanvas: кадр гри — з його такту
   initInput();
 
   let g = null;                              // поточна гра
@@ -81,8 +80,46 @@ function boot(make) {
       const st = g ? g.world.stats() : {}, R = renderer.R;
       return { fps: perf.fps, frameMs: perf.frameMs, p99: perf.p99, upd: perf.upd, drw: perf.drw, gpuMs: R.gpuMs, draws: R.stats.draws, tris: R.stats.tris,
         gpuMB: (R.stats.gpuBytes + R.stats.arenaBytes) / 1048576, colsPerSec: st.colsPerSec, pending: st.pending, cols: st.cols, secs: st.secs, meshes: renderer.meshCount, lod: [...renderer.lodCounts], workers: st.workers, streamMs: g ? g.streamMs : 0,
-        pcMs: R.cpuRenderMs, gpuPass: R.gpuPass, shTris: R.stats.shTris, shDraws: R.stats.shDraws };
+        pcMs: R.cpuRenderMs, gpuPass: R.gpuPass, shTris: R.stats.shTris, shDraws: R.stats.shDraws, ...lightStats() };
     },
+    // Годинник на фазу доби ph (0 — північ, 0,5 — полудень) поточного всесвіту; вічний день — ні (false)
+    setPhase(ph) { const c = clockFor(ph); if (c === null) return false; g.clock = c; return true; },
+    // Фаза 0…0,99 з найбільшою кількістю напрямлених світел (за рівності — найсильніших), ставить її
+    bestPhase() {
+      const L = g.world.laws(g.d, g.n), k = Math.max(1, Math.min(3, L.sky.suns.length + L.sky.moons.length));
+      let best = 0, bn = -1, bw = -1;
+      for (let i = 0; i < 100; i++) {
+        const c = clockFor(i / 100);
+        if (c === null) break;
+        const D = lightsOf(skyState(L, c), k).dirs, w = D.reduce((s, l) => s + l.k, 0);
+        if (D.length > bn || (D.length === bn && w > bw)) { best = i / 100; bn = D.length; bw = w; }
+      }
+      eco.setPhase(best);
+      return { phase: best, lights: bn };
+    },
+    // Погода для замірів: тип опадів ('rain' | 'snow' | 'dust' | 'acid'), сила 1; null — як є
+    weather(type) { wOver = type === undefined ? null : type; return wOver; },
+    // Найближча (до 48 клітинок) точка, де можна стати, з укриттям вище голови ≥ 4 одиниць (печера): гравець — туди
+    findCave() {
+      const P = g.world.probe(g.d, g.n), me = g.me;
+      let best = null, bd = Infinity;
+      for (let dy = -48; dy <= 48; dy += 2) for (let dx = -48; dx <= 48; dx += 2) {
+        const x = Math.floor(me.x) + dx + 0.5, y = Math.floor(me.y) + dy + 0.5, top = g.world.topAt(g.d, g.n, Math.floor(x), Math.floor(y));
+        if (top === null) continue;
+        for (let z = top - 6; z >= me.z - 30; z -= LEVEL) {
+          const d = Math.hypot(dx, dy, z - me.z);
+          if (d >= bd) continue;
+          if (standable(P, x, y, z)) { best = [x, y, z]; bd = d; break; }
+        }
+      }
+      if (!best) return null;
+      me.x = best[0]; me.y = best[1]; me.z = best[2]; me.vz = 0; me.vis = me.z; me.px = me.x; me.py = me.y; me.pv = me.z;
+      g.cam = [...best];
+      streamer.force();
+      return best;
+    },
+    settings() { return { ...loadSettings(QS), info: renderer.R.info }; },
+    toggleCamera() { toggleCam(); return camera.mode; },
     // Скинути кільця замірів (інтервали кадрів, час GPU) — заміри з чистого аркуша
     resetFrames() { frameN = 0; frameI = 0; if (renderer.R.gpuHist) renderer.R.gpuHistI = 0; },
     // ?pc: тіні сонця — 'off' | 'pcss' | 'pcf3' | {властивості світла PlayCanvas}
@@ -94,6 +131,30 @@ function boot(make) {
     // Видимого ще бракує (стовпців без зведення й секцій не в GPU) — заміри часу після стрибка
     visMissing() { return g && g.view ? visibleMissing(g, camera, renderer) : -1; },
   };
+
+  // Годинник, за якого фаза доби поточного всесвіту — ph (sky.js dayPhase); вічний день — null
+  function clockFor(ph) {
+    const L = g.world.laws(g.d, g.n), S = L.sky;
+    if (S.lock) return null;
+    const p = ((ph - S.off) % 1 + 1) % 1;
+    return p * S.dayMin * 60 / (L.phys ? L.phys.time : 1);
+  }
+  function lightStats() {
+    const i = renderer.R.info, gh = renderer.R.gpuHist;
+    let p99 = null;
+    if (gh) { const a = Array.from(gh).filter((v) => v > 0).sort((x, y) => x - y); if (a.length) p99 = a[Math.min(a.length - 1, Math.floor(a.length * 0.99))]; }
+    return { dirLights: i && i.lights ? i.lights.dir : null, locals: i && i.lights ? i.lights.local : null, gpuP99: p99, device: i ? i.device : 'webgl2-old', shadowsQ: i ? i.shadows : null };
+  }
+  let wOver = null;                                // ?dev: перевизначена погода
+  // V: третя особа ↔ згори
+  function toggleCam() {
+    camera.mode = camera.mode === ISO ? THIRD : ISO;
+    if (camera.mode === THIRD) setYaw(camera, g.me.yaw + Math.PI);        // за спину
+    else if (locked()) { unlockQuiet = true; unlockPointer(); }
+    store(CAM_KEY, camera.mode);
+    toast(camera.mode === ISO ? 'Камера: згори' : 'Камера: третя особа');
+    $('mouseHint').hidden = !(camera.mode === THIRD && !locked());
+  }
 
   // ================= Меню =================
   function showMenu() { unlockPointer(); $('menu').hidden = false; $('resume').hidden = !g; renderWorlds(); }
@@ -189,6 +250,7 @@ function boot(make) {
     putWorld(snapshot());
     hideMenu();
     $('hud').hidden = false; $('loading').hidden = false; $('debug').hidden = !showDebug;
+    if (renderer.warmUp) renderer.warmUp();          // шейдери для 3, 2, 1 напрямленого світла — за екраном завантаження
     if (rec.gen !== GEN) toast('Світ створено іншою версією генератора: незмінені місця можуть виглядати інакше');
   }
   async function quitGame(save) {
@@ -329,14 +391,7 @@ function boot(make) {
           toast(g.me.fly ? 'Політ: пробіл / Shift — угору / униз, пробіл двічі — вимкнути' : 'Політ вимкнено');
         } else { jump = true; spaceAt = now; }
       }
-      else if (a === 'camera') {
-        camera.mode = camera.mode === ISO ? THIRD : ISO;
-        if (camera.mode === THIRD) setYaw(camera, g.me.yaw + Math.PI);        // за спину
-        else if (locked()) { unlockQuiet = true; unlockPointer(); }
-        store(CAM_KEY, camera.mode);
-        toast(camera.mode === ISO ? 'Камера: згори' : 'Камера: третя особа');
-        $('mouseHint').hidden = !(camera.mode === THIRD && !locked());
-      }
+      else if (a === 'camera') toggleCam();
       else if (a === 'jumpPrev' || a === 'jumpNext') { if (g.dev.start([g.d, g.n + (a === 'jumpNext' ? 1 : -1)], a) === 'cancel') toast('Стрибок скасовано'); }
       else if (a === 'hit') { if (camera.mode === ISO || locked()) hit(now); }   // у третій особі перше клацання — захоплення миші
       else if (a === 'jumpRandom' || a === 'jumpRandomDepth') {
@@ -420,7 +475,7 @@ function boot(make) {
     const x0 = Math.floor(g.me.x) - 32, y0 = Math.floor(g.me.y) - 32, r = g.rain;
     if (r && r.x0 === x0 && r.y0 === y0 && r.d === g.d && r.n === g.n && now - r.at < 1000) return r;
     for (let j = 0; j < 64; j++) for (let i = 0; i < 64; i++) { const z = g.world.topAt(g.d, g.n, x0 + i, y0 + j); rainBuf[j * 64 + i] = z === null ? -1e4 : z; }
-    renderer.R.setRainMap(rainBuf);
+    if (renderer.setShelter) renderer.setShelter(rainBuf, x0, y0); else renderer.R.setRainMap(rainBuf);
     return (g.rain = { x0, y0, d: g.d, n: g.n, at: now });
   }
 
@@ -432,8 +487,8 @@ function boot(make) {
     const W = weatherAt(L, g.clock);
     if (me.placed) clim = areaClimate(L, me.x, me.y, clim);
     const C = me.placed && clim;
-    const loc = localWeather(L, W, !!C && C.cold, !!C && C.desert, !!C && C.arid);
-    const a = ch ? ch.t / CHARGE * (0.35 + 0.35 * Math.sin(now / 45)) : 0;
+    let loc = localWeather(L, W, !!C && C.cold, !!C && C.desert, !!C && C.arid);
+    if (wOver !== null) loc = { ...loc, type: wOver || null, k: 1 };
     const under = me.placed ? support(g.world.probe(g.d, g.n), me.x, me.y, me.z + 0.01) : null;
     const anim = animate(me, dt, now, physOf(L).speed * (me.run ? SPRINT * 0.85 : 1));
     if (!g.view) return;
@@ -446,7 +501,7 @@ function boot(make) {
     }
     const sk = renderer.draw({
       camera, target: g.cam, view: g.view, laws: L, far: g.far, clock: g.clock, bodies, weather: { W: loc.W, loc }, rain: me.placed && loc.type ? rainMap(now) : null,
-      me: me.placed ? { x: me.ix ?? me.x, y: me.iy ?? me.y, z: me.iv ?? me.vis ?? me.z, gz: under ? under.z : me.z, yaw: me.yaw, swim: me.swim, fly: me.fly, tint: [1 + a * 0.4, 1 + a, 1 + a * 1.3], anim } : null,
+      me: me.placed ? { x: me.ix ?? me.x, y: me.iy ?? me.y, z: me.iv ?? me.vis ?? me.z, gz: under ? under.z : me.z, yaw: me.yaw, swim: me.swim, fly: me.fly, anim } : null,
     });
     setText('addr', `Глибина ${g.d} · всесвіт ${fmtN(g.n)} · ${clockStr(sk.phase)}${L.sky.lock ? ' (вічно)' : ''}`);
     const an = g.ph && g.ph.anom ? ` · аномалія ×${g.ph.anom.toFixed(1).replace('.', ',')}` : '';
