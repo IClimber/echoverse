@@ -33,9 +33,12 @@ export function createLights(G, { shadows = 'pcf3' } = {}) {
 
   // ---- напрямлені: слоти ----
   // Каскади (приклад shadow-cascades): розподіл 0,5, змішування 0,1; зміщення 0,3 / 0,2. Головне — 4 каскади 2048;
-  // решта — без тіней. PCSS (приклад shadow-soft): 16 / 16 семплів, penumbraFalloff 4; penumbraSize — частка глибини
-  // каскаду, 0,01 (0,03 з прикладу на сцені 1000 одиниць у нас розмиває)
-  const typeOf = () => pcss() ? { shadowType: pc.SHADOW_PCSS_32F, shadowSamples: 16, shadowBlockerSamples: 16, penumbraSize: 0.01, penumbraFalloff: 4 } : { shadowType: pc.SHADOW_PCF3_32F };
+  // решта — без тіней. PCSS (приклад shadow-soft): 16 / 16 семплів. Півтінь (shadowSoft.js, PCSSDirectional): ширина
+  // пошуку блокерів = penumbraSize · глибина камери тіні (для PCSS — спільна AABB кидачів усіх каскадів, у нас ~300 од.,
+  // на низькому сонці — більше), півтінь біля контакту ≈ penumbraFalloff · penumbraSize · відстань до блокера. Тож
+  // falloff 16 і size 0,0025 дають ту саму м'якість біля контакту, що 4 і 0,01, а пошук — учетверо вужчий: менше
+  // промахів кешу текстур (11.10.2026: тайга опівдні 24,5 → 15,2 мс GPU, ліс 14,4 → 10,1)
+  const typeOf = () => pcss() ? { shadowType: pc.SHADOW_PCSS_32F, shadowSamples: 16, shadowBlockerSamples: 16, penumbraSize: 0.0025, penumbraFalloff: 16 } : { shadowType: pc.SHADOW_PCF3_32F };
   const slots = [];
   let shD = SHADOW_D, nDir = 0;
   const makeSlot = (i) => {
