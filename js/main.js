@@ -79,7 +79,7 @@ function boot(make) {
       const st = g ? g.world.stats() : {}, R = renderer.R;
       return { fps: perf.fps, frameMs: perf.frameMs, p99: perf.p99, upd: perf.upd, drw: perf.drw, gpuMs: R.gpuMs, draws: R.stats.draws, tris: R.stats.tris,
         gpuMB: (R.stats.gpuBytes + R.stats.arenaBytes) / 1048576, colsPerSec: st.colsPerSec, pending: st.pending, cols: st.cols, secs: st.secs, meshes: renderer.meshCount, lod: [...renderer.lodCounts], workers: st.workers, streamMs: g ? g.streamMs : 0,
-        pcMs: R.cpuRenderMs, gpuPass: R.gpuPass, shTris: R.stats.shTris };
+        pcMs: R.cpuRenderMs, gpuPass: R.gpuPass, shTris: R.stats.shTris, shDraws: R.stats.shDraws };
     },
     // ?pc: тіні сонця — 'off' | 'pcss' | 'pcf3' | {властивості світла PlayCanvas}
     shadows(m) { return renderer.setShadows ? renderer.setShadows(m) : null; },

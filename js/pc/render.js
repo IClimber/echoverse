@@ -14,7 +14,7 @@ import { poseMatrices } from '../anim.js';
 import { invert } from '../mat.js';
 import { skyState, applyWeather } from '../sky.js';
 import { ISO, VIEW_R, FAR_R, SEAM, viewProj, isoRadius, basis, aabbInView, aabbInside, colDist } from '../camera.js';
-import { regionOf, RW, RH, PO, PQ } from '../gen/pack.js';
+import { regionOf, RS, RW, RH, PO, PQ } from '../gen/pack.js';
 import { ck } from '../world.js';
 import { texturesOf, TEX } from '../textures.js';
 import { LAYERS } from '../gen/materials.js';
@@ -32,19 +32,33 @@ const rkey = (rx, ry, rz) => ((rx + 0x20000) * 0x40000 + (ry + 0x20000)) * 256 +
 // на шві, 5 — рослини зблизька, 6 + j — далекі рослини й каміння секцій (пара до списку j)
 const L_PLAIN = 1, L_RING = 2, L_LIQ = 3, L_LIQR = 4, L_FL = 5, L_OBJ = 6, NL = 9;
 const S16 = 65535 / PQ;                        // u16 нормовано (0…1) → одиниці
-// Сітки регіону: арена, матеріал, список кадру, чи кидає тінь (тіньові команди — buildShadow)
+// Сітки камери в регіоні: арена, матеріал, список кадру
 const MK = {
-  solid: { arena: 'op', mat: 'solid', list: L_PLAIN, cast: true }, solidR: { arena: 'op', mat: 'solidR', list: L_RING, cast: false },
-  obj: { arena: 'op', mat: 'obj', list: L_OBJ + L_PLAIN, cast: true }, objR: { arena: 'op', mat: 'objR', list: L_OBJ + L_RING, cast: false },
-  liq: { arena: 'liq', mat: 'liq', list: L_LIQ, cast: false }, liqR: { arena: 'liq', mat: 'liqR', list: L_LIQR, cast: false },
-  fl: { arena: 'fl', mat: 'fl', list: L_FL, cast: true },
+  solid: { arena: 'op', mat: 'solid', list: L_PLAIN }, solidR: { arena: 'op', mat: 'solidR', list: L_RING },
+  obj: { arena: 'op', mat: 'obj', list: L_OBJ + L_PLAIN }, objR: { arena: 'op', mat: 'objR', list: L_OBJ + L_RING },
+  liq: { arena: 'liq', mat: 'liq', list: L_LIQ }, liqR: { arena: 'liq', mat: 'liqR', list: L_LIQR },
+  fl: { arena: 'fl', mat: 'fl', list: L_FL },
 };
+// Кидачі тіней — окремі сітки в шарі «Тіні» (його бачить світло, не камера), по блоку BS×BS стовпців регіону: кожна зі своєю
+// AABB, тож PlayCanvas сам відсікає кидачів для кожного каскаду (стовпець уздовж світла навколо частини піраміди камери,
+// ShadowRendererDirectional.cull). Види: 0 — тверде разом з далекими рослинами й камінням секції (в арені вони поруч —
+// один діапазон замість двох; матеріал без відсікання граней), 2 — рослини зблизька. Ціна тіней — переважно кількість
+// діапазонів (карта 256 замість 2048 майже не дешевша), тож менше діапазонів — дешевше
+const BS = 2, NB = RS / BS, SK = [['obj', 'op'], null, ['fl', 'fl']];
+// Тіні — лише ближче SHADOW_D (від камери вздовж погляду; далі — без тіней, як у рушіях: Unreal — 200 м на 3 каскади)
+const SHADOW_D = 128;
+// Тіні сонця — як в офіційних прикладах PlayCanvas (engine/examples graphics/shadow-cascades і shadow-soft): 4 каскади
+// в одній карті 2048, розподіл 0,5, змішування 0,1, PCF3; зміщення 0,3 / 0,2; м'які — PCSS 16 / 16 семплів, penumbraFalloff 4.
 // penumbraSize у PCSS напрямленого — частка глибини каскаду (радіус пошуку = penumbraSize × глибина / ширина каскаду):
-// 1 (типове) розмиває тінь у ніщо, 0,003 — зубчаста, 0,01 — м'яка
-const SHADOW = {                               // ?dev eco.shadows(назва | {властивості світла})
+// 0,03 з прикладу (сцена 1000 одиниць) у нас розмиває, 0,01 — м'яка без сходинок.
+// stagger — дальні каскади рідше, як у прикладі: 1-й щокадру, 2-й раз на 5 кадрів, 3-й — на 10, 4-й — на 15;
+// 'spread' — ті самі періоди з рознесеними фазами (кадри ≡ 0 mod 5, 2 mod 10, 4 mod 15 не збігаються ніколи: за кадр — не
+// більше одного дальнього каскаду), true — фази з прикладу (раз на 30 кадрів оновлюються всі разом)
+const CASC = { castShadows: true, numCascades: 4, shadowResolution: 2048, cascadeDistribution: 0.5, cascadeBlend: 0.1, shadowBias: 0.3, normalOffsetBias: 0.2 };
+const SHADOW = {                               // ?dev eco.shadows(назва | {властивості світла, stagger, casters})
   off: { castShadows: false },
-  pcss: { castShadows: true, shadowType: pc.SHADOW_PCSS_32F, numCascades: 4, shadowResolution: 4096, cascadeDistribution: 0.7, cascadeBlend: 0.1, shadowSamples: 16, shadowBlockerSamples: 16, penumbraSize: 0.01 },
-  pcf3: { castShadows: true, shadowType: pc.SHADOW_PCF3_32F, numCascades: 4, shadowResolution: 4096, cascadeDistribution: 0.7, cascadeBlend: 0.1 },
+  pcf3: { ...CASC, shadowType: pc.SHADOW_PCF3_32F, stagger: 'spread', shadowDistance: SHADOW_D, casters: true },
+  pcss: { ...CASC, shadowType: pc.SHADOW_PCSS_32F, shadowSamples: 16, shadowBlockerSamples: 16, penumbraSize: 0.01, penumbraFalloff: 4, stagger: 'spread', shadowDistance: SHADOW_D, casters: true },
 };
 
 export function createRenderer(canvas) {
@@ -55,6 +69,8 @@ export function createRenderer(canvas) {
   if (dev.gpuProfiler) dev.gpuProfiler.enabled = true;
   const layer = app.scene.layers.getLayerByName('World'), skyLayer = app.scene.layers.getLayerByName('Skybox');
   layer.opaqueSortMode = pc.SORTMODE_FRONT2BACK;
+  const shLayer = new pc.Layer({ name: 'Тіні' });
+  app.scene.layers.push(shLayer);
   // Наші (x, y, z; z — угору) → PlayCanvas (x − Ox, z, y − Oy): root — поворот −90° навколо X і масштаб (1, −1, 1);
   // O — плаваючий початок (кратний 1024): позиції вузлів рахуються в JS (float64) уже відносно O
   const root = new pc.GraphNode('світ'); root.setLocalEulerAngles(-90, 0, 0); root.setLocalScale(1, -1, 1); app.root.addChild(root);
@@ -64,7 +80,8 @@ export function createRenderer(canvas) {
   app.root.addChild(camE);
   const cam = camE.camera;
   const sunE = new pc.Entity('сонце');
-  sunE.addComponent('light', { type: 'directional', intensity: 1, shadowDistance: VIEW_R, ...SHADOW.pcss });
+  const { stagger: _s, shadowDistance: _d, casters: _c, ...PCSS0 } = SHADOW.pcss;
+  sunE.addComponent('light', { type: 'directional', intensity: 1, shadowDistance: SHADOW_D, layers: [layer.id, shLayer.id], ...PCSS0 });
   app.root.addChild(sunE);
   const sun = sunE.light;
   app.scene.fog.type = pc.FOG_LINEAR;
@@ -99,7 +116,7 @@ export function createRenderer(canvas) {
 
   let cullOn = true;
   const R = {
-    gpuMs: null, gpuPass: {}, cpuRenderMs: 0,
+    gpuMs: null, gpuPass: {}, cpuRenderMs: 0, gpuHist: new Float32Array(600), gpuHistI: 0,   // GPU кожного кадру (кільце)
     stats: { draws: 0, tris: 0, shTris: 0, up: 0, upBytes: 0, gpuBytes: 0, arenaBytes: 0, arenaUsed: 0, over: false },
     get width() { return canvas.clientWidth || innerWidth; }, get height() { return canvas.clientHeight || innerHeight; },
     setCull(on) {
@@ -173,7 +190,7 @@ export function createRenderer(canvas) {
     const k = rkey(rx, ry, rz);
     let G = U.regions.get(k);
     if (!G) {
-      G = { rx, ry, rz, k, op: null, liq: null, fl: null, secs: new Map(), fls: new Map(), bb: [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity], seg: new Int32Array(NL * 2), mi: {}, shDirty: true, node: new pc.GraphNode() };
+      G = { rx, ry, rz, k, op: null, liq: null, fl: null, secs: new Map(), fls: new Map(), bb: [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity], seg: new Int32Array(NL * 2), mi: {}, sh: new Map(), shDirty: true, node: new pc.GraphNode() };
       G.node.setLocalScale(S16, S16, S16); root.addChild(G.node); place(G);
       U.regions.set(k, G);
     }
@@ -191,7 +208,8 @@ export function createRenderer(canvas) {
   };
   const dropRegion = (U, G) => {
     for (const k in G.mi) { const m = G.mi[k]; layer.removeMeshInstances([m]); m.destroy(); }
-    G.mi = {};
+    for (const m of G.sh.values()) { shLayer.removeMeshInstances([m]); m.destroy(); }
+    G.mi = {}; G.sh.clear();
     for (const A of [G.op, G.liq, G.fl]) if (A) A.drop();
     root.removeChild(G.node);
     for (const [k, E] of G.secs) { U.slots.delete(k); for (let l = 0; l < 3; l++) if (E.L[l]) nL[l]--; }
@@ -301,13 +319,12 @@ export function createRenderer(canvas) {
   // ---- сітки регіону й команди multi-draw ----
   function makeMI(G, k) {
     const K = MK[k], m = new pc.MeshInstance(G[K.arena].mesh, mats[K.mat], G.node);
-    m.castShadow = K.cast; m.visible = false; m.shV = 0;
-    m.cam = md(m, cam, 64); m.camCap = 64;              // свої команди камери: без них камера взяла б спільні (тіньові)
-    if (K.cast) { m.sh = md(m, null, 64); m.shCap = 64; }
+    m.castShadow = false; m.visible = false;
+    m.cam = md(m, cam, 64); m.camCap = 64;
     layer.addMeshInstances([m]);
     return (G.mi[k] = m);
   }
-  // діапазони F/C [a, b) у команди w ('cam' | 'sh'); → вершин
+  // діапазони F/C [a, b) у команди w ('cam' — камери, 'sh' — спільні: тіньові каскади); → вершин
   function fill(m, w, F, C, a, b) {
     const n = b - a;
     if (n > m[w + 'Cap']) { let c = m[w + 'Cap']; while (c < n) c *= 2; m[w + 'Cap'] = c; m[w] = md(m, w === 'cam' ? cam : null, c); }
@@ -316,32 +333,50 @@ export function createRenderer(canvas) {
     m[w].update(n);
     return v;
   }
-  // Тіньові (спільні) команди регіону: 0 — тверде, 1 — далекі рослини, 2 — рослини зблизька; у межах видимого
-  const SF = [0, 1, 2].map(() => new Int32Array(1024)), SC = [0, 1, 2].map(() => new Int32Array(1024)), SN = new Int32Array(3);
+  // Кидачі регіону: діапазони за блоками й видами (злиття сусідніх) і межі блоків (локальні регіону)
+  const NS = NB * NB * 3, SF = Array.from({ length: NS }, () => new Int32Array(256)), SC = Array.from({ length: NS }, () => new Int32Array(256)), SN = new Int32Array(NS);
+  const SB = new Float64Array(NB * NB * 6);
   const pushS = (i, off, n) => {
     const k = SN[i];
     if (k && SF[i][k - 1] + SC[i][k - 1] === off) { SC[i][k - 1] += n; return; }
     if (k >= SF[i].length) { const f = new Int32Array(k * 2), c = new Int32Array(k * 2); f.set(SF[i]); c.set(SC[i]); SF[i] = f; SC[i] = c; }
     SF[i][k] = off; SC[i][k] = n; SN[i] = k + 1;
   };
-  function buildShadow(U, G, t, rad) {
+  const growB = (b, bb) => { const o = b * 6; for (let i = 0; i < 3; i++) { if (bb[i] < SB[o + i]) SB[o + i] = bb[i]; if (bb[i + 3] > SB[o + i + 3]) SB[o + i + 3] = bb[i + 3]; } };
+  const blockOf = (G, cx, cy) => Math.floor((cx - G.rx * RS) / BS) + Math.floor((cy - G.ry * RS) / BS) * NB;
+  function buildShadow(U, G, t) {
     SN.fill(0);
+    for (let b = 0; b < NB * NB; b++) SB.set([Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity], b * 6);
     for (const E of G.secs.values()) {
       const sl = E.L[0];
-      if (!sl || sl.off < 0 || colDist(E.cx, E.cy, t) > rad) continue;
-      if (sl.ns) pushS(0, sl.off, sl.ns);
+      if (!sl || sl.off < 0 || !sl.bb) continue;
+      const b = blockOf(G, E.cx, E.cy);
       const dc = Math.hypot(E.cx * CS + CS / 2 - t[0], E.cy * CS + CS / 2 - t[1]);
-      const nf = dc < NEAR && U.flora.has(ck(E.cx, E.cy)) ? 0 : sl.nf;
-      if (nf) pushS(1, sl.off + sl.ns, nf);
+      const nf = dc < NEAR && U.flora.has(ck(E.cx, E.cy)) ? 0 : sl.nf;   // як у кадрі: зблизька — повні рослини замість спрощених
+      if (sl.ns + nf) pushS(b * 3, sl.off, sl.ns + nf);
+      if (sl.ns || nf) growB(b, sl.bb);
     }
     for (const f of G.fls.values()) {
-      if (f.off < 0 || !f.n) continue;
-      if (Math.hypot(f.cx * CS + CS / 2 - t[0], f.cy * CS + CS / 2 - t[1]) < NEAR) pushS(2, f.off, f.n);
+      if (f.off < 0 || !f.n || Math.hypot(f.cx * CS + CS / 2 - t[0], f.cy * CS + CS / 2 - t[1]) >= NEAR) continue;
+      const b = blockOf(G, f.cx, f.cy);
+      pushS(b * 3 + 2, f.off, f.n); growB(b, f.bb);
     }
-    for (const [i, k] of [[0, 'solid'], [1, 'obj'], [2, 'fl']]) {
-      if (!G[MK[k].arena]) continue;
-      const m = G.mi[k] || (SN[i] ? makeMI(G, k) : null);
-      if (m) m.shV = fill(m, 'sh', SF[i], SC[i], 0, SN[i]);
+    for (let b = 0; b < NB * NB; b++) for (let j = 0; j < 3; j++) {
+      if (!SK[j]) continue;
+      const i = b * 3 + j, key = i, [mk, arena] = SK[j];
+      let m = G.sh.get(key);
+      if (!SN[i] || !G[arena]) { if (m) m.visible = false; continue; }
+      if (!m) {
+        m = new pc.MeshInstance(G[arena].mesh, mats[mk], G.node);
+        m.castShadow = true; m.sh = md(m, null, 16); m.shCap = 16; m.kind = j;
+        shLayer.addMeshInstances([m]);
+        G.sh.set(key, m);
+      }
+      const o = b * 6, bb = new pc.BoundingBox();
+      bb.setMinMax(new pc.Vec3((SB[o] + PO[0]) / S16, (SB[o + 1] + PO[1]) / S16, (SB[o + 2] + PO[2]) / S16), new pc.Vec3((SB[o + 3] + PO[0]) / S16, (SB[o + 4] + PO[1]) / S16, (SB[o + 5] + PO[2]) / S16));
+      m.setCustomAabb(bb);
+      m.shV = fill(m, 'sh', SF[i], SC[i], 0, SN[i]);
+      m.visible = true;
     }
     G.shDirty = false;
   }
@@ -427,13 +462,23 @@ export function createRenderer(canvas) {
     P('uAur', [au.dir[0], au.dir[1], au.k, au.t % 10000]); P('uAurCol', c3(au.col));
   }
 
+  let stagger = 'spread', updMask = 15, shadowD = SHADOW_D;
+  const UPD = [pc.SHADOWUPDATE_REALTIME, pc.SHADOWUPDATE_NONE, pc.SHADOWUPDATE_NONE, pc.SHADOWUPDATE_NONE];
   const M4 = new pc.Mat4(), Q = new pc.Quat(), Q2 = new pc.Quat(), V3 = new pc.Vec3();
   let shownU = null, lastCol = '', lastRad = 0;
 
   return {
     R,
     raf(f) { next = f; },
-    setShadows(m) { Object.assign(sun, typeof m === 'string' ? SHADOW[m] : m); return R.info; },
+    // m.casters = false — без кидачів землі й рослин (лише фігура): діагностика вартості карти тіней
+    setShadows(m) {
+      const o = { ...(typeof m === 'string' ? SHADOW[m] : m) };
+      if ('casters' in o) { sun.layers = o.casters ? [layer.id, shLayer.id] : [layer.id]; delete o.casters; }
+      if ('shadowDistance' in o) { shadowD = o.shadowDistance; delete o.shadowDistance; }
+      if ('stagger' in o) { stagger = o.stagger; delete o.stagger; if (!stagger) sun.shadowUpdateOverrides = null; }
+      Object.assign(sun, o);
+      return R.info;
+    },
     resize() {},                                   // розмір канви PlayCanvas відстежує сам
     addSection(d, n, k, q, mesh) { pend.add(pkey('s' + (q.lod || 0), d, n, k)); upQ.push(['s', d, n, k, q, null, mesh]); },
     addFlora(d, n, k, q, data, mesh) { pend.add(pkey('f', d, n, k)); upQ.push(['f', d, n, k, q, data, mesh]); },
@@ -489,10 +534,23 @@ export function createRenderer(canvas) {
       // числа минулого кадру
       R.stats.up = R.stats.upBytes; R.stats.upBytes = 0; R.stats.draws = app.stats.drawCallCount;
       const gt = app.stats.gpuFrameTime;
-      if (gt !== undefined && gt > 0) R.gpuMs = R.gpuMs === null ? gt : R.gpuMs * 0.9 + gt * 0.1;
+      if (gt !== undefined && gt > 0) { R.gpuMs = R.gpuMs === null ? gt : R.gpuMs * 0.9 + gt * 0.1; R.gpuHist[R.gpuHistI++ % 600] = gt; }
       const pt = dev.gpuProfiler && dev.gpuProfiler.passTimings;
       if (pt) for (const [k, v] of pt) R.gpuPass[k] = R.gpuPass[k] === undefined ? v : R.gpuPass[k] * 0.9 + v * 0.1;
       R.cpuRenderMs = 0.9 * R.cpuRenderMs + 0.1 * (app.stats.cpuRenderTime || 0);
+      // тіні минулого кадру: кидачі й трикутники, що реально пішли в каскади
+      let shTris = 0, shDraws = 0, shRanges = 0;
+      R.stats.shCasc = [0, 0, 0, 0]; R.stats.shKind = [0, 0, 0, 0];
+      if (sun.enabled && sun.castShadows) for (let c = 0; c < sun.numCascades; c++) {
+        if (!(updMask & 1 << c)) continue;                // каскад минулого кадру не оновлювався
+        const rd = sun.light.getRenderData(cam.camera, c);
+        for (const m of rd.visibleCasters) {
+          const tr = (m.shV ?? m.mesh.primitive[0].count) / 3;
+          shDraws++; shTris += tr; shRanges += m.sh ? m.sh.count : 1;
+          R.stats.shCasc[c] += tr; R.stats.shKind[m.kind ?? 3] += tr;
+        }
+      }
+      R.stats.shTris = shTris; R.stats.shDraws = shDraws; R.stats.shRanges = shRanges;
 
       const { target: t, view, laws } = st, sk = skyState(laws, st.clock || 0), wt = st.weather;
       if (wt) applyWeather(sk, laws, wt.W, st.clock || 0);
@@ -540,7 +598,15 @@ export function createRenderer(canvas) {
       sunE.setRotation(Q2.setFromDirections(pc.Vec3.UP, V3.set(lx, lz, ly).normalize()));
       sun.color = new pc.Color(sk.lightK[0], sk.lightK[1], sk.lightK[2]);
       app.scene.ambientLight.set(sk.lightK[0] * amb, sk.lightK[1] * amb, sk.lightK[2] * amb);
-      sun.shadowDistance = iso ? 400 + view.rad : VIEW_R;
+      sun.shadowDistance = iso ? 400 + view.rad : shadowD;
+      if (stagger) {
+        const o2 = stagger === 'spread' ? 2 : 0, o3 = stagger === 'spread' ? 4 : 0;
+        UPD[1] = frame % 5 ? pc.SHADOWUPDATE_NONE : pc.SHADOWUPDATE_THISFRAME;
+        UPD[2] = frame % 10 !== o2 ? pc.SHADOWUPDATE_NONE : pc.SHADOWUPDATE_THISFRAME;
+        UPD[3] = frame % 15 !== o3 ? pc.SHADOWUPDATE_NONE : pc.SHADOWUPDATE_THISFRAME;
+        sun.shadowUpdateOverrides = UPD;
+        updMask = 1 | (UPD[1] !== pc.SHADOWUPDATE_NONE) << 1 | (UPD[2] !== pc.SHADOWUPDATE_NONE) << 2 | (UPD[3] !== pc.SHADOWUPDATE_NONE) << 3;
+      } else updMask = 15;
       const F = app.scene.fog;
       F.start = fogR[0]; F.end = fogR[1]; F.color.set(sk.fog[0] / 255, sk.fog[1] / 255, sk.fog[2] / 255);
       tgt[0] = t[0] - O[0]; tgt[1] = t[2]; tgt[2] = t[1] - O[1];
@@ -551,13 +617,14 @@ export function createRenderer(canvas) {
       const farOn = !!(st.far && st.far.length), rad = view.rad, U = uni(laws.d, laws.n);
       LN.fill(0); visRegs.length = 0;
       if (U !== shownU) {
-        if (shownU) for (const G of shownU.regions.values()) for (const k in G.mi) G.mi[k].visible = false;
+        if (shownU) for (const G of shownU.regions.values()) { for (const k in G.mi) G.mi[k].visible = false; for (const m of G.sh.values()) m.visible = false; }
         if (U) for (const G of U.regions.values()) G.shDirty = true;
         shownU = U;
       }
       const colK = `${Math.floor(t[0] / CS)},${Math.floor(t[1] / CS)}`;
-      if (U && (colK !== lastCol || rad !== lastRad)) { lastCol = colK; lastRad = rad; for (const G of U.regions.values()) G.shDirty = true; }
-      let tris = 0, shTris = 0;
+      // ціль у іншому стовпці — рослини зблизька й спрощені міняються лише біля неї
+      if (U && (colK !== lastCol || rad !== lastRad)) { lastCol = colK; lastRad = rad; for (const G of U.regions.values()) if (horiz(G, t) < NEAR + 2 * CS) G.shDirty = true; }
+      let tris = 0, camRanges = 0;
       if (U) {
         U.drawn = frame; U.at = performance.now();
         for (const G of U.regions.values()) {
@@ -606,16 +673,16 @@ export function createRenderer(canvas) {
         }
         // сітки регіонів: команди камери — видимі діапазони; кидачі — тіньові (buildShadow)
         for (const G of U.regions.values()) {
-          if (G.shDirty) buildShadow(U, G, t, rad);
+          if (G.shDirty) buildShadow(U, G, t);
           const on = G.drawn === frame;
           for (const k in MK) {
             const K = MK[k], a = on ? G.seg[K.list * 2] : 0, z = on ? G.seg[K.list * 2 + 1] : 0;
             let mi = G.mi[k];
             if (!mi) { if (z <= a || !G[K.arena]) continue; mi = makeMI(G, k); }
             const v = fill(mi, 'cam', LF[K.list], LC[K.list], a, z);
+            camRanges += z - a;
             tris += v / 3;
-            mi.visible = v > 0 || (K.cast && mi.shV > 0);      // кидач лишається видимим для тіней, навіть коли камера його не бачить
-            if (K.cast && mi.visible) shTris += mi.shV / 3;
+            mi.visible = v > 0;
           }
         }
       }
@@ -635,7 +702,7 @@ export function createRenderer(canvas) {
         figMI.visible = true;
       } else figMI.visible = false;
       if (frame % 60 === 0) maintain(U, t, rad, laws);
-      R.stats.tris = tris; R.stats.shTris = shTris;
+      R.stats.tris = tris; R.stats.camRanges = camRanges;
       return sk;
     },
   };
