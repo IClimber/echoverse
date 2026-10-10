@@ -1,8 +1,8 @@
 // scene.js — сцена гри на рушії PlayCanvas (js/engine/graphics): регіони секцій (щільні вершини в аренах, multi-draw;
 // далекі — звільняються), рослини зблизька, плитки далечі, фігура гравця, тіла екземплярами, опади частинками, небо з
 // розсіяним світлом, світла сонць і місяців з тінями, туман, «вікно» крізь те, що закриває гравця, розчинення рослин біля
-// ока. Облік (що в якому діапазоні, які видимі) — тут; об'єкти PlayCanvas — у рушії. Той самий API, що в старого рендера
-// (main.js, stream.js, debug.js). Камера — camera.js гри (третя особа чи ізометрія)
+// ока. Облік (що в якому діапазоні, які видимі) — тут; об'єкти PlayCanvas — у рушії. API для main.js, stream.js,
+// debug.js. Камера — camera.js гри (третя особа чи ізометрія)
 import { createApp, pc } from './engine/graphics/app.js';
 import { createMaterials } from './engine/graphics/materials.js';
 import { createRegions } from './engine/graphics/regions.js';

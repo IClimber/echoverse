@@ -32,7 +32,6 @@ const QS = new URLSearchParams(location.search);
 if (QS.has('strip')) import('./strip.js').then((m) => m.runStrip());
 else if (QS.has('flora')) import('./flora-stand.js').then((m) => m.runFlora());
 else if (QS.has('light')) import('./light-stand.js').then((m) => m.runLight()).catch((e) => showErr('Стенд ?light: ' + e.message));
-else if (QS.has('old')) import('./render.js').then((m) => boot(m.createRenderer($('gl')))).catch(fail);   // старий рендер (до кроку 14 плану п. 1)
 else createScene($('gl'), loadSettings(QS)).then(boot).catch(fail);
 const RESUME_KEY = 'echoverse-resume';       // світ, у який повернутися після перезавантаження (зміна графіки)
 
@@ -124,7 +123,7 @@ function boot(renderer) {
     // Скинути кільця замірів (інтервали кадрів, час GPU) — заміри з чистого аркуша
     resetFrames() { frameN = 0; frameI = 0; if (renderer.R.gpuHist) renderer.R.gpuHistI = 0; },
     // ?pc: тіні сонця — 'off' | 'pcss' | 'pcf3' | {властивості світла PlayCanvas}
-    shadows(m) { return renderer.setShadows ? renderer.setShadows(m) : null; },
+    shadows(m) { return renderer.setShadows(m); },
     // Рівні деталізації далекої землі: false — усе повне (порівняння)
     setLod(on) { setLod(on); streamer.force(); },
     // Відсікання задніх граней землі: false — усе з обох боків (порівняння)
@@ -175,7 +174,7 @@ function boot(renderer) {
     r.checked = r.value === cfg.shadows;
     r.onchange = () => {
       saveSetting('shadows', r.value);
-      if (renderer.setShadows) { renderer.setShadows(r.value); if (renderer.warmUp) renderer.warmUp(); }   // перекомпіляція — поки відкрите меню
+      renderer.setShadows(r.value); renderer.warmUp();   // перекомпіляція — поки відкрите меню
     };
   }
   if (info && !info.pcss) $('pcssNote').hidden = false;
@@ -286,7 +285,7 @@ function boot(renderer) {
     putWorld(snapshot());
     hideMenu();
     $('hud').hidden = false; $('loading').hidden = false; $('debug').hidden = !showDebug;
-    if (renderer.warmUp) renderer.warmUp();          // шейдери для 3, 2, 1 напрямленого світла — за екраном завантаження
+    renderer.warmUp();          // шейдери для 3, 2, 1 напрямленого світла — за екраном завантаження
     if (rec.gen !== GEN) toast('Світ створено іншою версією генератора: незмінені місця можуть виглядати інакше');
   }
   async function quitGame(save) {
@@ -519,7 +518,7 @@ function boot(renderer) {
     const x0 = Math.floor(g.me.x) - 32, y0 = Math.floor(g.me.y) - 32, r = g.rain;
     if (r && r.x0 === x0 && r.y0 === y0 && r.d === g.d && r.n === g.n && now - r.at < 1000) return r;
     for (let j = 0; j < 64; j++) for (let i = 0; i < 64; i++) { const z = g.world.topAt(g.d, g.n, x0 + i, y0 + j); rainBuf[j * 64 + i] = z === null ? -1e4 : z; }
-    if (renderer.setShelter) renderer.setShelter(rainBuf, x0, y0); else renderer.R.setRainMap(rainBuf);
+    renderer.setShelter(rainBuf, x0, y0);
     return (g.rain = { x0, y0, d: g.d, n: g.n, at: now });
   }
 

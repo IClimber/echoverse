@@ -6,7 +6,7 @@
 // uSunCol[3] (колір, яскравість), uMoon[3], uMoonCol[3] (rgb, 0), uNSun, uNMoon, uDay, uStars (яскравість, відтінок),
 // uCel (обертання зоряного неба), uRing (r0, r1, непрозорість, смуг), uRingCol, uPole, uCloud (хмарність, зсув x, y,
 // темність), uCloudCol, uFlash, uAur (напрям на полюс x, y, сила, час), uAurCol, eco_bakeK.
-// Тіло — небо старого рендера (js/gl.js SKY_FS) рядок у рядок. GLSL: уніформи — по одній на рядок
+// GLSL: уніформи — по одній на рядок
 
 export const SKY_GLSL = `
 uniform vec3 uZen;
