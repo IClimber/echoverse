@@ -1,5 +1,7 @@
 // js/engine/graphics/lights.js — світла засобами PlayCanvas (graphics/lighting/lights.md, shadows.md, clustered-lighting.md):
-// - напрямлені (сонця, місяці) — слоти з каскадними тінями. Напрямлені світла не кластерні: зміна їх кількості
+// - напрямлені (сонця, місяці) — слоти; тінь (каскадна) кидає лише головне — слот 0, решта без тіней (рішення
+//   користувача 11.10.2026: тінь від кількох сонць на око не відрізнити, а коштує по фільтру на піксель за кожне).
+//   Напрямлені світла не кластерні: зміна їх кількості
 //   перекомпільовує шейдери, тож кількість слотів стала на всесвіт (setDirectionalCount), порожній слот — intensity 0
 //   без оновлення тіні; warmUp — прогріти шейдери для 3, 2, 1 слотів (за екраном завантаження);
 // - точкові й прожектори — кластерні (шейдери не перекомпільовуються), тіні — в атласі, тип для всіх —
@@ -30,18 +32,18 @@ export function createLights(G, { shadows = 'pcf3' } = {}) {
   };
 
   // ---- напрямлені: слоти ----
-  // Каскади (приклад shadow-cascades): розподіл 0,5, змішування 0,1; зміщення 0,3 / 0,2. Головне — 4 каскади 2048,
-  // решта — 2 по 1024. PCSS (приклад shadow-soft): 16 / 16 семплів, penumbraFalloff 4; penumbraSize — частка глибини
+  // Каскади (приклад shadow-cascades): розподіл 0,5, змішування 0,1; зміщення 0,3 / 0,2. Головне — 4 каскади 2048;
+  // решта — без тіней. PCSS (приклад shadow-soft): 16 / 16 семплів, penumbraFalloff 4; penumbraSize — частка глибини
   // каскаду, 0,01 (0,03 з прикладу на сцені 1000 одиниць у нас розмиває)
   const typeOf = () => pcss() ? { shadowType: pc.SHADOW_PCSS_32F, shadowSamples: 16, shadowBlockerSamples: 16, penumbraSize: 0.01, penumbraFalloff: 4 } : { shadowType: pc.SHADOW_PCF3_32F };
   const slots = [];
   let shD = SHADOW_D, nDir = 0;
   const makeSlot = (i) => {
     const e = new pc.Entity(`світло ${i}`);
-    e.addComponent('light', {
+    e.addComponent('light', i ? { type: 'directional', intensity: 0, castShadows: false, layers: LAY } : {
       type: 'directional', intensity: 0, castShadows: true, shadowDistance: shD, layers: LAY,
       cascadeDistribution: 0.5, cascadeBlend: 0.1, shadowBias: 0.3, normalOffsetBias: 0.2,
-      numCascades: i ? 2 : 4, shadowResolution: i ? 1024 : 2048, shadowUpdateMode: pc.SHADOWUPDATE_NONE, ...typeOf(),
+      numCascades: 4, shadowResolution: 2048, shadowUpdateMode: pc.SHADOWUPDATE_NONE, ...typeOf(),
     });
     app.root.addChild(e);
     return { e, l: e.light, on: false, dir: [0, 0, 1] };
@@ -64,16 +66,16 @@ export function createLights(G, { shadows = 'pcf3' } = {}) {
       s.l.color = C.set(o.color[0], o.color[1], o.color[2]);
       s.l.intensity = o.intensity;
     } else s.l.intensity = 0;
-    if (on !== s.on) { s.l.shadowUpdateMode = on ? pc.SHADOWUPDATE_REALTIME : pc.SHADOWUPDATE_NONE; s.on = on; }
+    if (on !== s.on) { if (s.l.castShadows) s.l.shadowUpdateMode = on ? pc.SHADOWUPDATE_REALTIME : pc.SHADOWUPDATE_NONE; s.on = on; }
   }
-  function setShadowDistance(d) { shD = d; for (const s of slots) s.l.shadowDistance = d; }
+  function setShadowDistance(d) { shD = d; if (slots[0]) slots[0].l.shadowDistance = d; }
   // Прогрів: кадр із 3, 2, 1 слотом (кожна кількість — свій набір шейдерів), далі — як було, cb()
   function warmUp(cb) {
     const keep = nDir || 1, seq = [3, 2, 1];
     const step = () => {
       if (!seq.length) { setDirectionalCount(keep); if (cb) cb(); return; }
       setDirectionalCount(seq.shift());
-      for (const s of slots) { s.l.intensity = 0.001; s.l.shadowUpdateMode = pc.SHADOWUPDATE_THISFRAME; s.on = false; }
+      for (const s of slots) { s.l.intensity = 0.001; if (s.l.castShadows) s.l.shadowUpdateMode = pc.SHADOWUPDATE_THISFRAME; s.on = false; }
       app.once('postrender', step);
     };
     step();
@@ -128,7 +130,7 @@ export function createLights(G, { shadows = 'pcf3' } = {}) {
   function setQuality(s) {
     q = s;
     const t = typeOf();
-    for (const s2 of slots) Object.assign(s2.l, t);
+    if (slots[0]) Object.assign(slots[0].l, t);
     L.shadowType = pcss() ? pc.SHADOW_PCF5_32F : pc.SHADOW_PCF3_32F;
   }
   setQuality(q);
@@ -142,7 +144,7 @@ export function createLights(G, { shadows = 'pcf3' } = {}) {
     // напрямлені з тінями на кадр: [{dir — до світила, shD}] (для regions.cullCasters)
     dirs(out = []) {
       out.length = 0;
-      for (const s of slots) if (s.on) out.push({ dir: s.dir, shD: s.l.shadowDistance });
+      for (const s of slots) if (s.on && s.l.castShadows) out.push({ dir: s.dir, shD: s.l.shadowDistance });
       return out;
     },
     // увімкнені точкові джерела й прожектори з тінями: [{pos, range}] (наші координати)
@@ -153,7 +155,7 @@ export function createLights(G, { shadows = 'pcf3' } = {}) {
     },
     info() {
       let dir = 0, shadowed = 0;
-      for (const s of slots) if (s.on) { dir++; shadowed++; }
+      for (const s of slots) if (s.on) { dir++; if (s.l.castShadows) shadowed++; }
       let local = 0;
       for (const H of locals) if (H.e.enabled) { local++; if (H.e.light.castShadows) shadowed++; }
       return { dir, local, shadowed };
