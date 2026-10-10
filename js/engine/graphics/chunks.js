@@ -68,7 +68,7 @@ void getAlbedo() {
   #ifdef ECO_RING_OUT
     if (length(vPositionW.xz - eco_target.xz) < eco_seam) discard;
   #endif
-  float eco_m = vEcoMat;
+  float eco_m = floor(vEcoMat + 0.5);   // стала на трикутнику, але інтерполяція дає 18,9999 замість 19 — int() взяв би сусідній матеріал (мерехтіння)
   vec4 eco_p = eco_mat[int(min(eco_m, ${MAT_N - 1}.0))];
   vec3 an = abs(vNormalW), tp = vPositionW;
   vec2 uv = an.y >= max(an.x, an.z) ? tp.xz : (an.x >= an.z ? vec2(tp.z, -tp.y) : vec2(tp.x, -tp.y));
@@ -88,7 +88,7 @@ void getAlbedo() {
 `;
 const EMISSIVE_PS = `
 void getEmission() {
-  float eco_e = eco_mat[int(min(vEcoMat, ${MAT_N - 1}.0))].x;
+  float eco_e = eco_mat[int(min(floor(vEcoMat + 0.5), ${MAT_N - 1}.0))].x;
   dEmission = eco_col * max(eco_e, eco_minLight);
 }
 `;
@@ -174,7 +174,7 @@ var<private> eco_col: vec3f;
 // Похідні (dpdx) — лише в рівномірному потоці керування: координати — через select, шов (discard) — у кінці
 const DIFFUSE_PS_W = `
 fn getAlbedo() {
-  let eco_m: f32 = vEcoMat;
+  let eco_m: f32 = floor(vEcoMat + 0.5);   // див. GLSL: інтерполяція сталої не точна
   let eco_p: vec4f = uniform.eco_mat[i32(min(eco_m, ${MAT_N - 1}.0))];
   let an: vec3f = abs(vNormalW);
   let tp: vec3f = vPositionW;
@@ -206,7 +206,7 @@ fn getAlbedo() {
 `;
 const EMISSIVE_PS_W = `
 fn getEmission() {
-  let eco_e: f32 = uniform.eco_mat[i32(min(vEcoMat, ${MAT_N - 1}.0))].x;
+  let eco_e: f32 = uniform.eco_mat[i32(min(floor(vEcoMat + 0.5), ${MAT_N - 1}.0))].x;
   dEmission = eco_col * max(eco_e, uniform.eco_minLight);
 }
 `;
