@@ -19,9 +19,13 @@ const norm = (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] 
 const UP = [0, 0, 1];
 
 // Будівник шаблону: трикутники з власними вершинами (пласкі грані). Нормаль — від порядку вершин, повернута від
-// точки ref (усередині тіла); без ref — угору; flatUp — завжди (0, 0, 1): трава й пелюстки освітлені як земля
+// точки ref (усередині тіла); без ref — угору; flatUp — завжди (0, 0, 1): трава й пелюстки освітлені як земля.
+// Спрощений для далечі (cheap) — те саме дерево, лише грубіше: форма будується повністю (ті самі випадкові вибори —
+// той самий скелет, нахил, гілки й крона; LOD з одного скелета, як в EZ-Tree), спрощують лише примітиви (призма —
+// менше граней, без нижньої кришки, найтонші пропущено; грудка — октаедр). Форми бачать lod = 0 (11.10.2026, скарга:
+// здалеку дерево нахилене в інший бік і з іншими гілками, ніж зблизька — спрощений будувався з іншого зерна й варіанта)
 class Geo {
-  constructor(R, lod) { this.p = []; this.n = []; this.c = []; this.m = []; this.R = R; this.lod = lod; this.flatUp = false; }
+  constructor(R, lod) { this.p = []; this.n = []; this.c = []; this.m = []; this.R = R; this.lod = 0; this.cheap = lod; this.flatUp = false; }
   tri(a, b, c, col, mat, ref) {
     const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
     let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
@@ -55,7 +59,12 @@ function tilt(d, a, az) {
 }
 // Зрізана призма від a до b (радіуси r0, r1; r1 = 0 — конус). o: rot — поворот перерізу, star — ребра (зірчастий
 // переріз), cap / bot — кришка зверху / знизу (кольори capCol / botCol)
+const THIN = 0.025;                                        // спрощений: тонші призми (стебельця, пасма) пропускаємо
 function prism(G, a, b, r0, r1, sides, col, mat, o = {}) {
+  if (G.cheap) {
+    if (Math.max(r0, r1) < THIN) return;
+    sides = Math.min(sides, Math.max(r0, r1) > 0.06 ? 4 : 3); o = { ...o, star: 0, bot: false };
+  }
   const d = norm(sub(b, a)), [u, v] = frame(d), n = o.star ? sides * 2 : sides, rot = o.rot || 0;
   const ring = (c, r) => {
     const out = [];
@@ -82,13 +91,15 @@ const ICO = (() => {
   return { v, f };
 })();
 const OCT = { v: [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]], f: [[0, 2, 4], [2, 1, 4], [1, 3, 4], [3, 0, 4], [2, 0, 5], [1, 2, 5], [3, 1, 5], [0, 3, 5]] };
+// Випадкових чисел — стільки, скільки бере повна (ікосаедр), і в спрощеній: послідовність далі та сама
 function blob(G, c, rx, ry, rz, col, mat, o = {}) {
-  const P = G.lod || o.oct || Math.max(rx, ry, rz) < 0.1 ? OCT : ICO, R = G.R, jit = o.jit ?? 0.3, ca = Math.cos(o.az || 0), sa = Math.sin(o.az || 0);
-  const V = P.v.map(([x, y, z]) => {
-    const k = 1 + (R() - 0.5) * jit, X = x * rx * k, Y = y * ry * k;
+  const F = o.oct || Math.max(rx, ry, rz) < 0.1 ? OCT : ICO, P = G.cheap ? OCT : F, R = G.R, jit = o.jit ?? 0.3, ca = Math.cos(o.az || 0), sa = Math.sin(o.az || 0);
+  const K = F.v.map(() => 1 + (R() - 0.5) * jit), S = o.shade ? F.f.map(() => sh(col, 0.9 + R() * 0.18)) : null;
+  const V = P.v.map(([x, y, z], i) => {
+    const k = K[i], X = x * rx * k, Y = y * ry * k;
     return [c[0] + X * ca - Y * sa, c[1] + X * sa + Y * ca, c[2] + z * rz * k];
   });
-  for (const [i, j, k] of P.f) G.tri(V[i], V[j], V[k], o.shade ? sh(col, 0.9 + R() * 0.18) : col, mat, c);
+  P.f.forEach(([i, j, k], f) => G.tri(V[i], V[j], V[k], S ? S[f] : col, mat, c));
 }
 // Пласка смужка вздовж точок pts з шириною w(t) (лист пальми, папороті): ширина — поперек напряму side
 function strip(G, pts, side, w, col, mat) {
@@ -141,8 +152,8 @@ function tree(G, g, o) {
     if (!lod && len > 0.6 && segs > 0) {
       const mid = add(pos, mul(dir, len / 2));
       end = add(mid, mul(d2, len / 2));
-      prism(G, pos, mid, r, r * 0.86, sides, barkCol, barkMat);
-      prism(G, mid, end, r * 0.86, r * 0.72, sides, barkCol, barkMat);
+      if (G.cheap) prism(G, pos, end, r, r * 0.72, sides, barkCol, barkMat);   // спрощений: вигин — прямо до того самого кінця
+      else { prism(G, pos, mid, r, r * 0.86, sides, barkCol, barkMat); prism(G, mid, end, r * 0.86, r * 0.72, sides, barkCol, barkMat); }
       segs--;
     } else { end = add(pos, mul(norm(add(dir, d2)), len)); prism(G, pos, end, r, r * 0.72, sides, barkCol, barkMat); }
     if (lvl >= o.levels || segs <= 0) { crown(end, d2); return; }
@@ -516,7 +527,7 @@ export function template(g, variant, lod, style) {
   const key = `${g.key}:${style || ''}:${variant}:${lod}`;
   let T = cache.get(key);
   if (T) { cache.delete(key); cache.set(key, T); return T; }   // LRU: порядок Map — давність
-  const G = new Geo(rng((g.id ^ Math.imul(variant + 1, 0x9e3779b9) ^ (lod ? 0x51ed : 0)) >>> 0), lod);
+  const G = new Geo(rng((g.id ^ Math.imul(variant + 1, 0x9e3779b9)) >>> 0), lod);     // спрощений — те саме зерно: той самий скелет
   if (style) STONE[style](G, g); else FORM[g.form](G, g);
   T = G.finish();
   T.a = templateAO(T, style ? 'stone' : g.big ? 'big' : 'small');

@@ -322,7 +322,8 @@ test('рослини: дерева не впритул (між стовбура�
     for (const lod of FORMS[form].big ? [0, 1] : [0]) {
       const T = template(g, i % 3, lod);
       assert.ok(T.verts > 0 && T.verts % 3 === 0, form);
-      assert.ok(T.verts <= (lod ? 700 : FORMS[form].big ? 3000 : 1200), `${form} lod ${lod}: ${T.verts} вершин`);
+      // спрощений — той самий скелет, грубіші примітиви: не більший за повний
+      assert.ok(T.verts <= (lod ? Math.min(1800, template(g, i % 3, 0).verts) : FORMS[form].big ? 3000 : 1200), `${form} lod ${lod}: ${T.verts} вершин`);
       for (const v of T.p) assert.ok(Number.isFinite(v) && Math.abs(v) < 20, form);
     }
   }

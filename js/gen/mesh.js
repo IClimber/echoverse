@@ -405,7 +405,7 @@ function objMeshes(C, L, K0, NK, near, far, dz = 0) {
     if (o.k === O_TREE) {
       const tl = ((v >> 2 & 7) / 7) * 0.1;
       if (near) place(F, template(g, v % 3, 0), cx, cy, z, rot, s, tl, cj, sk);
-      if (far) place(Ff, template(g, 0, 1), cx, cy, z, rot, s, tl, cj, sk);
+      if (far) place(Ff, template(g, v % 3, 1), cx, cy, z, rot, s, tl, cj, sk);   // той самий варіант, спрощений
     } else if (o.k === O_COVER) { if (near) place(F, template(g, v & 1, 0), cx, cy, z, rot, s, 0, cj, sk); }
     else { const T = template(o.st ? stoneGenome(L, g, o.st) : g, v & 3, 0, styleOf(g, v)); if (near) place(F, T, cx, cy, z, rot, s, 0, cj, sk); if (far) place(Ff, T, cx, cy, z, rot, s, 0, cj, sk); }
   }
