@@ -44,7 +44,7 @@ import { lawsOf } from '../js/universe.js';
 import { genChunk, genCol, genSection, CS, SEC } from '../js/gen/chunk.js';
 import { chunkMesh, objPose } from '../js/gen/mesh.js';
 import { colSummary } from '../js/gen/job.js';
-import { packMesh, unpack, meshHash, meshDigest, regionOf, frameOf, packStats, VB, RS } from '../js/gen/pack.js';
+import { packMesh, unpack, meshHash, meshDigest, regionOf, frameOf, packStats, VB, RS, RW, RH } from '../js/gen/pack.js';
 import { createAlloc } from '../js/engine/graphics/arena.js';
 import { SPOTS, MESH_GOLD } from '../js/golden.js';
 import { LEVEL } from '../js/iso.js';
@@ -396,8 +396,9 @@ function aoSection(solid, top) {
 const upVerts = (m) => { const r = []; for (let v = 0; v < m.mat.length; v++) if (m.nor[v * 3 + 2] > 100) r.push(v); return r; };
 test('AO: рівна відкрита поверхня — 255 і одним прямокутником; кут біля стіни — темніше; під укриттям — темно', () => {
   const L = lawsOf(hashStr('ao'), 0, 0);
+  // один прямокутник: ребра на межах секції поділено в кожній цілій точці (64) + центр віяла
   const flat = chunkMesh(aoSection((x, y, k) => k < 4, 4), L).solid, up = upVerts(flat);
-  assert.equal(up.length, 4);
+  assert.equal(up.length, 65);
   for (const v of up) assert.equal(flat.ao[v], 255);
   const wall = chunkMesh(aoSection((x, y, k) => k < 4 || (x >= 8 && k < 6), (x) => x >= 8 ? 6 : 4), L).solid;
   const foot = [], far = [];
@@ -412,6 +413,34 @@ test('AO: рівна відкрита поверхня — 255 і одним п�
   for (const v of upVerts(deep)) assert.equal(deep.ao[v], 0);
   const mid = chunkMesh(aoSection((x, y, k) => k < 4, 9), L).solid;
   for (const v of upVerts(mid)) assert.equal(mid.ao[v], 128);
+});
+// T-стики: вершина однієї грані посеред ребра іншої дає щілини (шов уздовж межі чанків) — у секціях їх немає
+test('тверде без T-стиків: жодна вершина не лежить посеред осевого ребра (сусідні секції разом)', () => {
+  const L = lawsOf(hashStr('test'), 0, 1), cache = new Map(), V = new Set(), E = [];
+  const key = (p) => p.map((v) => Math.round(v * 8)).join(',');
+  for (let cx = -2; cx < 1; cx++) for (let cy = -2; cy < 1; cy++) {
+    const C = runJob(L, { type: 'col', d: 0, n: 1, cx, cy }, cache).data;
+    for (let cz = C.czLo; cz <= C.czHi; cz++) {
+      const r = runJob(L, { type: 'sec', d: 0, n: 1, cx, cy, cz }, cache);
+      if (!r.mesh || !r.mesh.ns) continue;
+      const u = unpack(r.mesh.op), [rx, ry, rz] = regionOf(cx, cy, cz), O = [rx * RW, ry * RW, rz * RH];
+      for (let t = 0; t < r.mesh.ns; t += 3) {
+        const v = [0, 1, 2].map((k) => [0, 1, 2].map((a) => u.pos[(t + k) * 3 + a] + O[a]));
+        for (const p of v) V.add(key(p));
+        for (let k = 0; k < 3; k++) E.push([v[k], v[(k + 1) % 3]]);
+      }
+    }
+  }
+  assert.ok(E.length > 1000);
+  let tj = 0;
+  for (const [a, b] of E) {
+    const df = [0, 1, 2].filter((i) => a[i] !== b[i]);
+    if (df.length !== 1) continue;
+    const ax = df[0], s = ax === 2 ? LEVEL : 1, lo = Math.min(a[ax], b[ax]), hi = Math.max(a[ax], b[ax]);
+    if (lo !== Math.round(lo / s) * s) continue;
+    for (let t = lo + s; t < hi - 1e-9; t += s) { const p = a.slice(); p[ax] = t; if (V.has(key(p))) tj++; }
+  }
+  assert.equal(tj, 0);
 });
 test('AO шаблону рослини: темніше знизу, у 0…255', () => {
   const L = lawsOf(hashStr('ao'), 0, 0), reg = regAt(L, 10, 10);

@@ -153,6 +153,13 @@ export function chunkMesh(C, L, { near = true, far = true } = {}) {
   const mask = new Float64Array(N * N), looks = new Array(N * N);
   // Подвійна ґратка: вершина куба з нижнім кутом у центрі блоку (x, y, k), x, y ∈ −1…CS−1, k ∈ −1…NK−1 (кеш)
   const NX = N + 1, VC = new Float32Array(NX * NX * (NK + 1) * 3).fill(NaN), VA = new Uint8Array(NX * NX * (NK + 1));
+  // T-стики: вершина однієї грані посеред ребра іншої — растеризатор лишає щілини в піксель (видно небо: шов уздовж
+  // межі чанків). Тож злиті прямокутники відкладаємо (FQ) і в кінці ділимо їхні ребра в точках, де є вершина будь-якої
+  // іншої грані секції (VS — цілі точки ґратки: x, y ∈ −1…N+1, рівень k ∈ −1…NK+1), а на межах секції (x, y = 0 чи N,
+  // k = 0 чи NK) — у кожній цілій точці: сусідня секція робить те саме, і з обох боків вершини збігаються
+  const VSX = N + 3, VSK = NK + 3, VS = new Uint8Array(VSX * VSX * VSK), FQ = [];
+  const vsI = (x, y, k) => x < -1 || y < -1 || k < -1 || x > N + 1 || y > N + 1 || k > NK + 1 ? -1 : ((k + 1) * VSX + y + 1) * VSX + x + 1;
+  const markV = (x, y, k) => { if (x === Math.round(x) && y === Math.round(y) && k === Math.round(k)) { const i = vsI(x, y, k); if (i >= 0) VS[i] = 1; } };
   // AO вершини (0fps, «Ambient occlusion for Minecraft-like worlds»): кут — за кількістю твердих блоків куба 2×2×2 навколо
   // вершини (до 4 — відкрито, далі — увігнутий кут темніший); небо — наскільки верх укриття клітинки (C.top, блоки) вище
   // вершини: ≤ 1 блок — відкрито, ≥ 9 — темно (печера, під навісом); середнє чотирьох клітинок навколо вершини
@@ -232,6 +239,7 @@ export function chunkMesh(C, L, { near = true, far = true } = {}) {
     else if (nz < -0.42) lk = look(b, 5, x, y, k);
     else lk = look(b, d, x, y, k);
     const N0 = nx * 127 | 0, N1 = ny * 127 | 0, N2 = nz * 127 | 0, i = T.n, p1 = flip ? c : bb, p2 = flip ? bb : c, cl = lk[1], m = lk[0];
+    if (T === M) for (const o of [a, bb, c]) markV(VC[o], VC[o + 1], VC[o + 2] / LEVEL);
     T.vert(VC[a] * ST + OF, VC[a + 1] * ST + OF, VC[a + 2] * ST + OZ, N0, N1, N2, cl, m, VA[a / 3]);
     T.vert(VC[p1] * ST + OF, VC[p1 + 1] * ST + OF, VC[p1 + 2] * ST + OZ, N0, N1, N2, cl, m, VA[p1 / 3]);
     T.vert(VC[p2] * ST + OF, VC[p2 + 1] * ST + OF, VC[p2 + 2] * ST + OZ, N0, N1, N2, cl, m, VA[p2 / 3]);
@@ -254,6 +262,8 @@ export function chunkMesh(C, L, { near = true, far = true } = {}) {
     return -1;
   };
   const aoM = new Uint8Array(N * N);
+  // Злитий прямокутник (кути — точки ґратки [x, y, рівень], по колу назовні): у FQ, кути — у VS
+  const fq = (a, b, c, d, nx, ny, nz, col, mt, ao) => { for (const p of [a, b, c, d]) markV(p[0], p[1], p[2]); FQ.push([a, b, c, d, nx, ny, nz, col, mt, ao]); };
   // Шари без граней (усе своє й сусіди — суцільне, чи твердого немає) пропускаємо: результат той самий, у рази швидше.
   // inS[k] — твердих у шарі k (без рамки), allS[k] — з рамкою, inL[k] — рідини (без рамки); k ∈ −1…NK
   const inS = new Int32Array(NK + 2), allS = new Int32Array(NK + 2), inL = new Int32Array(NK + 2);
@@ -293,7 +303,7 @@ export function chunkMesh(C, L, { near = true, far = true } = {}) {
         }
       }
       if (!any) continue;
-      const z = (d === 4 ? k + 1 : k) * LEVEL, nz = d === 4 ? 1 : -1;
+      const kz = d === 4 ? k + 1 : k, nz = d === 4 ? 1 : -1;
       for (let y = 0; y < N; y++) for (let x = 0; x < N; ) {
         const m = mask[y * N + x];
         if (!m) { x++; continue; }
@@ -301,13 +311,12 @@ export function chunkMesh(C, L, { near = true, far = true } = {}) {
         let h = 1;
         grow: while (y + h < N) { for (let q = 0; q < w; q++) if (mask[(y + h) * N + x + q] !== m) break grow; h++; }
         for (let yy = 0; yy < h; yy++) for (let q = 0; q < w; q++) mask[(y + yy) * N + x + q] = 0;
-        const [mt, c] = looks[y * N + x], ao = aoM[y * N + x], p0 = mp(x, y, z), p1 = mp(x + w, y, z), p2 = mp(x + w, y + h, z), p3 = mp(x, y + h, z);
-        if (d === 4) M.quad(p0, p1, p2, p3, 0, 0, nz, c, mt, ao); else M.quad(p0, p3, p2, p1, 0, 0, nz, c, mt, ao);   // низ — навпаки
+        const [mt, c] = looks[y * N + x], ao = aoM[y * N + x], p0 = [x, y, kz], p1 = [x + w, y, kz], p2 = [x + w, y + h, kz], p3 = [x, y + h, kz];
+        if (d === 4) fq(p0, p1, p2, p3, 0, 0, nz, c, mt, ao); else fq(p0, p3, p2, p1, 0, 0, nz, c, mt, ao);   // низ — навпаки
         x += w;
       }
     }
     // Боки: уздовж ряду (для ±x — уздовж y, для ±y — уздовж x)
-    const z0 = k * LEVEL, z1 = z0 + LEVEL;
     for (let d = 0; d < 4; d++) {
       if (!(anyF & 1 << d)) continue;
       const [dx, dy] = DIRS[d];
@@ -319,11 +328,11 @@ export function chunkMesh(C, L, { near = true, far = true } = {}) {
           const s0 = end - run, [mt, c] = rl, ao = ra;
           // порядок p0…p3 дає −x і +y; для +x і −y — навпаки (назовні)
           if (dx) {
-            const X = dx > 0 ? r + 1 : r, p0 = mp(X, s0, z1), p1 = mp(X, end, z1), p2 = mp(X, end, z0), p3 = mp(X, s0, z0);
-            if (dx < 0) M.quad(p0, p1, p2, p3, dx, 0, 0, c, mt, ao); else M.quad(p0, p3, p2, p1, dx, 0, 0, c, mt, ao);
+            const X = dx > 0 ? r + 1 : r, p0 = [X, s0, k + 1], p1 = [X, end, k + 1], p2 = [X, end, k], p3 = [X, s0, k];
+            if (dx < 0) fq(p0, p1, p2, p3, dx, 0, 0, c, mt, ao); else fq(p0, p3, p2, p1, dx, 0, 0, c, mt, ao);
           } else {
-            const Y = dy > 0 ? r + 1 : r, p0 = mp(s0, Y, z1), p1 = mp(end, Y, z1), p2 = mp(end, Y, z0), p3 = mp(s0, Y, z0);
-            if (dy > 0) M.quad(p0, p1, p2, p3, 0, dy, 0, c, mt, ao); else M.quad(p0, p3, p2, p1, 0, dy, 0, c, mt, ao);
+            const Y = dy > 0 ? r + 1 : r, p0 = [s0, Y, k + 1], p1 = [end, Y, k + 1], p2 = [end, Y, k], p3 = [s0, Y, k];
+            if (dy > 0) fq(p0, p1, p2, p3, 0, dy, 0, c, mt, ao); else fq(p0, p3, p2, p1, 0, dy, 0, c, mt, ao);
           }
           run = 0;
         };
@@ -340,6 +349,28 @@ export function chunkMesh(C, L, { near = true, far = true } = {}) {
         flush(N);
       }
     }
+  }
+  // Злиті прямокутники: ребро — з точками поділу (VS чи межа секції); немає — два трикутники, є — віяло від центру
+  // (вершини по колу, жодного виродженого трикутника)
+  const ring = [], onB = (v, n) => v === 0 || v === n;
+  for (const [a, b, c, d, nx, ny, nz, col, mt, ao] of FQ) {
+    ring.length = 0;
+    let split = false;
+    for (const [p, q] of [[a, b], [b, c], [c, d], [d, a]]) {
+      ring.push(p);
+      const ax = p[0] !== q[0] ? 0 : p[1] !== q[1] ? 1 : 2, len = Math.abs(q[ax] - p[ax]), st = q[ax] > p[ax] ? 1 : -1;
+      if (ax === 2 || len < 2) continue;                   // уздовж висоти ребро — один рівень
+      const o = 1 - ax, bord = onB(p[o], N) || onB(p[2], NK);
+      for (let t = 1; t < len; t++) {
+        const r = p.slice(); r[ax] += st * t;
+        if (bord || VS[vsI(r[0], r[1], r[2])]) { ring.push(r); split = true; }
+      }
+    }
+    const N3 = [nx * 127 | 0, ny * 127 | 0, nz * 127 | 0];
+    if (!split) { M.quad(mp(a[0], a[1], a[2] * LEVEL), mp(b[0], b[1], b[2] * LEVEL), mp(c[0], c[1], c[2] * LEVEL), mp(d[0], d[1], d[2] * LEVEL), nx, ny, nz, col, mt, ao); continue; }
+    const cp = mp((a[0] + c[0]) / 2, (a[1] + c[1]) / 2, (a[2] + c[2]) / 2 * LEVEL), i0 = M.vert(cp[0], cp[1], cp[2], N3[0], N3[1], N3[2], col, mt, ao);
+    for (const r of ring) { const q = mp(r[0], r[1], r[2] * LEVEL); M.vert(q[0], q[1], q[2], N3[0], N3[1], N3[2], col, mt, ao); }
+    for (let j = 0; j < ring.length; j++) M.idx(i0, i0 + 1 + j, i0 + 1 + (j + 1) % ring.length);
   }
   // Обрізи (лише груба ґратка): грані власних твердих точок на 4 бічних межах секції в бік твердої точки рамки — так,
   // ніби там повітря, — лише біля поверхні (у площині межі поруч, у власному шарі чи в рамці, є не тверда точка).
