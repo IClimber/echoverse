@@ -216,6 +216,27 @@ test('пірнання: Ctrl — униз, відпустив — спливає
   assert.ok(q.x - x0 > 1 && q.z - z0 < -0.5 && q.pose === 'swim', `Shift + W: Δx ${q.x - x0}, Δz ${q.z - z0}, ${q.pose}`);
 });
 
+test('плавання за поглядом: на поверхні до 30° униз — поверхнею, нижче — пірнаєш; під водою — за поглядом; відпустив — виштовхує', () => {
+  const P = pool(), dir = (deg) => [Math.cos(deg * Math.PI / 180), 0, -Math.sin(deg * Math.PI / 180)], fz = SURF - FLOAT_Z;
+  const p = man(-30.5, 0.5, fz);
+  go(p, P, 60, 0, 0);
+  const x0 = p.x;
+  go(p, P, 120, 0, -1, { look: dir(20) }, PH1, TO_WALL);
+  assert.ok(!p.dive && Math.abs(p.z - fz) < 0.05 && p.x - x0 > 1, `20° униз — поверхнею: ${p.z} ${p.dive} Δx ${p.x - x0}`);
+  go(p, P, 120, 0, -1, { look: dir(45) }, PH1, TO_WALL);
+  assert.ok(p.dive && p.z < fz - 0.5, `45° униз — пірнаєш: ${p.z}`);
+  const z1 = p.z;
+  go(p, P, 60, 0, -1, { look: dir(20) }, PH1, TO_WALL);
+  assert.ok(p.z < z1 - 0.15, `під водою 20° униз — далі вниз: ${z1} → ${p.z}`);
+  const z2 = p.z;
+  go(p, P, 60, 0, -1, { look: dir(-30) }, PH1, TO_WALL);
+  assert.ok(p.z > z2 + 0.2, `погляд угору — угору: ${z2} → ${p.z}`);
+  go(p, P, 120, 0, -1, { look: dir(80) }, PH1, TO_WALL);
+  const z3 = p.z;
+  go(p, P, 1440, 0, 0);                                    // з дна (z 1) — 0,3 од/с
+  assert.ok(!p.dive && Math.abs(p.z - fz) < 0.05 && z3 < fz - 1, `відпустив — виштовхує: ${z3} → ${p.z} ${p.dive}`);
+});
+
 test('під водою щілину в 1 блок пропливаєш бігом (поза плавання), без бігу — ні', () => {
   const P = pool(true), L = [1, 0, 0];
   const s = man(7.5, 0.5, 1.56);

@@ -25,6 +25,7 @@ export const SPRINT = 1.6;           // біг (Shift): множник швид�
 // Політ: клітинок за секунду по горизонталі, з Shift. ТИМЧАСОВО на час розробки (користувач, 11.10.2026) — 48 / 120;
 // у грі повернути 12 / 24 (×2, як у Minecraft) — docs/roadmap.md, «Інше»
 export const FLY_SPEED = 48, FLY_FAST = 120;
+export const DIVE_Z = 0.5;           // на поверхні пірнаєш поглядом, лише коли він нижче 30° (sin 30°)
 export const FLY_V = 8;              // політ: швидкість угору / униз
 const FLY_TOP = 2040;                // політ: вище цієї висоти не піднятися (майже верх світу)
 const CLIMB_OUT = 2;                 // з рідини можна вилізти на берег до 2 блоків над її поверхнею
@@ -271,12 +272,16 @@ export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
     }
   }
   if (p.climb && climbStep(p, ix, iy, jump, dt, P, C, ph, ctl)) return finish(p, dt, P, ph);
-  // Пірнання (рідина тримає): Ctrl — униз; відпустив і без бігу дійшов до рівня плавання — знову на поверхні.
-  // Біг під рідиною (Shift + W, не на дні) — уздовж погляду, поза плавання (низька форма: щілина в 1 блок)
+  // Пірнання (рідина тримає): пливеш туди, куди дивишся (W / S — уздовж погляду камери, як у Minecraft), Ctrl — униз;
+  // на поверхні пірнаєш, лише коли погляд нижче DIVE_Z (30°: камера третьої особи типово дивиться на фігуру згори —
+  // рішення користувача 11.10.2026); перестав пливти вниз — виштовхує (від густини), дійшов до рівня плавання — знову на
+  // поверхні. Біг під рідиною (Shift + W, не на дні) — так само, швидше, поза плавання (низька форма: щілина в 1 блок)
   const swimFast = inBuoy && !p.ground && !!ctl.sprint && iy < 0 && !ctl.carry;
+  const lookZ = ctl.look && (ix || iy) ? -iy * ctl.look[2] / (Math.hypot(ctl.look[0], ctl.look[1], ctl.look[2]) || 1) / Math.hypot(ix, iy) : 0;
   if (!inBuoy) p.dive = false;
-  else if (ctl.crouch || swimFast) p.dive = true;
+  else if (ctl.crouch || (!p.ground && lookZ < -DIVE_Z)) p.dive = true;
   else if (p.dive && p.z >= surf - floatZ(P) - 0.05) p.dive = false;
+  const lookSwim = inBuoy && p.dive && !ctl.carry && !!ctl.look && !!iy;   // під рідиною: W / S — за поглядом (3D)
   // Поза: бажана — присів (Ctrl на землі) чи стоячи; під рідиною Ctrl — униз, не присід
   if (p.pose === 'swim' && !inBuoy) p.pose = 'crawl';
   if (swimFast) p.pose = 'swim';
@@ -306,7 +311,8 @@ export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
     if (ph.tilt) { p.vx += ph.tilt[0] * gA * dt; p.vy += ph.tilt[1] * gA * dt; }
   } else if (swimFast) {
     // біг під рідиною: уздовж погляду (3D), прискорення 8/с
-    const lk = ctl.look || [dirX, dirY, 0], ll = Math.hypot(lk[0], lk[1], lk[2]) || 1, sp = 0.5 * SPEED * ph.speed * SPRINT * vs, a = Math.min(1, 8 * dt);
+    const lk = ctl.look && p.dive ? ctl.look : ctl.look ? [ctl.look[0], ctl.look[1], 0] : [dirX, dirY, 0];   // на поверхні — уздовж неї
+    const ll = Math.hypot(lk[0], lk[1], lk[2]) || 1, sp = 0.5 * SPEED * ph.speed * SPRINT * vs, a = Math.min(1, 8 * dt);
     p.vx += (lk[0] / ll * sp + ix * mb[0][0] * sp * 0.5 - p.vx) * a; p.vy += (lk[1] / ll * sp + ix * mb[0][1] * sp * 0.5 - p.vy) * a;
     p.vz += (lk[2] / ll * sp - p.vz) * a;
     p.yaw = Math.atan2(lk[1], lk[0]);
@@ -316,6 +322,11 @@ export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
       const run = ctl.sprint && !low && !ctl.carry ? (surf === null ? SPRINT : 1 + (SPRINT - 1) / 2) : 1;
       const sp = SPEED * ph.speed * run * (surf === null ? 1 : (deep || !buoy ? 0.5 : 0.7) * vs) * (low ? SNEAK : 1) * (1 - 0.4 * (ctl.carry || 0));
       tvx = dirX * sp; tvy = dirY * sp;
+      if (lookSwim) {
+        // уздовж погляду: вперед-назад — з горизонтальною часткою погляду, убік — як було; разом — та сама швидкість
+        const lk = ctl.look, ll = Math.hypot(lk[0], lk[1], lk[2]) || 1, ch = Math.hypot(lk[0], lk[1]) / ll, l = Math.hypot(ix, iy);
+        tvx = (ix * mb[0][0] + iy * ch * mb[1][0]) / l * sp; tvy = (ix * mb[0][1] + iy * ch * mb[1][1]) / l * sp;
+      }
       p.yaw = Math.atan2(dirY, dirX);
     }
     const fr = surf !== null ? 1 : mu;
@@ -370,7 +381,8 @@ export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
   const s2 = liquidAt(P, p.x, p.y, p.z);
   if (s2 !== null && buoy && p.dive) {
     if (!swimFast) {
-      const rho = P.liquid.density || 1, tvz = ctl.vert > 0 ? SWIM_V * vs : ctl.vert < 0 ? -SWIM_V * vs : Math.min(2, (0.3 + 1.2 * Math.max(0, rho - 1)) * vs);
+      const rho = P.liquid.density || 1, up = Math.min(2, (0.3 + 1.2 * Math.max(0, rho - 1)) * vs);
+      const tvz = ctl.vert > 0 ? SWIM_V * vs : ctl.vert < 0 ? -SWIM_V * vs : lookSwim ? lookZ * 0.5 * SPEED * ph.speed * vs : up;
       p.vz += (tvz - p.vz) * Math.min(1, 8 * dt);
     }
   } else if (s2 !== null && buoy && !p.ground && !p.leap) p.vz += ((s2 - floatZ(P) - p.z) * 22 / visc - p.vz * 7 * Math.sqrt(visc)) * dt;
