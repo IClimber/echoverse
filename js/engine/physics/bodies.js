@@ -71,8 +71,10 @@ export function windMoves(b, env) {
 }
 
 // Крок тіла: P — щуп, env — {g (сила тяжіння, g), vT, bounce, friction, wind [x, y]}
+// b.held — у руках (швидкість задає той, хто тримає): без тяжіння, поля й вітру, не спить; зіткнення — як завжди
 export function stepBody(b, dt, P, env) {
-  const windy = windMoves(b, env);
+  const windy = !b.held && windMoves(b, env);
+  if (b.held) { b.sleep = false; b.calm = 0; return moveBody(b, dt, P, env); }
   if (b.sleep) { if (!windy) return; b.sleep = false; b.calm = 0; }
   const g = GRAVITY * env.g, lift = b.lift || 0;
   // тяжіння мінус підйом породи; левітуюче — пружина до висоти ширяння (немає ґрунту під — просто висить)
@@ -90,6 +92,15 @@ export function stepBody(b, dt, P, env) {
   if (lift > 1 && b.ax !== undefined && b.ax !== null) { b.vx += ((b.ax - b.x) * ANCHOR - b.vx * 1.6) * dt; b.vy += ((b.ay - b.y) * ANCHOR - b.vy * 1.6) * dt; }
   b.vz += az * dt;
   if (b.vz < -vTb) b.vz = -vTb;
+  moveBody(b, dt, P, env);
+  const sp = Math.hypot(b.vx, b.vy, b.vz);
+  b.calm = sp < SLEEP_V ? b.calm + dt : 0;
+  if (b.calm > SLEEP_T && !windy) { b.sleep = true; b.vx = b.vy = b.vz = 0; }
+  if (b.calm > SLEEP_T && lift > 1 && b.ax === null) { b.ax = b.x; b.ay = b.y; }   // після удару спинилось — тут і тримається
+}
+
+// Рух зі швидкістю (vx, vy, vz) за dt з зіткненнями з блоками
+function moveBody(b, dt, P, env) {
   // рух по осях окремо, дробимо крок, щоб не проскочити крізь тонку стіну
   const n = Math.max(1, Math.ceil(Math.max(Math.abs(b.vx), Math.abs(b.vy), Math.abs(b.vz)) * dt / 0.2));
   const h = dt / n, rest = Math.max(0.15, env.bounce || 0.25), fr = env.friction ?? 1;
@@ -105,10 +116,6 @@ export function stepBody(b, dt, P, env) {
   }
   b.yaw += b.spin * dt;
   b.spin *= Math.exp(-dt * 1.5);
-  const sp = Math.hypot(b.vx, b.vy, b.vz);
-  b.calm = sp < SLEEP_V ? b.calm + dt : 0;
-  if (b.calm > SLEEP_T && !windy) { b.sleep = true; b.vx = b.vy = b.vz = 0; }
-  if (b.calm > SLEEP_T && lift > 1 && b.ax === null) { b.ax = b.x; b.ay = b.y; }   // після удару спинилось — тут і тримається
 }
 
 // Імпульс (j — вектор маса × швидкість) у тіло: будить

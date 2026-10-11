@@ -1,5 +1,6 @@
 // debug.js — панель F3: зерно, адреса, клітинка, чанк і його відбиток, закони всесвіту, швидкодія.
-import { CS, TYPE_NAMES, BLOCK_NAMES, digest, tile } from './gen/chunk.js';
+import { CS, TYPE_NAMES, BLOCK_NAMES, O_ROCK, O_TREE, digest, tile } from './gen/chunk.js';
+import { canLift } from './carry.js';
 import { physOf, STRANGE_NAMES, TIER_NAMES, FAM_NAMES } from './universe.js';
 import { BIOMES } from './gen/biomes.js';
 import { regionAt, speciesOf, FORMS } from './gen/flora.js';
@@ -22,6 +23,27 @@ function land3(L) {
 function speciesLine(L, x, y, bm) {
   const reg = regionAt(L, x, y), S = speciesOf(L, reg, bm);
   return `область ${(reg.id >>> 0).toString(16).padStart(8, '0').slice(0, 6)}: ${[...S.big, ...S.small].map((g) => FORMS[g.form].name).join(', ') || 'немає'}`;
+}
+
+// Поза гравця: стоїть / присів / лежить / пливе під рідиною; лізе (хват) / драбина; сповзає (кут, межа); витривалість
+const POSE_NAMES = { stand: 'стоїть', crouch: 'присів', crawl: 'лежить', swim: 'пливе під рідиною' };
+const deg = (a) => (a * 180 / Math.PI).toFixed(0) + '°';
+function poseLine(me) {
+  const s = [me.climb ? (me.climb.kind === 'wall' ? `лізе по стіні, хват ${(me.grip ?? 1).toFixed(2).replace('.', ',')}` : 'драбина / ліана') : POSE_NAMES[me.pose || 'stand']];
+  if (me.dive) s.push('пірнає');
+  if (me.slide) s.push(`сповзає: ${deg(me.slideA || 0)}, межа ${deg(me.slideS || 0)}`);
+  if (me.mantle) s.push('вилазить');
+  if ((me.stam ?? 1) < 1 || me.climb) s.push(`витривалість ${Math.round((me.stam ?? 1) * 100)} %${me.tired ? ' (втома)' : ''}`);
+  return s.join(' · ');
+}
+// Ціль: блок x y k вид / тіло m кг (можна взяти / заважко) / рослина (форма) / камінь; відстань
+function aimLine(a, gg) {
+  if (!a) return '—';
+  const t = ` · ${a.t.toFixed(2).replace('.', ',')}`;
+  if (a.kind === 'block') return `блок ${a.x} ${a.y} ${a.k}, ${BLOCK_NAMES[a.b]}${t}`;
+  if (a.kind === 'body') { const q = canLift(a.body, gg); return `тіло ${Math.round(a.body.mass)} кг (${q.ok ? 'можна взяти' : 'заважко'})${t}`; }
+  const o = a.obj.o;
+  return (o.k === O_ROCK ? 'камінь' : o.k === O_TREE ? 'дерево' : 'рослина') + (a.obj.C.sp && a.obj.C.sp[o.s] ? ` (${FORMS[a.obj.C.sp[o.s].form].name})` : '') + t;
 }
 
 export const fmtN = (n) => n > 0 ? '+' + n : n < 0 ? '−' + -n : '0';
@@ -56,6 +78,9 @@ export function debugText(g, perf, meshCount, cam, R, lod) {
     `погода     ${WEATHER_NAMES[weatherAt(L, g.clock || 0).kind]} (зміна раз на ${L.air.segMin.toFixed(1)} хв; ${Object.entries(L.air.w).filter(([, v]) => v > 0.05).map(([k, v]) => k + ' ' + v.toFixed(1)).join(', ')})`,
     `камера     ${cam.mode === 'iso' ? `згори, масштаб ${cam.zoom.toFixed(2)}` : cam.mode === 'first' ? `перша особа, око ${f2(g.eyeZ ?? 0)}` : `третя особа, відстань ${f1(g.camDist ?? cam.dist)} з ${f1(cam.dist)}`}${g.under ? ' · під рідиною' : ''}, азимут ${Math.round(cam.yaw * 180 / Math.PI) % 360}°, видно стовпців ${g.visible || 0}`,
     `зіткнення  секцій ${CST.secs}, трикутників ${(CST.tris / 1000).toFixed(1).replace('.', ',')} тис., побудов ${CST.builds} (${f1(CST.buildMs)} мс) · крок ${f1(g.stepUs || 0)} мкс${me.ground ? ` · підлога ${me.floorN ? (Math.acos(Math.min(1, me.floorN[2])) * 180 / Math.PI).toFixed(0) + '°' : '—'}` : ''}`,
+    `поза       ${poseLine(me)}`,
+    `ціль       ${aimLine(g.aim, g.ph ? g.ph.g : 1)}`,
+    `у руках    ${g.carry ? `камінь ${Math.round(g.carry.b.mass)} кг (вага ${Math.round(g.carry.k * 100)} % найбільшої)` : '—'}`,
     `кадр       ${perf.fps.toFixed(0)} к/с · ${f1(perf.frameMs)} мс (p99 ${f1(perf.p99)}) · CPU ${perf.upd.toFixed(2).replace('.', ',')} + ${perf.drw.toFixed(2).replace('.', ',')} мс · GPU ${R && R.gpuMs !== null ? R.gpuMs.toFixed(2).replace('.', ',') + ' мс' : '—'}`,
     `рендер     викликів ${R ? R.stats.draws : 0} · трикутників ${R ? (R.stats.tris / 1e6).toFixed(2).replace('.', ',') : 0} млн · завантажено ${R ? (R.stats.up / 1024).toFixed(0) : 0} КБ/кадр · у GPU ${R ? ((R.stats.gpuBytes + R.stats.arenaUsed) / 1048576).toFixed(0) : 0} з ${R ? ((R.stats.gpuBytes + R.stats.arenaBytes) / 1048576).toFixed(0) : 0} МБ · секцій ${meshCount}${lod && LOD_ON ? ` · LOD увімкнено (0/1/2: ${lod[0]}/${lod[1]}/${lod[2]})` : ''}${R && !R.cullOn ? ' · відсікання вимкнено' : ''}${R && R.stats.over ? ' · бюджет GPU перевищено' : ''}${R && R.info ? ` · ${R.info.device} · тіні ${R.info.shadows === 'off' ? 'вимкнено' : R.info.shadows.toUpperCase()} · світел ${R.info.lights.dir} + ${R.info.lights.local}` : ''}`,
     `генерація  воркерів ${st.workers} · ${st.colsPerSec} стовпців/с · ${st.genMs.toFixed(2).replace('.', ',')} мс/робота · стовпців ${st.cols}, секцій ${st.secs}, у черзі ${st.pending} · стрімінг ${(g.streamMs || 0).toFixed(1).replace('.', ',')} мс`,

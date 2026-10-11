@@ -370,9 +370,19 @@ export function tile(L, x, y, out = {}, lite = false) {
 // ================= Блоки =================
 export const H = WORLD_H;
 export const B_AIR = 0, B_LIQ = 1, B_ICE = 2, B_SAND = 3, B_GRASS = 4, B_DRY = 5, B_DESERT = 6, B_SNOW = 7, B_ROCK = 8,
-  B_BED = 9, B_MUD = 10, B_SOIL = 11, B_STONE = 12, B_SANDSTONE = 13, B_MAGMA = 14, B_FLOAT = 15;
-export const BLOCK_NAMES = ['повітря', 'рідина', 'лід', 'пісок', 'трава', 'степ', 'пустеля', 'сніг', 'скеля', 'дно', 'глина', 'ґрунт', 'камінь', 'пісковик', 'розпечена лава', 'левітуюча порода'];
-export const solidB = (b) => b >= B_ICE;                 // тверде (лід теж); рідина й повітря — ні
+  B_BED = 9, B_MUD = 10, B_SOIL = 11, B_STONE = 12, B_SANDSTONE = 13, B_MAGMA = 14, B_FLOAT = 15,
+  // по чому лазять (п. 3 roadmap): тонка панель на стіні (на першому твердому сусіді: −x, +x, −y, +y), крізь клітинку
+  // проходиш; меш — у твердому (зіткнення — з ним). Генератор їх поки не ставить: ліани — п. 9, драбини — з будуванням
+  B_LADDER = 16, B_VINE = 17;
+export const BLOCK_NAMES = ['повітря', 'рідина', 'лід', 'пісок', 'трава', 'степ', 'пустеля', 'сніг', 'скеля', 'дно', 'глина', 'ґрунт', 'камінь', 'пісковик', 'розпечена лава', 'левітуюча порода', 'драбина', 'ліана'];
+export const solidB = (b) => b >= B_ICE && b < B_LADDER;   // тверде (лід теж); рідина, повітря, драбина й ліана — ні
+export const climbB = (b) => b === B_LADDER || b === B_VINE;
+// Драбина чи ліана в (x, y, k): нормаль від стіни [nx, ny] (до першого твердого сусіда −x, +x, −y, +y) або null
+export function climbSide(block, x, y, k) {
+  for (const [dx, dy] of CLIMB_N) { const b = block(x + dx, y + dy, k); if (solidB(b)) return [-dx, -dy]; }
+  return null;
+}
+const CLIMB_N = [[-1, 0], [1, 0], [0, -1], [0, 1]];
 const TOP_BLOCK = [B_BED, B_ICE, B_SAND, B_GRASS, B_DRY, B_DESERT, B_SNOW, B_ROCK, B_MUD];   // за типом поверхні T_*
 const SUB_BLOCK = [B_SOIL, B_SOIL, B_SANDSTONE, B_SOIL, B_SOIL, B_SANDSTONE, B_SOIL, B_STONE, B_SOIL];
 // Об'єм блоків (секція чи стовпець): x, y ∈ −1…CS (рамка), k ∈ −1…nk (рамка знизу й згори); індекс — стовпець

@@ -554,6 +554,20 @@ export function footprint(T) {
   return (T.foot = { r, top });
 }
 
+// Обрис шаблону для прицілювання (aim.js): r — найбільший горизонтальний радіус усіх вершин, top — верх, z0 — низ м'яких
+// частин (крона, квіти, трава; немає — 0,4 висоти). Кеш у шаблоні
+export function extent(T) {
+  if (T.ext) return T.ext;
+  let r = 0, top = 0, z0 = Infinity;
+  for (let i = 0, j = 0; i < T.verts; i++, j += 3) {
+    const z = T.p[j + 2];
+    if (z > top) top = z;
+    r = Math.max(r, Math.hypot(T.p[j], T.p[j + 1]));
+    if (SOFT.has(T.m[i]) && z < z0) z0 = z;
+  }
+  return (T.ext = { r, top, z0: z0 === Infinity ? 0.4 * top : Math.max(0, z0) });
+}
+
 // Шаблон T у меш M (gen/mesh.js Mesh) у точці (x, y, z): поворот rot навколо вертикалі, нахил tl, масштаб s,
 // множники кольору cj [r, g, b]; sky — AO неба над основою; thin — мітка проріджування 1…THIN_N (gen/materials.js; 0 — ні)
 export function place(M, T, x, y, z, rot, s, tl, cj, sky = 1, thin = 0) {

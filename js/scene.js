@@ -141,6 +141,36 @@ export async function createScene(canvas, settings = {}) {
   armsMI.castShadow = false; armsMI.visible = false;
   G.layers.arms.addMeshInstances([armsMI]);
 
+  // ---- обрис цілі (п. 3 roadmap): тіло, рослина, камінь — OutlineRenderer PlayCanvas (extras/renderers/outline-renderer.js,
+  // приклад graphics/outlines-colored): шар «Обрис» у композиції, але не в камері (обриси малює лише внутрішня камера);
+  // окремий екземпляр меша цілі; камера обрису вимкнена, поки цілі немає (інакше рендер і розмиття — щокадру). Блок —
+  // каркас коробки (Immediate)
+  const outLayer = new pc.Layer({ name: 'Обрис' });
+  app.scene.layers.push(outLayer);
+  const outline = new pc.OutlineRenderer(app, outLayer);
+  outline.outlineCameraEntity.enabled = false;
+  const outE = new pc.Entity('обрис');
+  outE.addComponent('render', { layers: [], castShadows: false, receiveShadows: false });
+  G.root.addChild(outE);
+  const OUT_COL = new pc.Color(0.95, 0.95, 0.85);
+  // проста StandardMaterial: прохід обрису бере з матеріалу лише непрозорість (наші шматки в ньому не компілюються)
+  const outMat = new pc.StandardMaterial(); outMat.cull = pc.CULLFACE_NONE; outMat.update();
+  const wire = new pc.WireRenderer(app);            // каркас блоку-цілі (extras/renderers/wire-renderer.js)
+  wire.color = new pc.Color(0.05, 0.05, 0.05, 0.7); wire.layer = G.layers.world; wire.depthTest = true;   // World: шар «Руки» очищає глибину до Immediate — каркас лягав би поверх фігури
+  const objMeshes = new Map();                      // повна будова предметів-цілей: key → pc.Mesh (кілька останніх)
+  let outKey = null;
+  const bMin = new pc.Vec3(), bMax = new pc.Vec3();
+  const setOutline = (key, mesh) => {
+    if (outKey === key) return;
+    outline.removeAllEntities();
+    outKey = key;
+    if (mesh) {
+      outE.render.meshInstances = [new pc.MeshInstance(mesh, outMat, outE)];
+      outline.addEntity(outE, OUT_COL);
+    }
+    outline.outlineCameraEntity.enabled = !!mesh;
+  };
+
   // ---- тіла: шаблон → меш і група екземплярів ----
   const tmpl = new Map();
   const group = (T) => {
@@ -456,6 +486,16 @@ export async function createScene(canvas, settings = {}) {
     },
     hasFlora(d, n, k) { const Un = uni(d, n); return (!!Un && Un.flora.has(k)) || pend.has(pkey('f', d, n, k)); },
     hasFar: (key) => fars.has(key),
+    // Повна будова предмета-цілі (робота 'obj'): для обрису
+    addObj(key, mesh) {
+      if (!mesh || !mesh.pos.length) return;
+      // кеш тримає своє посилання: MeshInstance.destroy() (заміна обрису) знищує меш, на який більше ніхто не посилається
+      if (objMeshes.size >= 8) { const [k0, m0] = objMeshes.entries().next().value; if (k0 !== outKey) { m0.decRefCount(); if (m0.refCount < 1) m0.destroy(); objMeshes.delete(k0); } }
+      const m = floatMesh(G, mesh);
+      m.incRefCount();
+      objMeshes.set(key, m);
+    },
+    hasObj: (key) => objMeshes.has(key),
     clear() {
       upQ.length = 0; upHead = 0; pend.clear();
       for (const Un of [...unis.values()]) dropUni(Un);
@@ -700,6 +740,27 @@ export async function createScene(canvas, settings = {}) {
       figMI.visible = !!me && !first && (view.ortho || camD > 0.7);
       armsMI.visible = !!me && first;
       if (armsMI.visible) arms.pose(viewArms(me.anim, me, b, [t[0] + e[0] - G.O[0], t[1] + e[1] - G.O[1], t[2] + e[2]], G.width / G.height, fovOf(st.camera)));
+
+      // Ціль: обрис тіла чи предмета, каркас блоку (1 × 1 × LEVEL, трохи ширше, крізь поверхню не видно)
+      const aim = st.aim;
+      if (aim && aim.kind === 'body' && aim.body.T) {
+        const bo = aim.body, gm = group(bo.T);
+        setOutline(bo, gm.mesh);
+        // вузол під root — локальні координати наші (відносно O): rotZ(yaw) · rotX(tilt) · масштаб, як в екземплярах тіл
+        const c = Math.cos(bo.yaw), sn = Math.sin(bo.yaw), ct = Math.cos(bo.tilt), stl = Math.sin(bo.tilt);
+        M4.set([c, sn, 0, 0, -sn * ct, c * ct, stl, 0, sn * stl, -c * stl, ct, 0, 0, 0, 0, 1]);
+        Q.setFromMat4(M4);
+        outE.setLocalPosition((bo.ix ?? bo.x) - G.O[0], (bo.iy ?? bo.y) - G.O[1], (bo.iz ?? bo.z) - bo.hz); outE.setLocalRotation(Q); outE.setLocalScale(bo.s, bo.s, bo.s);
+      } else if (aim && aim.kind === 'obj' && objMeshes.has(aim.key)) {
+        setOutline(aim.key, objMeshes.get(aim.key));
+        outE.setLocalPosition(aim.obj.C.cx * CS - G.O[0], aim.obj.C.cy * CS - G.O[1], 0); outE.setLocalRotation(pc.Quat.IDENTITY); outE.setLocalScale(1, 1, 1);
+      } else setOutline(null, null);
+      if (outKey !== null) outline.frameUpdate(G.camE, G.layers.immediate, false);
+      if (aim && aim.kind === 'block') {
+        const e4 = 0.004, x0 = aim.x - e4, y0 = aim.y - e4, z0 = aim.k * LEVEL - e4, x1 = aim.x + 1 + e4, y1 = aim.y + 1 + e4, z1 = (aim.k + 1) * LEVEL + e4;
+        bMin.set(x0 - G.O[0], z0, y0 - G.O[1]); bMax.set(x1 - G.O[0], z1, y1 - G.O[1]);
+        wire.boxMinMax(bMin, bMax);
+      }
 
       // ?dev: каркас зіткнень (відрізки в координатах світу, без перевірки глибини — видно й крізь поверхню)
       if (st.lines && st.lines.pos.length) {

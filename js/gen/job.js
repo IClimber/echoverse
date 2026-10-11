@@ -2,19 +2,20 @@
 // Стовпець (клітинки, «небо», ґратка шуму, предмети з положеннями) рахується раз і живе в кеші: секції стовпця беруть
 // його звідти. Зведення стовпця — поверхня, укриття від опадів, межі секцій із поверхнею, предмети.
 import { genCol, genSection, genCoarse, shelterTop, CW, SEC, T_WATER, T_ICE, T_BED, O_FLOAT } from './chunk.js';
-import { chunkMesh, floraMesh, farFlora, objPose } from './mesh.js';
+import { chunkMesh, floraMesh, farFlora, objPose, objMesh } from './mesh.js';
 import { packMesh, concat, frameOf, RS } from './pack.js';
-import { farMesh } from './far.js';
+import { farMesh, FT } from './far.js';
+import { standCol, standSection, standFar } from './stand.js';
 import { L_DRY, SEA } from '../universe.js';
 import { LEVEL } from '../iso.js';
 
 const ISL_CZ = [2, 3, 4, 5];                  // секції смуги ширяючих островів (блоки 44…84)
 
 function colFor(L, q, cache) {
-  const ck = `${q.d}:${q.n}:${q.cx}:${q.cy}`;
+  const ck = `${q.stand ? 's' : ''}${q.d}:${q.n}:${q.cx}:${q.cy}`;
   let col = cache.get(ck);
   if (!col) {
-    col = genCol(L, q.cx, q.cy);
+    col = q.stand ? standCol(L, q.cx, q.cy) : genCol(L, q.cx, q.cy);
     for (const o of col.obj) objPose(col, L, o);
     cache.set(ck, col);
     if (cache.size > 300) cache.delete(cache.keys().next().value);
@@ -40,18 +41,25 @@ export function colSummary(col, L) {
   };
 }
 
-// Робота q = {type: 'col' | 'sec' | 'lod' (груба секція рівня lod) | 'flora' | 'far' (плитка далечі tx, ty з кроком s), d, n, cx, cy, cz}:
+// Робота q = {type: 'col' | 'sec' | 'lod' (груба секція рівня lod) | 'flora' | 'far' (плитка далечі tx, ty з кроком s) |
+// 'obj' (предмет i стовпця повністю — обрис цілі), d, n, cx, cy, cz, stand — стенд руху (gen/stand.js)}:
 // {data, mesh?, bufs — що можна передати без копіювання}. Меші секцій і рослин — щільні вершини в кадрі регіону (pack.js):
 // секція — op (тверде, за ним ns вершин — nf далеких рослин) і liq (поверхня рідини); рослини зблизька — весь стовпець
 // окремо (потрібні лише біля камери), кадр — регіон rz найнижчого предмета. Груба секція (lod) — op: тверде (ns), далекі
 // рослини (nf), обрізи (nc, шов між рівнями); блоків не віддає
 export function runJob(L, q, cache) {
   if (q.type === 'far') {                      // плитка далечі: висотне поле поверхні з кроком q.s
-    const f = farMesh(L, q.tx, q.ty, q.s), m = f.mesh;
+    const f = q.stand ? standFar(L, q.tx, q.ty, FT) : farMesh(L, q.tx, q.ty, q.s), m = f.mesh;
     return { data: { zmin: f.zmin, zmax: f.zmax }, mesh: { solid: m }, bufs: [m.pos.buffer, m.nor.buffer, m.col.buffer, m.mat.buffer, m.idx.buffer] };
   }
   const col = colFor(L, q, cache);
   if (q.type === 'col') return { data: colSummary(col, L), bufs: [] };
+  if (q.type === 'obj') {                      // один предмет повністю (обрис цілі): q.i — номер у col.obj
+    const o = col.obj[q.i];
+    if (!o) return { data: null, mesh: null, bufs: [] };
+    const m = objMesh(col, L, o);
+    return { data: null, mesh: m, bufs: [m.pos.buffer, m.nor.buffer, m.col.buffer, m.mat.buffer, m.idx.buffer] };
+  }
   if (q.type === 'flora') {
     let zmin = Infinity;
     for (const o of col.obj) if (o.k !== O_FLOAT && o.z < zmin) zmin = o.z;
@@ -74,7 +82,7 @@ export function runJob(L, q, cache) {
       bufs: lq ? [op.buf, lq.buf] : [op.buf],
     };
   }
-  const sec = genSection(L, col, q.cz);
+  const sec = q.stand ? standSection(col, q.cz) : genSection(L, col, q.cz);
   if (sec.empty) return { data: sec, bufs: [] };
   const m = chunkMesh({ cx: q.cx, cy: q.cy, h: col.h, bm: col.bm, v: col.v, top: shelterTop(col, L), b: sec.b, k0: sec.k0, nk: sec.nk, obj: col.obj, sp: col.sp }, L, { near: false });
   const [dx, dy, dz] = frameOf(q.cx, q.cy, q.cz), s = packMesh(m.solid, dx, dy, dz), f = packMesh(m.far, dx, dy, dz);

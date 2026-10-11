@@ -20,6 +20,8 @@ export const LIMITS = {
 export const FOV = 55 * D2R, FOV1 = 70 * D2R;   // кут огляду по вертикалі: третя особа, перша (як у Minecraft)
 export const fovOf = (c) => c.mode === FIRST ? FOV1 : FOV;
 export const EYE = 0.92;             // перша особа: око над ногами (очі фігури); під низькою стелею — нижче
+// Око першої особи й ціль третьої за позою (player.js p.pose): стоїть, присів, лежить, пливе під рідиною
+export const EYE_OF = { stand: EYE, crouch: 0.64, crawl: 0.3, swim: 0.3 };
 // Дальність (третя особа) — налаштування гравця, 8–32 чанки (setViewChunks; живі прив'язки ES-модулів — імпортери бачать нове)
 export let VIEW_R = 256;             // повні секції (клітинок)
 export let FAR_R = 1400;             // далечінь (плитки поверхні, gen/far.js), далі — туман і небо
@@ -51,6 +53,7 @@ export function setViewChunks(c) {
   return c;
 }
 export const HEAD = 1.0;             // третя особа: камера дивиться на висоту голови
+export const HEAD_OF = { stand: HEAD, crouch: 0.75, crawl: 0.45, swim: 0.45 };
 // Третя й перша особа: куди дивиться камера (по горизонталі) — туди обернений гравець (у третій — спиною до камери)
 export const facing = (c) => c.yaw + Math.PI;
 

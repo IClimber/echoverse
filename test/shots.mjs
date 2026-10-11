@@ -1,5 +1,5 @@
 // test/shots.mjs — знімки сцен гри й стенда ?light, помилки консолі; headless Chrome через CDP (не в npm test).
-// Сервер: python3 serve.py (порт 8123). node test/shots.mjs [--combos=webgl2:pcf3:16,…] [--scenes=plain,mount,…] [--out=ТЕКА]
+// Сервер: python3 serve.py (порт 8123). node test/shots.mjs [--combos=webgl2:pcf3:16,…] [--scenes=plain,mount,…] [--mscenes=mcrouch,…|none] [--out=ТЕКА]
 import { spawn } from 'node:child_process'; import { mkdirSync, rmSync, writeFileSync } from 'node:fs'; import { tmpdir } from 'node:os';
 const arg = (k, d) => { const a = process.argv.find((s) => s.startsWith(`--${k}=`)); return a ? a.slice(k.length + 3) : d; };
 const port = 9337;
@@ -12,7 +12,24 @@ const COMBOS = arg('combos', 'webgl2:pcf3:16,webgl2:pcss:16,webgl2:off:16,webgpu
 // firstcave)
 const ALL = { plain: [1, -52, -45, 0.4], night: [1, -52, -45, 0.0], rain: [1, -52, -45, 0.4, 'rain'], iso: [1, -52, -45, 0.4, 'iso'],
   first: [1, -52, -45, 0.4, 'first'], under: [1, -52, -45, 0.4, 'under'], slope: [33281, -61, -2, 0.4, 'slope'], trunk: [-60813, -478, -107, 0.4, 'trunk'], coll: [1, -52, -45, 0.4, 'coll'], grass: [1, -52, -45, 0.4, 'grass'], grass3: [1, -52, -45, 0.4, 'grass3'], cave: [1, -52, -45, 0.4, 'cave'], firstcave: [1, -52, -45, 0.4, 'firstcave'], fgrass: [-60813, -478, -107, 0.4, 'grass'], mount: [33281, -61, -2, 0.4], forest: [-60813, -478, -107, 0.4], suns3: [784, -52, -45, 'best'] };
-const SCENES = arg('scenes', Object.keys(ALL).join(',')).split(',');
+const SCENES = arg('scenes', Object.keys(ALL).join(',')).split(',').filter((k) => ALL[k]);   // --scenes=none — лише стенд
+// Стенд руху ?move (gen/stand.js): сцена — дії через ?dev (eco.spot — місце, eco.key — клавіші, eco.look — камера)
+const K = (c, d = true) => `eco.key('${c}', ${d});`;
+const MOVE = {
+  mcrouch: ["eco.setCam('third'); eco.spot('start');", K('ControlLeft'), 600, 'eco.look(-0.9, 0.25, 4);', 600, 'shot', K('ControlLeft', false)],
+  mcrawl: ["eco.setCam('third'); eco.spot('A3');", K('ControlLeft') + K('KeyW'), 2500, K('KeyW', false) + 'eco.g.me.x = 20.3;', 300, 'eco.look(Math.PI + 0.5, 0.15, 3);', 700, 'shot'],
+  mcrawl1: ["eco.setCam('first'); eco.g.me.x = 17;", 300, 'eco.look(0, 0.1);', 500, 'shot', "eco.setCam('third');" + K('ControlLeft', false)],
+  mclimb: ["eco.setCam('third'); eco.spot('B2');", K('KeyW'), 300, K('Space'), 120, K('Space', false), 1200, K('KeyW', false) + 'eco.look(-0.9, 0, 5);', 600, 'shot'],
+  mladder: ["eco.setCam('third'); eco.spot('B5');", K('KeyW'), 1200, K('KeyW', false) + 'eco.look(-1.0, 0, 5);', 600, 'shot'],
+  mslide: ["eco.setCam('third'); eco.spot('C6'); eco.look(Math.PI - 1.0, 0.25, 6);", 600, 'eco.g.me.x = 58.5; eco.g.me.z = 9; eco.g.me.vz = 0;', 500, 'shot'],
+  mdive: ["eco.setCam('third'); eco.spot('D');", 800, K('ControlLeft'), 1200, K('ControlLeft', false) + "eco.setCam('first'); eco.look(0, 0.1);", 400, 'shot'],
+  maimb: ["eco.setCam('first'); eco.spot('A1'); eco.look(0, 0.6);", 800, 'shot'],
+  maimo: ["eco.setCam('first'); eco.spot('E'); eco.g.me.x = 76.2; eco.g.me.y = 32.2;", 400, 'eco.look(Math.atan2(30.5 - 32.2, 78.5 - 76.2), 0.1);', 1200, 'shot'],
+  maimbody: ["eco.setCam('third'); eco.spot('bodies'); eco.look(0, 0.45, 5);", 1000, 'shot'],
+  mcarry: ["eco.setCam('third'); eco.spot('bodies'); eco.look(0, 0.45, 5);", 800, K('KeyF'), 50, K('KeyF', false), 800, 'eco.look(-1.4, 0.3, 4);', 800, 'shot', K('KeyF'), 50, K('KeyF', false)],
+  miso: ["eco.setCam('iso'); eco.spot('E'); eco.look(120 * Math.PI / 180);", 800, 'mouse', 600, 'shot', "eco.setCam('third');"],
+};
+const MSCENES = arg('mscenes', Object.keys(MOVE).join(',')).split(',').filter((k) => MOVE[k]);
 const flags = ['--headless=new', '--use-angle=vulkan', '--enable-features=Vulkan', '--enable-unsafe-webgpu', '--ignore-gpu-blocklist', '--window-size=2560,1440'];
 rmSync(`${OUT}/profile`, { recursive: true, force: true });
 const ch = spawn('google-chrome', [`--remote-debugging-port=${port}`, ...flags, `--user-data-dir=${OUT}/profile`, 'about:blank'], { stdio: 'ignore', detached: true });
@@ -88,6 +105,18 @@ for (const [gpu, sh, view] of COMBOS) {
     if (gpu !== 'webgpu') await shot(`${gpu}-${sh}-${view}-${sc}`);   // WebGPU у headless знімає чорне — лише помилки
     await menu(false);
     R.push({ gpu, sh, view, sc, device: await ev('eco.stats().device') });
+  }
+  // стенд руху ?move: ті самі налаштування, свої сцени; ціль — без меню (з відкритим меню цілі немає)
+  if (!MSCENES.length) continue;
+  await send('Page.navigate', { url: 'http://localhost:8123/?move&dev' }); await waitFor('!!(window.eco && eco.g && eco.g.me.placed)'); await idle();
+  await menu(false); await ev("document.getElementById('help').hidden = true; 1");
+  for (const sc of MSCENES) {
+    for (const a of MOVE[sc]) {
+      if (typeof a === 'number') await wait(a);
+      else if (a === 'shot') { if (gpu !== 'webgpu') await shot(`${gpu}-${sh}-${view}-${sc}`); R.push({ gpu, sh, view, sc, device: await ev('eco.stats().device') + ' · ' + JSON.stringify(await ev('eco.pose()')) + ' · ціль ' + JSON.stringify(await ev('(() => { const a = eco.aim(); return a && [a.kind, a.mass ?? a.b ?? a.form]; })()')) }); }
+      else if (a === 'mouse') await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1280 + 260, y: 720 + 60 });
+      else { await ev(`(() => { ${a} return 1; })()`); if (a.includes('eco.spot')) await idle(); }
+    }
   }
 }
 // стенд ?light (сам ставить window.eco = { ready: true } після першого кадру)

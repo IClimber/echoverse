@@ -56,6 +56,16 @@
   #flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; transition: opacity .45s ease-out; }
   #flash.on { opacity: .85; transition: none; }
   #loading { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+  /* Хрестик (перша особа) і кільце витривалості (лазіння): біля центру екрана */
+  #cross { position: absolute; left: 50%; top: 50%; width: 16px; height: 16px; transform: translate(-50%, -50%); }
+  #cross::before, #cross::after { content: ''; position: absolute; background: #f4f6fa; box-shadow: 0 0 0 1px #000a; }
+  #cross::before { left: 7px; top: 0; width: 2px; height: 16px; }
+  #cross::after { left: 0; top: 7px; width: 16px; height: 2px; }
+  #stam { position: absolute; left: calc(50% + 60px); top: 50%; width: 34px; height: 34px; transform: translateY(-50%); transition: opacity 1s; }
+  #stam circle { fill: none; stroke-width: 4; }
+  #stam .bg { stroke: #0007; }
+  #stam .fg { stroke: var(--accent); stroke-linecap: round; transform: rotate(-90deg); transform-origin: 50% 50%; }
+  #stam.low .fg { stroke: var(--bad); }
 
   /* Меню */
   #menu { position: fixed; inset: 0; display: grid; place-items: center; background: #0b0f16b0; padding: 16px; }
@@ -66,6 +76,7 @@
   .row { display: flex; gap: 8px; }
   .row input { flex: 1; }
   button.wide { width: 100%; margin-top: 20px; }
+  button.wide + button.wide { margin-top: 8px; }
   /* Налаштування: рядок «Назва ‹ значення ›», як у налаштуваннях ігор */
   .opts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; margin-top: 12px; }
   .opt { display: grid; grid-template-columns: 1fr auto 150px auto; align-items: center; gap: 6px; font-size: 15px; margin-top: 10px; }
@@ -94,12 +105,15 @@
 <div id="hud" hidden>
   <div id="where" class="chip"><div id="addr"></div><div id="coords"></div><div id="env"></div></div>
   <div id="help" class="chip">
-    <b>WASD</b> — рух · <b>Shift</b> — біг · <b>пробіл</b> — стрибок, двічі — політ (пробіл / Shift — угору / униз) · <b>Q</b> / <b>E</b> — у сусідній всесвіт · <b>R</b> — у випадковий (<b>Shift+R</b> — і глибина)<br>
-    <b>V</b> — камера (перша особа → третя → згори) · <b>права кнопка миші</b> чи <b>Z</b> / <b>C</b> — обертати · <b>коліщатко</b> — відстань (третя) / масштаб (згори)<br>
-    <b>Esc</b> — меню · <b>F3</b> — налагодження · <b>H</b> — сховати підказку
+    <b>WASD</b> — рух · <b>Shift</b> — біг · <b>пробіл</b> — стрибок (у стіну — чіплятися), двічі — політ (пробіл / <b>Ctrl</b> — угору / униз, Shift — швидше) · <b>Q</b> / <b>E</b> — у сусідній всесвіт · <b>R</b> — у випадковий (<b>Shift+R</b> — і глибина)<br>
+    <b>Ctrl</b> — присісти (у лаз — лягти), у рідині — униз, на стіні — відпустити · <b>Shift</b> у рідині — пливти, куди дивишся · <b>F</b> — взяти / покласти · <b>ЛКМ</b> — удар / кинути · <b>ПКМ</b> — використати<br>
+    <b>V</b> — камера (перша особа → третя → згори) · <b>права кнопка миші</b> (згори) чи <b>Z</b> / <b>C</b> — обертати · <b>коліщатко</b> — відстань (третя) / масштаб (згори)<br>
+    <b>Esc</b> — меню · <b>F11</b> — повний екран (без нього Ctrl+W закриває вкладку) · <b>F3</b> — налагодження · <b>H</b> — сховати підказку
   </div>
   <div id="charge" class="chip" hidden><span id="chargeTxt"></span><div class="bar"><i id="chargeBar"></i></div></div>
   <div id="toast" class="chip" hidden></div>
+  <div id="cross" hidden></div>
+  <svg id="stam" viewBox="0 0 34 34" style="opacity: 0"><circle class="bg" cx="17" cy="17" r="14"/><circle class="fg" id="stamArc" cx="17" cy="17" r="14" stroke-dasharray="87.96 87.96" stroke-dashoffset="0"/></svg>
   <div id="mouseHint" class="chip" hidden>Клацни по світу — і мишею керуй камерою (Esc — відпустити)</div>
 </div>
 <pre id="debug" hidden></pre>
@@ -120,6 +134,7 @@
     <div id="worlds"></div>
     <div id="err" hidden></div>
     <button id="openSettings" class="wide">Налаштування</button>
+    <button id="full" class="wide">На весь екран</button>
     <div class="foot">
       <span>Зберігається в цьому браузері</span>
       <span><button id="import">Імпорт з файлу</button><input id="file" type="file" accept=".json,application/json" hidden></span>

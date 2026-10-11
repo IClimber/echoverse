@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { toScreen, fromScreen, pick, LEVEL } from '../js/iso.js';
-import { step, hits, support, standable, settle, SPEED, PH1, GRAVITY, JUMP_V, FLOAT_Z, jumpHeight, SPRINT, FLY_SPEED, FLY_V } from '../js/player.js';
+import { step, hits, support, standable, settle, SPEED, PH1, GRAVITY, JUMP_V, FLOAT_Z, jumpHeight, SPRINT, FLY_SPEED, FLY_V, shapeOf } from '../js/player.js';
 import { landing, landingChunks, createDevice, CHARGE, HISTORY } from '../js/device.js';
 import { serialize, deserialize } from '../js/save.js';
 import { B_AIR, B_LIQ, B_GRASS, B_STONE } from '../js/gen/chunk.js';
@@ -636,8 +636,8 @@ test('прогулянка справжнім рельєфом: випадков
       jumps += jump;
       step(p, ix, iy, jump, 1 / 120, P, ph, undefined, { sprint });
       moved += Math.hypot(p.x - x0, p.y - y0);
-      assert.ok(!hits(P, p.x, p.y, p.z), `${n}, крок ${i}: капсула в поверхні (${p.x}, ${p.y}, ${p.z})`);
-      if (p.ground && !p.wet) { ground++; assert.ok(support(P, p.x, p.y, p.z, 0.02), `${n}, крок ${i}: на землі без підлоги (${p.x}, ${p.y}, ${p.z})`); }
+      assert.ok(!hits(P, p.x, p.y, p.z, shapeOf(p)), `${n}, крок ${i}: капсула в поверхні (${p.x}, ${p.y}, ${p.z})`);
+      if (p.ground && !p.wet) { ground++; assert.ok(support(P, p.x, p.y, p.z, 0.02, false, shapeOf(p)), `${n}, крок ${i}: на землі без підлоги (${p.x}, ${p.y}, ${p.z})`); }
     }
     assert.ok(moved > 30 && ground > 10 && jumps > 10, `${n}: пройшов ${moved}, на землі ${ground}, стрибків ${jumps}`);
   }

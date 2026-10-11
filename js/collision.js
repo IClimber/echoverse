@@ -138,6 +138,7 @@ function createCollider(P) {
       if (P.bodies) {
         const mx = (x0 + x1) / 2, my = (y0 + y1) / 2, rr = Math.hypot(x1 - x0, y1 - y0) / 2 + 2;
         for (const b of P.bodies(mx, my, rr)) {
+          if (b.held) continue;                                 // у руках — не перешкода (тримає сам гравець)
           if (b.x + b.hx < x0 || b.x - b.hx > x1 || b.y + b.hy < y0 || b.y - b.hy > y1 || b.z + b.hz < z0 || b.z - b.hz > z1) continue;
           boxTris(L, b.x - b.hx, b.y - b.hy, b.z - b.hz, b.x + b.hx, b.y + b.hy, b.z + b.hz, b);
         }

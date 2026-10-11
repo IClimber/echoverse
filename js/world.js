@@ -34,7 +34,9 @@ export const skey = (d, n, cx, cy, cz) => `${d}:${n}:${cx}:${cy}:${cz}`;
 // Скільки тримати в пам'яті (секція ~6 КБ) — від дальності (стрімінг: setKeep(keepFor(R)))
 export const keepFor = (R) => { const n = Math.ceil(Math.PI * (R / CS + 1) ** 2); return { cols: Math.max(1500, Math.ceil(n * 1.8)), secs: Math.max(5000, n * 6), fars: 1500 }; };
 
-export function createWorld(seed, onMesh) {
+// opts.stand — стенд руху ?move (gen/stand.js): усі роботи генератора — з полігону
+export function createWorld(seed, onMesh, opts = {}) {
+  const Q = (q) => opts.stand ? { ...q, stand: true } : q;
   const lawsMap = new Map(), fars = new Map();
   // Всесвіти: 'd:n' → {d, n, cols: Map(ck → стовпець), secs: Map(sk → секція), at — коли був поточним}. Давність —
   // мітка used (touch* ставить нову; сортування — лише під час витіснення)
@@ -92,6 +94,9 @@ export function createWorld(seed, onMesh) {
   // Стовпець прийшов: перешкоди-предмети за клітинкою (світові координати; розмір — o.r, o.top), тіла (ширяюче каміння)
   function addCol(c) {
     c.obst = new Array(CS * CS).fill(null);
+    // предмет клітинки (прицілювання): номер у c.obj чи −1; ширяюче каміння — тіла
+    c.objAt = new Int16Array(CS * CS).fill(-1);
+    c.obj.forEach((o, i) => { if (o.k !== O_FLOAT) c.objAt[o.y * CS + o.x] = i; });
     for (const o of c.obj) if (o.r > 0) {
       const z0 = o.z * LEVEL;
       c.obst[o.y * CS + o.x] = { cx: c.cx * CS + o.cx, cy: c.cy * CS + o.cy, z0, z1: z0 + o.top, r: o.r };
@@ -127,6 +132,7 @@ export function createWorld(seed, onMesh) {
       return;
     }
     if (q.type === 'flora') { onMesh('flora', q.d, q.n, ck(q.cx, q.cy), q, data, mesh); return; }
+    if (q.type === 'obj') { onMesh('obj', q.d, q.n, key, q, null, mesh); return; }
     if (q.type === 'lod') { onMesh('sec', q.d, q.n, sk(q.cx, q.cy, q.cz), q, null, mesh); return; }
     const U = uni(q.d, q.n, true), k = sk(q.cx, q.cy, q.cz), was = U.secs.get(k);
     if (was) { was.dead = true; U.secs.delete(k); } else nSecs++;
@@ -191,6 +197,15 @@ export function createWorld(seed, onMesh) {
       const C = colOf(d, n, x, y);
       return C ? C.obst[(y - C.cy * CS) * CS + x - C.cx * CS] : null;
     },
+    // Предмет клітинки (x, y) — рослина, камінь (прицілювання): {o, C, i} або null
+    objAt(d, n, x, y) {
+      const C = colOf(d, n, x, y);
+      if (!C) return null;
+      const i = C.objAt[(y - C.cy * CS) * CS + x - C.cx * CS];
+      return i < 0 ? null : { o: C.obj[i], C, i };
+    },
+    // Повна будова предмета i стовпця (cx, cy) — для обрису цілі (onMesh('obj', …))
+    wantObj(d, n, cx, cy, i) { const key = `o${d}:${n}:${cx}:${cy}:${i}`; gen.want(key, Q({ type: 'obj', d, n, cx, cy, i }), -1); return key; },
     // Верх укриття від опадів у стовпці (x, y) — одиниці; немає даних — null
     topAt(d, n, x, y) {
       const C = colOf(d, n, x, y);
@@ -226,15 +241,15 @@ export function createWorld(seed, onMesh) {
       return P;
     },
     ver: 0,
-    wantCol(d, n, cx, cy, pri) { const key = `c${d}:${n}:${cx}:${cy}`; gen.want(key, { type: 'col', d, n, cx, cy }, pri); return key; },
+    wantCol(d, n, cx, cy, pri) { const key = `c${d}:${n}:${cx}:${cy}`; gen.want(key, Q({ type: 'col', d, n, cx, cy }), pri); return key; },
     // Плитка далечі (крок s): запит (готова — far(key): zmin, zmax; меш — у рендері), ключ
-    wantFar(d, n, tx, ty, s, pri) { const key = `f${d}:${n}:${tx}:${ty}:${s}`; gen.want(key, { type: 'far', d, n, tx, ty, s }, pri); return key; },
+    wantFar(d, n, tx, ty, s, pri) { const key = `f${d}:${n}:${tx}:${ty}:${s}`; gen.want(key, Q({ type: 'far', d, n, tx, ty, s }), pri); return key; },
     far: (key) => { const F = fars.get(key); if (F) { fars.delete(key); fars.set(key, F); } return F; },
     // Рослини зблизька стовпця (меш — у рендері)
-    wantFlora(d, n, cx, cy, pri) { const key = `p${d}:${n}:${cx}:${cy}`; gen.want(key, { type: 'flora', d, n, cx, cy }, pri); return key; },
+    wantFlora(d, n, cx, cy, pri) { const key = `p${d}:${n}:${cx}:${cy}`; gen.want(key, Q({ type: 'flora', d, n, cx, cy }), pri); return key; },
     // Груба секція рівня lod (1, 2) — лише меш для рендера
-    wantLod(d, n, cx, cy, cz, lod, pri) { const key = `l${lod}:${d}:${n}:${cx}:${cy}:${cz}`; gen.want(key, { type: 'lod', lod, d, n, cx, cy, cz }, pri); return key; },
-    wantSec(d, n, cx, cy, cz, pri) { const key = skey(d, n, cx, cy, cz); gen.want(key, { type: 'sec', d, n, cx, cy, cz }, pri); return key; },
+    wantLod(d, n, cx, cy, cz, lod, pri) { const key = `l${lod}:${d}:${n}:${cx}:${cy}:${cz}`; gen.want(key, Q({ type: 'lod', lod, d, n, cx, cy, cz }), pri); return key; },
+    wantSec(d, n, cx, cy, cz, pri) { const key = skey(d, n, cx, cy, cz); gen.want(key, Q({ type: 'sec', d, n, cx, cy, cz }), pri); return key; },
     stats: () => {
       const now = performance.now();
       while (colTimes.length && now - colTimes[0] > 1000) colTimes.shift();

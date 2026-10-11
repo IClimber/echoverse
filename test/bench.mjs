@@ -107,3 +107,50 @@ console.log(`дальність 32 (14 / 42 / 44 % стовпців — повн
   }
   console.log(`зіткнення: секція з b ${(secB / nB).toFixed(2)} мс (${nB}), віртуальна з block() ${(secV / nV).toFixed(2)} мс (${nV}); крок гравця ${(stepT / steps * 1000).toFixed(1)} мкс; камера ${(camT / cams * 1000).toFixed(1)} мкс`);
 }
+
+// Рух п. 3 (стенд ?move — gen/stand.js): крок гравця в позах (присів, лежить, на стіні, на драбині, під водою) і ціль
+// (aimRay: з ока вздовж випадкових напрямків справжнім рельєфом)
+{
+  const { step, settle, PH1 } = await import('../js/player.js');
+  const { standBlock, STAND_SPOTS } = await import('../js/gen/stand.js');
+  const { aimRay, REACH } = await import('../js/aim.js');
+  const { genCol, genSection, bv, solidB, B_STONE, B_AIR, SEC } = await import('../js/gen/chunk.js');
+  const P = { liquid: { swim: true, danger: '', density: 1, visc: 1 }, obj: () => null, block: standBlock };
+  const W = [[0, 1], [-1, 0]];                      // W — уздовж +x
+  const at = (s) => { const [x, y] = STAND_SPOTS[s]; let k = 40; while (k > 0 && !solidB(standBlock(Math.floor(x), Math.floor(y), k - 1)) && standBlock(Math.floor(x), Math.floor(y), k - 1) !== 1) k--; const q = settle(P, x, y, k * 0.5); return { x: q[0], y: q[1], z: q[2], vz: 0, ground: true }; };
+  const run = (s, ctl, jumpAt = -1) => {
+    let p = at(s);
+    for (let i = 0; i < 120; i++) step(p, 0, -1, i === jumpAt, 1 / 120, P, PH1, W, ctl);     // прогрів
+    let t = 0, n = 0;
+    for (let r = 0; r < 16; r++) {                // по 2 с: драбина й стіна — ще не нагорі
+      p = at(s);
+      const t0 = performance.now();
+      for (let i = 0; i < 240; i++) step(p, 0, -1, i === jumpAt, 1 / 120, P, PH1, W, ctl);
+      t += performance.now() - t0; n += 240;
+    }
+    return { us: (t / n * 1000).toFixed(1), p };
+  };
+  const out = [];
+  for (const [name, s, ctl, j] of [['стоїть', 'A1', {}], ['присів', 'A2', { crouch: true }], ['лежить', 'A3', { crouch: true }], ['стіна', 'B3', {}, 20], ['драбина', 'B5', {}], ['під водою', 'D', { crouch: true, vert: -1 }]]) {
+    const r = run(s, ctl, j);
+    out.push(`${name} ${r.us} (${r.p.climb ? r.p.climb.kind : r.p.dive ? 'пірнає' : r.p.pose})`);
+  }
+  // ціль справжнім рельєфом (стовпці 3×3 зерна, як вище)
+  const L = lawsOf(seed, 0, 37), cols = new Map(), secs = new Map();
+  for (let cy = 0; cy < 3; cy++) for (let cx = 0; cx < 3; cx++) cols.set(`${cx},${cy}`, genCol(L, cx, cy));
+  const sec = (cx, cy, cz) => { const col = cols.get(`${cx},${cy}`); if (!col) return undefined; const k = `${cx},${cy},${cz}`; if (!secs.has(k)) secs.set(k, genSection(L, col, cz)); return secs.get(k); };
+  const block = (x, y, k) => { const cx = Math.floor(x / 16), cy = Math.floor(y / 16), S = sec(cx, cy, Math.floor(k / SEC)); if (!S) return -1; if (!S.b) return S.solid ? B_STONE : B_AIR; return S.b[bv(x - cx * 16, y - cy * 16, k - S.k0, S.nk)]; };
+  const PA = { liquid: L.liquid, laws: L, obj: () => null, block, sec };
+  let rs = 9, t = 0, n = 0, hit = 0;
+  const r = () => { rs = (rs * 1103515245 + 12345) >>> 0; return rs / 4294967296; };
+  for (let i = 0; i < 4000; i++) {
+    const o = [16 + r() * 16, 16 + r() * 16, 0], a = r() * Math.PI * 2, e = -0.1 - r() * 1.2;
+    let k = 300; while (k > -60 && block(Math.floor(o[0]), Math.floor(o[1]), k - 1) === B_AIR) k--;
+    o[2] = k * 0.5 + 1.5;
+    const d = [Math.cos(a) * Math.cos(e), Math.sin(a) * Math.cos(e), Math.sin(e)];
+    const t0 = performance.now();
+    if (aimRay(PA, null, o, d, REACH)) hit++;
+    if (i >= 400) { t += performance.now() - t0; n++; }
+  }
+  console.log(`рух п. 3: крок гравця, мкс — ${out.join(', ')}; ціль (aimRay) ${(t / n * 1000).toFixed(1)} мкс (влучань ${(hit / 40).toFixed(0)} %)`);
+}

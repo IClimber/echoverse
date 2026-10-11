@@ -2,12 +2,12 @@
 // позиції (float32 ×3), нормалі (int8 ×3), кольори (uint8 ×3), матеріали (uint8 — шар текстури), індекси.
 // Світло, туман і текстуру (за матеріалом, координати — проєкцією на площину грані) додає шейдер.
 // Земля — з блоків: грань лише між твердим і порожнім.
-import { CS, SEC, H, O_TREE, O_FLOAT, O_COVER, solidB, B_AIR, B_LIQ, B_ICE, B_SAND, B_GRASS, B_DRY, B_DESERT, B_SNOW, B_ROCK, B_BED, B_MUD, B_SOIL, B_STONE, B_SANDSTONE, B_MAGMA, B_FLOAT } from './chunk.js';
+import { CS, SEC, H, O_TREE, O_FLOAT, O_COVER, solidB, B_AIR, B_LIQ, B_ICE, B_SAND, B_GRASS, B_DRY, B_DESERT, B_SNOW, B_ROCK, B_BED, B_MUD, B_SOIL, B_STONE, B_SANDSTONE, B_MAGMA, B_FLOAT, B_LADDER, B_VINE } from './chunk.js';
 import { L_LAVA, SEA, gravityAt } from '../universe.js';
 import { LEVEL } from '../iso.js';
-import { template, place, footprint } from './plants.js';
+import { template, place, footprint, extent } from './plants.js';
 import { groundTint } from './flora.js';
-import { M_FLAT, M_ROCK, M_CLIFF, M_WATER, M_LAVA, M_ICE, M_SAND, M_LUSH, M_DRY, M_DESERT, M_SNOW, M_BED, M_MUD, M_SOIL, M_SANDSIDE, M_LIP, THIN_N } from './materials.js';
+import { M_FLAT, M_ROCK, M_CLIFF, M_WATER, M_LAVA, M_ICE, M_SAND, M_LUSH, M_DRY, M_DESERT, M_SNOW, M_BED, M_MUD, M_SOIL, M_SANDSIDE, M_LIP, M_BARK, M_LEAF, THIN_N } from './materials.js';
 import { hash3 } from '../rng.js';
 
 export const shade = (c, k) => [Math.min(255, c[0] * k | 0), Math.min(255, c[1] * k | 0), Math.min(255, c[2] * k | 0)];
@@ -98,8 +98,40 @@ export class Mesh {
 // Трава, степ і пустеля — відтінку біому клітинки (межі біомів — усереднення по сусідах 3×3)
 const DIRS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
 // AO вершини: кут (твердих блоків у кубі 2×2×2 навколо вершини) і відкритість неба (верх укриття вище вершини на d блоків)
+// тверде (solidB) таблицею — у гарячих циклах: драбина й ліана не тверді, їх меш — окремо (climbMesh)
+const SOL = new Uint8Array(256);
+for (let b = 0; b < 256; b++) SOL[b] = solidB(b) ? 1 : 0;
 const AOB = [255, 255, 255, 255, 255, 227, 199, 168, 140];
 export const skyK = (d) => d <= 1 ? 1 : d >= 9 ? 0 : 1 - (d - 1) / 8;
+
+const CLIMB_N = [[-1, 0], [1, 0], [0, -1], [0, 1]], LADDER_COL = [120, 84, 52];
+// Драбина чи ліана: (wx, wy) — середина грані стіни внизу блоку (z0), (nx, ny) — нормаль від стіни. Точка (d — від стіни,
+// s — уздовж стіни праворуч (−ny, nx), z). Грані — проти годинникової ззовні (тверде — з відсіканням задніх)
+function climbMesh(M, b, wx, wy, z0, nx, ny, col, ao) {
+  const tx = -ny, ty = nx, at = (d, s, z) => [wx + nx * d + tx * s, wy + ny * d + ty * s, z];
+  const face = (a, bb, c, d, n) => {
+    const ux = bb[0] - a[0], uy = bb[1] - a[1], uz = bb[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+    const ccw = (uy * vz - uz * vy) * n[0] + (uz * vx - ux * vz) * n[1] + (ux * vy - uy * vx) * n[2] > 0;
+    if (ccw) M.quad(a, bb, c, d, n[0], n[1], n[2], col, mt, ao); else M.quad(a, d, c, bb, n[0], n[1], n[2], col, mt, ao);
+  };
+  const mt = b === B_LADDER ? M_BARK : M_LEAF, N = [nx, ny, 0], Nb = [-nx, -ny, 0], Tp = [tx, ty, 0], Tn = [-tx, -ty, 0];
+  const cuboid = (d0, d1, s0, s1, z0, z1) => {
+    face(at(d1, s0, z0), at(d1, s1, z0), at(d1, s1, z1), at(d1, s0, z1), N);
+    face(at(d0, s0, z0), at(d0, s0, z1), at(d0, s1, z1), at(d0, s1, z0), Nb);
+    face(at(d0, s1, z0), at(d0, s1, z1), at(d1, s1, z1), at(d1, s1, z0), Tp);
+    face(at(d0, s0, z0), at(d1, s0, z0), at(d1, s0, z1), at(d0, s0, z1), Tn);
+    face(at(d0, s0, z1), at(d0, s1, z1), at(d1, s1, z1), at(d1, s0, z1), [0, 0, 1]);
+    face(at(d0, s0, z0), at(d1, s0, z0), at(d1, s1, z0), at(d0, s1, z0), [0, 0, -1]);
+  };
+  const z1 = z0 + LEVEL;
+  if (b === B_LADDER) {
+    cuboid(0.04, 0.1, -0.33, -0.27, z0, z1); cuboid(0.04, 0.1, 0.27, 0.33, z0, z1);   // стійки
+    cuboid(0.045, 0.095, -0.27, 0.27, z0 + LEVEL / 2 - 0.025, z0 + LEVEL / 2 + 0.025);  // щабель
+  } else {
+    face(at(0.03, -0.45, z0), at(0.03, 0.45, z0), at(0.03, 0.45, z1), at(0.03, -0.45, z1), N);     // лицем від стіни
+    face(at(0.03, -0.45, z0), at(0.03, -0.45, z1), at(0.03, 0.45, z1), at(0.03, 0.45, z0), Nb);    // і до стіни
+  }
+}
 
 export function chunkMesh(C, L, { near = true, far = true } = {}) {
   const M = new Mesh(), W = new Mesh(), Mc = new Mesh(), P = L.pal, B = C.b;
@@ -172,7 +204,7 @@ export function chunkMesh(C, L, { near = true, far = true } = {}) {
     const o = (((k + 1) * NX + y + 1) * NX + x + 1) * 3;
     if (VC[o] === VC[o]) return o;
     const o0 = bi(x, y, k);
-    for (let c = 0; c < 8; c++) cornerSolid[c] = B[o0 + CO[c]] >= B_ICE ? 1 : 0;
+    for (let c = 0; c < 8; c++) cornerSolid[c] = SOL[B[o0 + CO[c]]];
     let sx = 0, sy = 0, sz = 0, n = 0;
     for (let e = 0; e < 12; e++) {
       if (cornerSolid[EA[e]] === cornerSolid[EB[e]]) continue;
@@ -270,7 +302,7 @@ export function chunkMesh(C, L, { near = true, far = true } = {}) {
     const inner = x >= 0 && y >= 0 && x < N && y < N, o = bi(x, y, -1);
     for (let k = 0; k < NK + 2; k++) {
       const b = B[o + k];
-      if (b >= B_ICE) { allS[k]++; if (inner) inS[k]++; }
+      if (SOL[b]) { allS[k]++; if (inner) inS[k]++; }
       else if (b === B_LIQ && inner) inL[k]++;
     }
   }
@@ -285,7 +317,7 @@ export function chunkMesh(C, L, { near = true, far = true } = {}) {
     for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
       const o = ((y + 1) * NW + x + 1) * SK + k + 1;
       let f = 0;
-      if (B[o] >= B_ICE) for (let d = 0; d < 6; d++) if (B[o + NB[d]] < B_ICE) { f |= 1 << d; rows[d * N + (d < 2 ? x : y)] = 1; }
+      if (SOL[B[o]]) for (let d = 0; d < 6; d++) if (!SOL[B[o + NB[d]]]) { f |= 1 << d; rows[d * N + (d < 2 ? x : y)] = 1; }
       fm[y * N + x] = f; anyF |= f;
     }
     if (!anyF) continue;
@@ -380,16 +412,27 @@ export function chunkMesh(C, L, { near = true, far = true } = {}) {
       const [dx, dy] = DIRS[d];
       for (let r = 0; r < N; r++) for (let k = 0; k < NK; k++) {
         const x = dx ? (dx > 0 ? N - 1 : 0) : r, y = dx ? r : (dy > 0 ? N - 1 : 0), b = B[bi(x, y, k)];
-        if (b < B_ICE || B[bi(x + dx, y + dy, k)] < B_ICE) continue;
+        if (!SOL[b] || !SOL[B[bi(x + dx, y + dy, k)]]) continue;
         let rim = false;
         for (let a = -1; a <= 1 && !rim; a++) for (let c = -1; c <= 1 && !rim; c++) {
           const xx = dx ? x : x + a, yy = dx ? y + a : y;
-          if (B[bi(xx, yy, k + c)] < B_ICE || B[bi(xx + dx, yy + dy, k + c)] < B_ICE) rim = true;
+          if (!SOL[B[bi(xx, yy, k + c)]] || !SOL[B[bi(xx + dx, yy + dy, k + c)]]) rim = true;
         }
         if (rim) smoothFace(x, y, k, d, quadOf(x, y, k, d), b);
       }
     }
     T = M;
+  }
+  // Драбини й ліани (лише точна ґратка): тонка панель на стіні — на першому твердому сусіді (−x, +x, −y, +y). У твердому
+  // меші — тож і в зіткненнях (collision.js): стійки й щаблі драбини, площина ліани
+  if (ST === 1) for (let k = 0; k < NK; k++) for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const b = B[bi(x, y, k)];
+    if (b !== B_LADDER && b !== B_VINE) continue;
+    let nx = 0, ny = 0;
+    for (const [dx, dy] of CLIMB_N) if (SOL[B[bi(x + dx, y + dy, k)]]) { nx = -dx; ny = -dy; break; }
+    if (!nx && !ny) continue;
+    const ao = TOP ? Math.round(255 * skyK(TOP[cix(x, y)] - (K0 + k + 0.5))) : 255;
+    climbMesh(M, b, x + 0.5 - nx * 0.5, y + 0.5 - ny * 0.5, k * LEVEL, nx, ny, b === B_LADDER ? LADDER_COL : shade(P.lush, 0.8), ao);
   }
   // Поверхня рідини: верхній блок рідини під повітрям (трохи нижче за край блоку)
   // і бічні грані там, де рідина межує з повітрям (печера біля водойми): об'єм рідини завжди замкнений
@@ -444,6 +487,16 @@ function objMeshes(C, L, K0, NK, near, far, dz = 0) {
   return { F, Ff };
 }
 
+// Один предмет o стовпця C повністю (обрис цілі, scene.js): той самий шаблон, поворот, масштаб і колір, що в objMeshes;
+// позиції — у чанку (x, y 0…16), висота — від блоку 0
+export function objMesh(C, L, o) {
+  const M = new Mesh(), v = o.v, g = C.sp[o.s], { cx, cy, rot, s, cj } = objPose(C, L, o), z = o.z * LEVEL;
+  if (o.k === O_TREE) place(M, template(g, v % 3, 0), cx, cy, z, rot, s, ((v >> 2 & 7) / 7) * 0.1, cj);
+  else if (o.k === O_COVER) place(M, template(g, v & 1, 0), cx, cy, z, rot, s, 0, cj);
+  else if (o.k !== O_FLOAT) place(M, template(o.st ? stoneGenome(L, g, o.st) : g, v & 3, 0, styleOf(g, v)), cx, cy, z, rot, s, 0, cj);
+  return M.finish();
+}
+
 // Рослини й каміння зблизька всього стовпця (окрема робота: потрібні лише біля камери); висота — від блоку K0
 export function floraMesh(C, L, K0) { return objMeshes(C, L, K0, 1e9, true, false).F; }
 // Далекі рослини й каміння з основою в секції K0…K0+15 (груба секція: dz — опустити до грубої землі)
@@ -461,19 +514,26 @@ export function objPose(C, L, o) {
   const cj = [k * (0.97 + 0.06 * (v >> 6 & 3) / 3), k, k * (0.97 + 0.06 * (v >> 1 & 3) / 3)];
   const ga = gravityAt(L, C.cx * CS + cx, C.cy * CS + cy).k, gs = ga === 1 ? 1 : Math.min(2.2, Math.max(0.5, Math.pow(ga, -0.6)));
   o.cx = cx; o.cy = cy; o.r = 0; o.top = 0;
-  let s = 1;
+  let s = 1, T = null;
   if (o.k === O_TREE) {
     s = (0.6 + 0.8 * age) * gs;
-    const fp = footprint(template(g, v % 3, 0));
+    T = template(g, v % 3, 0);
+    const fp = footprint(T);
     o.r = Math.min(3.5, Math.max(0.12, fp.r * s * 0.8)); o.top = Math.max(2, fp.top * s);
-  } else if (o.k === O_COVER) s = (0.6 + 0.8 * age) * Math.sqrt(gs);
+  } else if (o.k === O_COVER) { s = (0.6 + 0.8 * age) * Math.sqrt(gs); T = template(g, v & 1, 0); }
   else if (o.k !== O_FLOAT) {
     s = 0.8 + 0.4 * age;
-    const fp = footprint(template(o.st ? stoneGenome(L, g, o.st) : g, v & 3, 0, styleOf(g, v)));
+    T = template(o.st ? stoneGenome(L, g, o.st) : g, v & 3, 0, styleOf(g, v));
+    const fp = footprint(T);
     if (fp.top * s > LEVEL / 2) { o.r = Math.min(0.5, fp.r * s * 0.8); o.top = fp.top * s; }
   }
+  // обрис для прицілювання (aim.js): циліндр радіуса ar від az0 до ah над основою
+  if (T) { const e = extent(T); o.ar = e.r * s; o.az0 = e.z0 * s; o.ah = Math.max(0.1, e.top * s); }
   return (o.pose = { cx, cy, rot, s, cj });
 }
+
+// Шаблон каменя виду каміння області g (стиль — від варіанта v): тіла стенду руху
+export const stoneTemplate = (g, v) => template(g, v & 3, 0, styleOf(g, v));
 
 // Стиль каміння клітинки — з ваг стилів області
 function styleOf(g, v) {
@@ -502,28 +562,37 @@ export function floatPose(L, g, o, cx, cy, z) {
 }
 
 // ================= Фігура гравця =================
-// Частини окремими мешами (для анімації): тулуб із головою й пристроєм, дві ноги, дві руки.
-// Локальні координати: ноги в (0, 0, 0), обличчя — у бік +x; ліва сторона — +y. PIVOT — суглоби (кульш, плече)
+// Частини окремими мешами (для анімації): тулуб із пристроєм, голова, стегна, гомілки, руки.
+// Локальні координати: ноги в (0, 0, 0), обличчя — у бік +x; ліва сторона — +y. PIVOT — суглоби (кульш, коліно, плече,
+// шия). Ящики замкнені (з низом: лежачи й на стіні низ видно) і не мають спільних площин різного кольору (пристрій
+// заходить у тулуб): інакше крізь відкритий низ було видно дві грані в одній площині — мерехтіли (плавання, 11.10.2026)
 export const FIG_K = 1.25;
-export const PIVOT = { hip: 0.28 * FIG_K, shoulder: 0.58 * FIG_K, legY: 0.08 * FIG_K, armY: 0.21 * FIG_K };
+export const PIVOT = { hip: 0.28 * FIG_K, knee: 0.14 * FIG_K, shoulder: 0.58 * FIG_K, neck: 0.62 * FIG_K, legY: 0.08 * FIG_K, armY: 0.21 * FIG_K };
 export function figureParts(color) {
-  const dark = [40, 38, 48], skin = [236, 200, 170], dev = [120, 240, 255], k = FIG_K;
+  const dark = [40, 38, 48], dark2 = [52, 50, 62], skin = [236, 200, 170], dev = [120, 240, 255], k = FIG_K;
   const part = (boxes) => {
     const M = new Mesh();
-    for (const [x0, y0, z0, x1, y1, z1, c] of boxes) M.box(x0 * k, y0 * k, z0 * k, x1 * k, y1 * k, z1 * k, c);
+    for (const [x0, y0, z0, x1, y1, z1, c] of boxes) {
+      M.box(x0 * k, y0 * k, z0 * k, x1 * k, y1 * k, z1 * k, c);
+      M.quad([x0 * k, y0 * k, z0 * k], [x0 * k, y1 * k, z0 * k], [x1 * k, y1 * k, z0 * k], [x1 * k, y0 * k, z0 * k], 0, 0, -1, c);   // низ
+    }
     return M.finish();
   };
   return {
     core: part([
       [-0.13, -0.17, 0.28, 0.11, 0.17, 0.62, color],
-      [-0.25, -0.12, 0.32, -0.13, 0.12, 0.58, dev],                // пристрій для стрибків — на спині
-      [-0.11, -0.12, 0.62, 0.11, 0.12, 0.84, skin],
-      [0.11, -0.08, 0.71, 0.125, -0.03, 0.77, dark],
-      [0.11, 0.03, 0.71, 0.125, 0.08, 0.77, dark],
+      [-0.22, -0.12, 0.32, -0.12, 0.12, 0.58, dev],                // пристрій для стрибків — на спині (заходить у тулуб)
     ]),
-    legL: part([[-0.08, 0.02, 0, 0.06, 0.14, 0.28, dark]]),
-    legR: part([[-0.08, -0.14, 0, 0.06, -0.02, 0.28, dark]]),
-    armL: part([[-0.05, 0.17, 0.33, 0.05, 0.25, 0.6, color], [-0.05, 0.17, 0.3, 0.05, 0.25, 0.34, skin]]),
-    armR: part([[-0.05, -0.25, 0.33, 0.05, -0.17, 0.6, color], [-0.05, -0.25, 0.3, 0.05, -0.17, 0.34, skin]]),
+    head: part([
+      [-0.11, -0.12, 0.62, 0.11, 0.12, 0.84, skin],
+      [0.105, -0.08, 0.71, 0.125, -0.03, 0.77, dark],
+      [0.105, 0.03, 0.71, 0.125, 0.08, 0.77, dark],
+    ]),
+    legL: part([[-0.08, 0.02, 0.14, 0.06, 0.14, 0.28, dark]]),
+    legR: part([[-0.08, -0.14, 0.14, 0.06, -0.02, 0.28, dark]]),
+    shinL: part([[-0.075, 0.025, 0, 0.055, 0.135, 0.145, dark2]]),
+    shinR: part([[-0.075, -0.135, 0, 0.055, -0.025, 0.145, dark2]]),
+    armL: part([[-0.05, 0.17, 0.33, 0.05, 0.25, 0.6, color], [-0.045, 0.175, 0.3, 0.045, 0.245, 0.33, skin]]),
+    armR: part([[-0.05, -0.25, 0.33, 0.05, -0.17, 0.6, color], [-0.045, -0.245, 0.3, 0.045, -0.175, 0.33, skin]]),
   };
 }
