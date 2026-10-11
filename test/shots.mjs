@@ -1,5 +1,5 @@
 // test/shots.mjs — знімки сцен гри й стенда ?light, помилки консолі; headless Chrome через CDP (не в npm test).
-// Сервер: python3 -m http.server 8123. node test/shots.mjs [--combos=webgl2:pcf3:16,…] [--scenes=plain,mount,…] [--out=ТЕКА]
+// Сервер: python3 serve.py (порт 8123). node test/shots.mjs [--combos=webgl2:pcf3:16,…] [--scenes=plain,mount,…] [--out=ТЕКА]
 import { spawn } from 'node:child_process'; import { mkdirSync, rmSync, writeFileSync } from 'node:fs'; import { tmpdir } from 'node:os';
 const arg = (k, d) => { const a = process.argv.find((s) => s.startsWith(`--${k}=`)); return a ? a.slice(k.length + 3) : d; };
 const port = 9337;
