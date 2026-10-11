@@ -52,22 +52,28 @@ export function createWorld(seed, onMesh) {
   // Потрібне останньому перерахунку стрімінгу (торкнулось після початку попереднього, pass()) не витісняється: інакше
   // коло приземлення сусідніх всесвітів і цілі стрибка (не поточні) витіснялось щойно згенерованим — стрибок чекав
   // «Стабілізації», поки генерація й витіснення випадково не розминуться
+  // Витіснити нічого (усе потрібне — острови, кілька всесвітів дають більше секцій, ніж keep) — до наступного перерахунку
+  // (safe не змінився) не пробувати знову: інакше кожен новий стовпець і секція сортували всю мапу (десятки тисяч записів,
+  // у польоті — десятки разів за кадр; 11.10.2026 — до 9 к/с)
   let safe = 0, passAt = 0;
+  const stuck = { cols: -1, secs: -1 };
   const trim = (kind, total, keep) => {
-    if (total <= keep) return total;
+    if (total <= keep || stuck[kind] === safe) return total;
     const order = [...unis.values()].filter((U) => U !== cur).sort((a, b) => a.at - b.at);
     if (cur) order.push(cur);
     for (const U of order) {
-      const map = U[kind];
-      for (const [k, o] of [...map].sort((a, b) => a[1].used - b[1].used)) {
+      const map = U[kind], old = [];
+      for (const e of map) if (e[1].used <= safe) old.push(e);
+      old.sort((a, b) => a[1].used - b[1].used);
+      for (const [k, o] of old) {
         if (total <= keep * 0.9) break;
-        if (o.used > safe) continue;
         o.dead = true; map.delete(k); total--;
         if (kind === 'cols') entsOf(U.d, U.n).unload(k);       // змінені тіла стовпця — у сховище сесії
       }
       if (!U.cols.size && !U.secs.size && U !== cur) { unis.delete(`${U.d}:${U.n}`); if (lastU === U) lastU = null; }
       if (total <= keep * 0.9) break;
     }
+    if (total > keep * 0.9) stuck[kind] = safe;              // усе давнє витіснено, решта потрібна
     return total;
   };
   let stamp = 0;
@@ -153,7 +159,7 @@ export function createWorld(seed, onMesh) {
     pass() { safe = passAt; passAt = stamp; },
     touchCol(d, n, cx, cy) { const U = uni(d, n); return U && touch(U.cols, ck(cx, cy)); },
     touchSec(d, n, cx, cy, cz) { const U = uni(d, n); return U && touch(U.secs, sk(cx, cy, cz)); },
-    setKeep(k) { keep = k; },
+    setKeep(k) { keep = k; stuck.cols = stuck.secs = -1; },
     dirty: false,                            // прийшли зведення стовпців (стрімінг перерахує)
     // Поточний всесвіт (витісняється останнім)
     setCurrent(d, n) { cur = uni(d, n, true); cur.at = performance.now(); },
