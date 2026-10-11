@@ -171,13 +171,15 @@ export function chunkMesh(C, L, { near = true, far = true } = {}) {
     return [Math.round(r / 27) * 3, Math.round(g / 27) * 3, Math.round(bl / 27) * 3];
   };
   // Вигляд грані: [матеріал, колір] (темряву печер дає світло рушія: тіні й AO вершин)
+  // дно водойм темнішає з глибиною — і верх, і боки (бік крутого схилу дна — так само: інакше на глибині круті трикутники
+  // вдвічі яскравіші за пологі поруч — яскраві «зубці», 12.10.2026)
   const look = (b, d, x, y, k) => {
-    const kb = k * ST;
+    const kb = k * ST, dk = b === B_BED ? 0.62 + 0.38 * Math.max(0, Math.min(1, (kb + K0) / SEA)) : 1;
     let m, c;
-    if (d === 4) { m = TOPM[b]; c = b === B_BED ? shade(COL[b], 0.62 + 0.38 * Math.max(0, Math.min(1, (kb + K0) / SEA))) : colOf(b, x, y); }
-    else if (d === 5) { m = SIDEM[b]; c = shade(COL[b === B_GRASS || b === B_DRY ? B_SOIL : b], 0.8); }
+    if (d === 4) { m = TOPM[b]; c = b === B_BED ? shade(COL[b], dk) : colOf(b, x, y); }
+    else if (d === 5) { m = SIDEM[b]; c = shade(COL[b === B_GRASS || b === B_DRY ? B_SOIL : b], 0.8 * dk); }
     else if (LIP.has(b) && !solidB(B[bi(x, y, k + 1)])) { m = b === B_SNOW ? M_SNOW : M_LIP; c = shade(colOf(b, x, y), 0.86); }
-    else { m = SIDEM[b]; c = shade(b === B_DESERT ? colOf(b, x, y) : COL[b === B_GRASS || b === B_DRY ? B_SOIL : b], k & 1 ? 1 : 0.92); }
+    else { m = SIDEM[b]; c = shade(b === B_DESERT ? colOf(b, x, y) : COL[b === B_GRASS || b === B_DRY ? B_SOIL : b], (k & 1 ? 1 : 0.92) * dk); }
     return [m, c];
   };
   const key = (lk) => lk[0] * 16777216 + (lk[1][0] << 16 | lk[1][1] << 8 | lk[1][2]);
