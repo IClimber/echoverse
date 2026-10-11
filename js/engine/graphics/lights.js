@@ -9,6 +9,13 @@
 //   shadows.md. Налаштування й зміщення — з прикладів graphics/shadow-cascades, shadow-soft, clustered-omni-shadows.
 // Кидачі — шари World і «Тіні» (app.js); що з кидачів «Тіней» увімкнено на кадр — regions.cullCasters
 export const SHADOW_D = 128;                   // тіні — лише ближче (глибина від камери, shadowDistance PlayCanvas)
+// Напрям світла з тінню змінюється кроками, не щокадру. PlayCanvas прив'язує карту тіней до текселів (стабільно при
+// русі камери — shadow-renderer-directional.js), але не при повороті світла: сітка текселів повертається навколо початку
+// координат і біля точки p зсувається на |p|·кут. Від руху сонця щокадру — на частку текселя, тож краї тіней (тонкі
+// стебла, фігура) щоразу перемальовуються інакше й мерехтять навіть на місці (11.10.2026, міра на місці: PCF3
+// 0,100 → 0,015, PCSS 0,225 → 0,016 — як без руху сонця). Крок 0,25°: тінь куща зсувається на соті частки одиниці,
+// перемальовка — раз на ~0,5 с за доби 16 хв (як оновлення освітлення за lightingThreshold скрипта ProceduralSky)
+const SHADOW_STEP = Math.cos(0.25 * Math.PI / 180);
 const MAX_DIR = 3;
 
 // G — застосунок (app.js); shadows — 'pcf3' | 'pcss'
@@ -64,8 +71,11 @@ export function createLights(G, { shadows = 'pcf3' } = {}) {
     if (!s) return;
     const on = !!o && o.intensity > 0;
     if (on) {
-      s.dir[0] = o.dir[0]; s.dir[1] = o.dir[1]; s.dir[2] = o.dir[2];
-      orient(s.e, G.dirToPC(o.dir, V).normalize());
+      const d = o.dir, k = s.dir;
+      if (!s.l.castShadows || !s.on || (d[0] * k[0] + d[1] * k[1] + d[2] * k[2]) / Math.hypot(d[0], d[1], d[2]) / Math.hypot(k[0], k[1], k[2]) < SHADOW_STEP) {
+        k[0] = d[0]; k[1] = d[1]; k[2] = d[2];
+        orient(s.e, G.dirToPC(d, V).normalize());
+      }
       s.l.color = C.set(o.color[0], o.color[1], o.color[2]);
       s.l.intensity = o.intensity;
     } else s.l.intensity = 0;
