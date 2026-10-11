@@ -293,6 +293,10 @@ function boot(renderer) {
   document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) navigator.keyboard?.unlock?.(); fullBtn(); });
   $('full').onclick = toggleFull;
   let ctrlWarned = false;                          // Ctrl поза повним екраном: раз за сесію — про Ctrl+W
+  // Ctrl+W поза повним екраном сторінці не приходить (браузер одразу закриває вкладку), а Ctrl — це присідання: присів і
+  // пішов уперед — вкладку закрито. Тож поки в грі затиснуто Ctrl — браузер перепитує (beforeunload; так само перепитає
+  // й на Ctrl+R, Ctrl+Shift+R). Світ і без того зберігається (pagehide)
+  addEventListener('beforeunload', (e) => { if (g && crouchHeld() && !document.fullscreenElement) { e.preventDefault(); e.returnValue = ''; } });
   function hideMenu() { $('menu').hidden = true; clearInput(); document.activeElement?.blur(); }   // інакше Enter у грі тиснув би кнопку меню
   const btn = (text, fn, cls) => { const b = document.createElement('button'); b.textContent = text; b.onclick = fn; if (cls) b.className = cls; return b; };
 
