@@ -734,3 +734,14 @@ test('незгенероване під гравцем (телепорт у пе
   for (let i = 0; i < 60; i++) step(p, 0, 0, false, 1 / 120, P, PH1);
   assert.ok(p.z === 3 && p.ground, `у печері: ${p.z}`);
 });
+
+test('під рідиною: око нижче поверхні стовпця рідини (поверхня — 0,15 під краєм верхнього блоку); видимість — від прозорості', async () => {
+  const { underLiquid, liquidVis } = await import('../js/collision.js');
+  const P = world(Array(4).fill('wwww'));                               // дно — верх k = 1 (z 1), рідина k 2…5, поверхня 2,85
+  assert.equal(underLiquid(P, 1.5, 1.5, 2.84), true);
+  assert.equal(underLiquid(P, 1.5, 1.5, 2.86), false);
+  assert.equal(underLiquid(P, 1.5, 1.5, 2.0), true);                    // межа блоків k 3 / 4 — та сама рідина
+  assert.equal(underLiquid(P, 1.5, 1.5, 0.9), false);                   // у дні — не рідина
+  const vis = [0.72, 0.82, 0.55, 1].map(liquidVis);                     // вода, кислота, метан, лава
+  assert.ok(Math.abs(vis[0] - 15.56) < 0.01 && Math.abs(vis[1] - 8.78) < 0.01 && Math.abs(vis[2] - 32.73) < 0.01 && vis[3] === 0.8, `${vis}`);
+});

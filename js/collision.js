@@ -20,7 +20,7 @@ export function colliderOf(P) {
   if (!c) all.set(P, (c = createCollider(P)));
   return c;
 }
-export const stats = { secs: 0, tris: 0, builds: 0, buildMs: 0 };
+export const stats = { secs: 0, tris: 0, builds: 0, buildMs: 0, maxMs: 0, slow: 0, virt: 0, temp: 0 };
 
 function createCollider(P) {
   const secs = new Map();
@@ -60,27 +60,38 @@ function createCollider(P) {
     if (S && S.b) e = fromBlocks(S.b, S.k0, S.nk, cx, cy);
     else if (S && S.empty) e = { n: 0 };
     else {
-      // віртуальна секція з P.block: −1 (не згенеровано) — камінь, як стіна
-      let solid = 0, unk = false;
-      const X = cx * CS, Y = cy * CS, K = cz * SEC;
+      // віртуальна секція з P.block: −1 (не згенеровано) — камінь, як стіна. Для кожної сусідньої секції (рамка), де трапилось
+      // −1, — одна така точка: запис дійсний, поки всі вони ще не згенеровані
+      let solid = 0;
+      const X = cx * CS, Y = cy * CS, K = cz * SEC, unk = [];
       for (let k = -1; k <= SEC; k++) for (let y = -1; y <= CS; y++) for (let x = -1; x <= CS; x++) {
         let b = P.block(X + x, Y + y, K + k);
-        if (b === -1) { b = B_STONE; unk = true; }
+        if (b === -1) {
+          b = B_STONE;
+          const r = ((k < 0 ? 0 : k < SEC ? 1 : 2) * 3 + (y < 0 ? 0 : y < CS ? 1 : 2)) * 3 + (x < 0 ? 0 : x < CS ? 1 : 2);
+          if (!unk.some((u) => u[0] === r)) unk.push([r, X + x, Y + y, K + k]);
+        }
         vb[bv(x, y, k, SEC)] = b;
         if (solidB(b)) solid++;
       }
       e = solid === 0 || solid === NB ? { n: 0 } : fromBlocks(vb.slice(), K, SEC, cx, cy);
-      if (unk) { e.temp = true; e.ver = P.ver ? P.ver() : 0; }
+      if (unk.length) { e.temp = unk; e.ver = P.ver ? P.ver() : 0; }
     }
     e.src = S || null;
-    stats.builds++; stats.buildMs += performance.now() - t0;
+    const ms = performance.now() - t0;
+    stats.builds++; stats.buildMs += ms; if (ms > stats.maxMs) stats.maxMs = ms; if (ms > 3) stats.slow++;
+    if (!(S && (S.b || S.empty))) stats.virt++; if (e.temp) stats.temp++;
     return e;
   }
 
   function section(cx, cy, cz) {
     const key = `${cx},${cy},${cz}`, S = P.sec ? P.sec(cx, cy, cz) : undefined;
     let e = secs.get(key);
-    if (e && (e.src !== (S || null) || (e.temp && e.ver !== (P.ver ? P.ver() : 0)))) { stats.tris -= e.n; secs.delete(key); e = null; }
+    if (e && e.temp && e.src === (S || null)) {                  // дані світу змінились — чи догенеровано щось із рамки
+      const v = P.ver ? P.ver() : 0;
+      if (e.ver !== v) { if (e.temp.some((u) => P.block(u[1], u[2], u[3]) !== -1)) e.src = undefined; else e.ver = v; }
+    }
+    if (e && e.src !== (S || null)) { stats.tris -= e.n; secs.delete(key); e = null; }
     if (e) { secs.delete(key); secs.set(key, e); return e; }
     e = build(cx, cy, cz, S);
     secs.set(key, e); stats.tris += e.n;
@@ -146,3 +157,6 @@ export function underLiquid(P, x, y, z) {
   while (P.block(tx, ty, k + 1) === B_LIQ) k++;
   return z < (k + 1) * LEVEL - 0.15;
 }
+// Видимість під рідиною (кінець лінійного туману, одиниць) — від прозорості поверхні liquid.alpha: вода 15,6, кислота 8,8,
+// метан 32,7, лава 0,8
+export const liquidVis = (alpha) => Math.max(0.8, 40 * (1 - alpha) / Math.max(1e-3, alpha));

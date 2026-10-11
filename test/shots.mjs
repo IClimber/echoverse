@@ -11,7 +11,7 @@ const COMBOS = arg('combos', 'webgl2:pcf3:16,webgl2:pcss:16,webgl2:off:16,webgpu
 // особливе: rain — дощ, iso — згори, first — перша особа, coll — каркас зіткнень (?dev showColl), cave — печера (перша особа:
 // firstcave)
 const ALL = { plain: [1, -52, -45, 0.4], night: [1, -52, -45, 0.0], rain: [1, -52, -45, 0.4, 'rain'], iso: [1, -52, -45, 0.4, 'iso'],
-  first: [1, -52, -45, 0.4, 'first'], coll: [1, -52, -45, 0.4, 'coll'], cave: [1, -52, -45, 0.4, 'cave'], firstcave: [1, -52, -45, 0.4, 'firstcave'], mount: [33281, -61, -2, 0.4], forest: [-60813, -478, -107, 0.4], suns3: [784, -52, -45, 'best'] };
+  first: [1, -52, -45, 0.4, 'first'], under: [1, -52, -45, 0.4, 'under'], slope: [33281, -61, -2, 0.4, 'slope'], trunk: [-60813, -478, -107, 0.4, 'trunk'], coll: [1, -52, -45, 0.4, 'coll'], cave: [1, -52, -45, 0.4, 'cave'], firstcave: [1, -52, -45, 0.4, 'firstcave'], mount: [33281, -61, -2, 0.4], forest: [-60813, -478, -107, 0.4], suns3: [784, -52, -45, 'best'] };
 const SCENES = arg('scenes', Object.keys(ALL).join(',')).split(',');
 const flags = ['--headless=new', '--use-angle=vulkan', '--enable-features=Vulkan', '--enable-unsafe-webgpu', '--ignore-gpu-blocklist', '--window-size=2560,1440'];
 rmSync(`${OUT}/profile`, { recursive: true, force: true });
@@ -57,11 +57,30 @@ for (const [gpu, sh, view] of COMBOS) {
   await waitFor('!!(eco.g && eco.g.me.placed)'); await idle();
   for (const sc of SCENES) {
     const [n, x, y, ph, sp] = ALL[sc];
-    const mode = sp === 'iso' ? 'iso' : sp === 'first' || sp === 'firstcave' ? 'first' : 'third', cave = sp === 'cave' || sp === 'firstcave';
+    const mode = sp === 'iso' ? 'iso' : ['first', 'firstcave', 'under'].includes(sp) ? 'first' : 'third', cave = sp === 'cave' || sp === 'firstcave';
     await ev(`eco.setCam('${mode}'); eco.showColl(${sp === 'coll'}); eco.weather(${sp === 'rain' ? "'rain'" : 'null'}); 1`);
     await jumpTo(n, x, y);
-    if (cave && last[3] !== 'cave' && !(await ev('eco.findCave()'))) { R.push({ gpu, sh, view, sc, skip: 'печеру не знайдено' }); continue; }
+    if (cave && last[3] !== 'cave') {             // печерні секції підвантажуються не одразу — кілька спроб
+      let ok = null;
+      for (let i = 0; i < 20 && !ok; i++) { ok = await ev('eco.findCave()'); if (!ok) await wait(250); }
+      if (!ok) { R.push({ gpu, sh, view, sc, skip: 'печеру не знайдено' }); continue; }
+    }
     if (cave) { last[3] = 'cave'; await idle(); while ((await ev('eco.visMissing()')) !== 0) await wait(20); }
+    if (sp === 'under') {                         // водойма ≥ 3 одиниць: око на 1,5 під поверхнею, погляд трохи вгору (політ — не тоне)
+      const w = await ev('eco.findLiquid(12)');
+      if (!w) { R.push({ gpu, sh, view, sc, skip: 'водойми не знайдено' }); continue; }
+      await ev(`(() => { const me = eco.g.me; me.x = ${w[0]}; me.y = ${w[1]}; me.z = ${w[2]} - 1.5 - 0.92; me.fly = true; me.vz = 0; eco.look(0.6, -0.35); return 1; })()`);
+      last = null; await idle(); await wait(500);
+    }
+    if (sp === 'slope') {                         // третя особа, камера — з боку, де земля вища (схил за спиною)
+      await ev(`(() => { const g = eco.g, me = g.me; let best = 0, bh = -1e9; for (let a = 0; a < 6.28; a += 0.2) { const h = g.world.topAt(g.d, g.n, Math.floor(me.x + Math.cos(a) * 3), Math.floor(me.y + Math.sin(a) * 3)); if (h !== null && h > bh) { bh = h; best = a; } } eco.look(best + Math.PI, 0.25); return best; })()`);
+      await wait(800);
+    }
+    if (sp === 'trunk') {                         // третя особа: найближчий стовбур — за спиною, гравець за 1,2 від нього
+      const ok = await ev(`(() => { const g = eco.g, me = g.me; let o = null, bd = 1e9; for (let dy = -20; dy <= 20; dy++) for (let dx = -20; dx <= 20; dx++) { const q = g.world.obst(g.d, g.n, Math.floor(me.x) + dx, Math.floor(me.y) + dy); if (q && typeof q === 'object' && q.r > 0.12 && q.z1 - q.z0 > 2) { const d = Math.hypot(dx, dy); if (d < bd) { bd = d; o = q; } } } if (!o) return false; const a = 0.7; me.x = o.cx + Math.cos(a) * (o.r + 1.4); me.y = o.cy + Math.sin(a) * (o.r + 1.4); me.z = o.z0 + 0.5; me.vz = 0; eco.look(a, 0.15); return true; })()`);
+      if (!ok) { R.push({ gpu, sh, view, sc, skip: 'стовбура не знайдено' }); continue; }
+      last = null; await idle(); await wait(1200);
+    }
     await ev(ph === 'best' ? 'eco.bestPhase()' : `eco.setPhase(${ph})`);
     await menu(true); await wait(1500);
     if (gpu !== 'webgpu') await shot(`${gpu}-${sh}-${view}-${sc}`);   // WebGPU у headless знімає чорне — лише помилки

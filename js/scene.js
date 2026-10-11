@@ -16,7 +16,8 @@ import { SPR } from './gen/sprites.js';
 import { SKY_GLSL, SKY_WGSL } from './sky-shader.js';
 import { LEVEL, S } from './iso.js';
 import { CS } from './gen/chunk.js';
-import { SEA, MAX_AMP } from './universe.js';
+import { SEA, MAX_AMP, L_LAVA } from './universe.js';
+import { liquidVis } from './collision.js';
 import { figureParts } from './gen/mesh.js';
 import { poseMatrices, viewArms } from './anim.js';
 import { skyState, applyWeather, lightsOf, pcIntensity } from './sky.js';
@@ -415,6 +416,7 @@ export async function createScene(canvas, settings = {}) {
   let cullOn = true, shownU = null, lastCol = '', lastRad = 0, lawsKey = null;
   const M4 = new pc.Mat4(), Q = new pc.Quat(), V3 = new pc.Vec3(), engRegs = [];
   let linesPC = new Float32Array(0);
+  const underBg = new pc.Color(), BLACK = new pc.Color(0, 0, 0);
   const dirsBuf = [], cutF = new Float32Array(4), cut2 = new Float32Array(4), cut3 = new Float32Array(2), eyePC = new Float32Array(3), tgtPC = new Float32Array(3), wind4 = new Float32Array(4), fade2 = new Float32Array(2), thin2 = new Float32Array(2), xfade2 = new Float32Array(2);
   const viewC = { m: null, eye: null, ud: null, t: null };
   let next = null;
@@ -554,9 +556,17 @@ export async function createScene(canvas, settings = {}) {
       sky.maybeBake(sig, fresh);
       // Туман (лінійний, PlayCanvas; колір — екранний, рушій сам переводить). Згори — без туману: глибина від ока ~400
       // однакова для всього, а лінійний туман PlayCanvas — за глибиною
-      const F = scene.fog;
-      if (view.fog) { F.type = pc.FOG_LINEAR; F.start = view.fog[0] * vk; F.end = view.fog[1] * vk; F.color.set(sk.fog[0] / 255, sk.fog[1] / 255, sk.fog[2] / 255); }
+      const F = scene.fog, under = st.under;
+      if (under) {
+        // око під рідиною: туман від ока до видимості рідини, колір — між поверхнею й глибиною рідини при денному світлі
+        // (лава світиться сама); неба не видно — фон того самого кольору
+        const lk = under.kind === L_LAVA ? 1 : 0.3 + 0.7 * Math.min(1, sk.lightK[1]), c = laws.pal.liquid, c2 = laws.pal.liquidDeep;
+        F.type = pc.FOG_LINEAR; F.start = 0; F.end = liquidVis(under.alpha);
+        F.color.set((c[0] + c2[0]) / 510 * lk, (c[1] + c2[1]) / 510 * lk, (c[2] + c2[2]) / 510 * lk);
+        underBg.set(F.color.r, F.color.g, F.color.b, 1); cam.clearColor = underBg;
+      } else if (view.fog) { F.type = pc.FOG_LINEAR; F.start = view.fog[0] * vk; F.end = view.fog[1] * vk; F.color.set(sk.fog[0] / 255, sk.fog[1] / 255, sk.fog[2] / 255); }
       else F.type = pc.FOG_NONE;
+      if (G.layers.sky.enabled !== !under) { G.layers.sky.enabled = !under; if (!under) cam.clearColor = BLACK; }
 
       // Уніформи кадру: вітер, кривизна, ціль, шов, час, мінімум світла, око, розчинення, «вікно»
       const wk = wt ? Math.min(0.012, 0.09 / (Math.hypot(wt.W.wind[0], wt.W.wind[1]) + 1e-6)) : 0;
@@ -712,7 +722,7 @@ export async function createScene(canvas, settings = {}) {
       }
 
       // Опади й пил: частинки PlayCanvas, лише поточний тип; під дахом — не падають (карта укриттів)
-      const loc = wt && wt.loc, want = loc && loc.type && st.rain && PART[loc.type] ? loc.type : null;
+      const loc = wt && wt.loc, want = loc && loc.type && st.rain && !st.under && PART[loc.type] ? loc.type : null;
       // вмикати лише при зміні: вимкнення знімає сітку частинок із шарів, увімкнення — додає назад
       for (const k in vols) if (vols[k].enabled !== (k === want)) vols[k].enabled = k === want;
       if (want) {

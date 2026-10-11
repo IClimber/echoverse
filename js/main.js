@@ -13,7 +13,7 @@ import { initInput, moveAxis, turnAxis, sprintHeld, vertAxis, takeActions, takeW
 import { listWorlds, putWorld, deleteWorld, serialize, deserialize, newId } from './save.js';
 import { hashStr } from './rng.js';
 import { GEN, SEA, physOf, physAt } from './universe.js';
-import { CS, SEC, B_MAGMA } from './gen/chunk.js';
+import { CS, SEC, B_LIQ, B_MAGMA } from './gen/chunk.js';
 import { LEVEL } from './iso.js';
 import { debugText, fmtN } from './debug.js';
 import { animate } from './anim.js';
@@ -122,6 +122,22 @@ function boot(renderer) {
     },
     settings() { return { ...loadSettings(QS), info: renderer.R.info }; },
     toggleCamera() { toggleCam(); return camera.mode; },
+    // Найближча (до 64 клітинок) водойма глибиною ≥ minK блоків (типово 3): [x, y, поверхня] або null
+    findLiquid(minK = 3) {
+      const me = g.me;
+      for (let r = 0; r <= 64; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx += (Math.abs(dy) === r ? 1 : 2 * r || 1)) {
+        const x = Math.floor(me.x) + dx, y = Math.floor(me.y) + dy, top = g.world.topAt(g.d, g.n, x, y);
+        if (top === null) continue;
+        let k = Math.floor(top / LEVEL) + 1;
+        const k0 = k - 64;
+        while (k > k0 && g.world.block(g.d, g.n, x, y, k) === 0) k--;
+        if (g.world.block(g.d, g.n, x, y, k) !== B_LIQ) continue;
+        let n = 0;
+        while (n < minK && g.world.block(g.d, g.n, x, y, k - n) === B_LIQ) n++;
+        if (n >= minK) return [x + 0.5, y + 0.5, (k + 1) * LEVEL - 0.15];
+      }
+      return null;
+    },
     // Стенд «на око»: каркас трикутників зіткнень навколо гравця (радіус 4, зелений; тіла й предмети — жовтий) і капсула (блакитна)
     showColl(on = true) { g.showColl = !!on; return g.showColl; },
     // Камера: режим ('first' | 'third' | 'iso') — через цикл V; напрям погляду (азимут від +x, нахил: + — униз), радіани
@@ -552,6 +568,8 @@ function boot(renderer) {
     } else g.camDist = camera.dist;
     const dist = g.camDist;
     g.view = renderer.view(camera, g.cam, dist);
+    // око під рідиною (вид з-під рідини: туман і колір рідини, без неба й опадів)
+    g.under = me.placed && camera.mode !== ISO && underLiquid(g.world.probe(g.d, g.n), g.cam[0] + g.view.eye[0], g.cam[1] + g.view.eye[1], g.cam[2] + g.view.eye[2]);
     g.far = streamer.update(g, camera, renderer, now).far;
     g.visible = streamer.visible; g.streamMs = streamer.ms;
     if (now - g.lastSave > SAVE_MS) { g.lastSave = now; save(); }
@@ -605,7 +623,7 @@ function boot(renderer) {
     }
     const lines = g.showColl && me.placed ? collLines(me) : null;
     const sk = renderer.draw({
-      lines,
+      lines, under: g.under ? L.liquid : null,
       camera, target: g.cam, view: g.view, laws: L, far: g.far, clock: g.clock, bodies, weather: { W: loc.W, loc }, rain: me.placed && loc.type ? rainMap(now) : null,
       me: me.placed ? { x: me.ix ?? me.x, y: me.iy ?? me.y, z: me.iv ?? me.vis ?? me.z, yaw: me.yaw, swim: me.swim, fly: me.fly, anim } : null,
     });
