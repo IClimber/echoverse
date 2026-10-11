@@ -8,8 +8,10 @@ const OUT = arg('out', `${tmpdir()}/echoverse-shots`); mkdirSync(OUT, { recursiv
 const COMBOS = arg('combos', 'webgl2:pcf3:16,webgl2:pcss:16,webgl2:off:16,webgpu:pcf3:16').split(',').map((s) => s.split(':'));
 // сцена: [всесвіт, x, y, фаза доби ('best' — найбільше світил), особливе]. Порядок важливий: сцени того самого всесвіту
 // й місця — підряд без телепорту; печера — остання з них (переносить гравця під землю), далі — стрибок в інший всесвіт
+// особливе: rain — дощ, iso — згори, first — перша особа, coll — каркас зіткнень (?dev showColl), cave — печера (перша особа:
+// firstcave)
 const ALL = { plain: [1, -52, -45, 0.4], night: [1, -52, -45, 0.0], rain: [1, -52, -45, 0.4, 'rain'], iso: [1, -52, -45, 0.4, 'iso'],
-  cave: [1, -52, -45, 0.4, 'cave'], mount: [33281, -61, -2, 0.4], forest: [-60813, -478, -107, 0.4], suns3: [784, -52, -45, 'best'] };
+  first: [1, -52, -45, 0.4, 'first'], coll: [1, -52, -45, 0.4, 'coll'], cave: [1, -52, -45, 0.4, 'cave'], firstcave: [1, -52, -45, 0.4, 'firstcave'], mount: [33281, -61, -2, 0.4], forest: [-60813, -478, -107, 0.4], suns3: [784, -52, -45, 'best'] };
 const SCENES = arg('scenes', Object.keys(ALL).join(',')).split(',');
 const flags = ['--headless=new', '--use-angle=vulkan', '--enable-features=Vulkan', '--enable-unsafe-webgpu', '--ignore-gpu-blocklist', '--window-size=2560,1440'];
 rmSync(`${OUT}/profile`, { recursive: true, force: true });
@@ -55,10 +57,11 @@ for (const [gpu, sh, view] of COMBOS) {
   await waitFor('!!(eco.g && eco.g.me.placed)'); await idle();
   for (const sc of SCENES) {
     const [n, x, y, ph, sp] = ALL[sc];
-    await ev(`eco.camera.mode !== '${sp === 'iso' ? 'iso' : 'third'}' && eco.toggleCamera(); eco.weather(${sp === 'rain' ? "'rain'" : 'null'}); 1`);
+    const mode = sp === 'iso' ? 'iso' : sp === 'first' || sp === 'firstcave' ? 'first' : 'third', cave = sp === 'cave' || sp === 'firstcave';
+    await ev(`eco.setCam('${mode}'); eco.showColl(${sp === 'coll'}); eco.weather(${sp === 'rain' ? "'rain'" : 'null'}); 1`);
     await jumpTo(n, x, y);
-    if (sp === 'cave' && !(await ev('eco.findCave()'))) { R.push({ gpu, sh, view, sc, skip: 'печеру не знайдено' }); continue; }
-    if (sp === 'cave') { await idle(); while ((await ev('eco.visMissing()')) !== 0) await wait(20); }
+    if (cave && last[3] !== 'cave' && !(await ev('eco.findCave()'))) { R.push({ gpu, sh, view, sc, skip: 'печеру не знайдено' }); continue; }
+    if (cave) { last[3] = 'cave'; await idle(); while ((await ev('eco.visMissing()')) !== 0) await wait(20); }
     await ev(ph === 'best' ? 'eco.bestPhase()' : `eco.setPhase(${ph})`);
     await menu(true); await wait(1500);
     if (gpu !== 'webgpu') await shot(`${gpu}-${sh}-${view}-${sc}`);   // WebGPU у headless знімає чорне — лише помилки

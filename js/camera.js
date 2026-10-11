@@ -1,4 +1,5 @@
-// camera.js — камера: ізометрія (орто, обертається) і третя особа (перспектива, за спиною). Лише вигляд, без DOM.
+// camera.js — камера: перша особа (око гравця), третя особа (перспектива, за спиною) й ізометрія (орто, обертається).
+// Лише вигляд, без DOM.
 // Камера дивиться на ціль (гравця); у шейдер ідуть координати відносно цілі. Напрям від цілі до камери —
 // азимут yaw і нахил pitch: u = (cos p · cos yaw, cos p · sin yaw, sin p). Екранні осі: праворуч r = (sin yaw, −cos yaw, 0),
 // угору up = (−sin p · cos yaw, −sin p · sin yaw, cos p). Ця трійка — дзеркальна (як і була фіксована ізометрія:
@@ -8,13 +9,17 @@ import { CS } from './gen/chunk.js';
 import { aabbInView, aabbInside } from './engine/core/frustum.js';
 import { createList, clearList, sweepSphere } from './engine/physics/collide.js';
 
-export const ISO = 'iso', THIRD = 'third';
+export const ISO = 'iso', THIRD = 'third', FIRST = 'first';
+export const NEXT = { first: THIRD, third: ISO, iso: FIRST };   // V: перша особа → третя → згори
 const D2R = Math.PI / 180;
 export const LIMITS = {
   iso: { pitch: [20 * D2R, 75 * D2R], zoom: [0.45, 2.5] },
   third: { pitch: [-70 * D2R, 80 * D2R], dist: [2.5, 16] },   // від'ємний нахил — погляд угору (eyeDir)
+  first: { pitch: [-89 * D2R, 89 * D2R] },
 };
-export const FOV = 55 * D2R;
+export const FOV = 55 * D2R, FOV1 = 70 * D2R;   // кут огляду по вертикалі: третя особа, перша (як у Minecraft)
+export const fovOf = (c) => c.mode === FIRST ? FOV1 : FOV;
+export const EYE = 0.92;             // перша особа: око над ногами (очі фігури); під низькою стелею — нижче
 // Дальність (третя особа) — налаштування гравця, 8–32 чанки (setViewChunks; живі прив'язки ES-модулів — імпортери бачать нове)
 export let VIEW_R = 256;             // повні секції (клітинок)
 export let FAR_R = 1400;             // далечінь (плитки поверхні, gen/far.js), далі — туман і небо
@@ -46,13 +51,13 @@ export function setViewChunks(c) {
   return c;
 }
 export const HEAD = 1.0;             // третя особа: камера дивиться на висоту голови
-// Третя особа: куди дивиться камера (по горизонталі) — туди обернений гравець, спиною до камери
+// Третя й перша особа: куди дивиться камера (по горизонталі) — туди обернений гравець (у третій — спиною до камери)
 export const facing = (c) => c.yaw + Math.PI;
 
 export function createCamera(mode = ISO) {
-  const c = { mode, yaw: 0, pitch: 30 * D2R, zoom: 1.4, dist: 7, pitch3: 20 * D2R, distT: 7, zoomT: 1.4 };
+  const c = { mode, yaw: 0, pitch: 30 * D2R, zoom: 1.4, dist: 7, pitch3: 20 * D2R, pitch1: 0, distT: 7, zoomT: 1.4 };
   setYaw(c, Math.PI / 4);
-  c.pitchT = c.pitch; c.pitch3T = c.pitch3;
+  c.pitchT = c.pitch; c.pitch3T = c.pitch3; c.pitch1T = c.pitch1;
   return c;
 }
 // Миттєво (перемикання вигляду, старт): і поточний кут, і ціль
@@ -61,7 +66,7 @@ export function setYaw(c, yaw) { c.yaw = c.yawT = yaw; }
 const SENS = 0.0022;                 // радіан на піксель руху миші
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-export const pitchOf = (c) => c.mode === ISO ? c.pitch : c.pitch3;
+export const pitchOf = (c) => c.mode === ISO ? c.pitch : c.mode === FIRST ? c.pitch1 : c.pitch3;
 
 // Третя особа: напрям від цілі до ока. Нахил угору (від'ємний) не опускає камеру під землю — вона лишається за
 // спиною на висоті голови, а вгору повертається лише погляд (гравець — унизу екрана)
@@ -86,9 +91,11 @@ export function moveBasis(c) {
 export function rotate(c, dx, dy) {
   c.yawT += dx * SENS;
   if (c.mode === ISO) c.pitchT = clamp(c.pitchT + dy * SENS * 0.8, ...LIMITS.iso.pitch);
+  else if (c.mode === FIRST) c.pitch1T = clamp(c.pitch1T + dy * SENS * 0.8, ...LIMITS.first.pitch);
   else c.pitch3T = clamp(c.pitch3T + dy * SENS * 0.8, ...LIMITS.third.pitch);
 }
 export function wheel(c, w) {
+  if (c.mode === FIRST) return;
   if (c.mode === ISO) c.zoomT = clamp(c.zoomT * Math.exp(-w * 0.0012), ...LIMITS.iso.zoom);
   else c.distT = clamp(c.distT * Math.exp(w * 0.0012), ...LIMITS.third.dist);
 }
@@ -99,6 +106,7 @@ export function smooth(c, dt) {
   c.yaw += (c.yawT - c.yaw) * r;
   c.pitch += (c.pitchT - c.pitch) * r;
   c.pitch3 += (c.pitch3T - c.pitch3) * r;
+  if (c.mode === FIRST) { c.yaw = c.yawT; c.pitch1 = c.pitch1T; }   // перша особа — миша без згладжування
 }
 
 // Матриця «відносно цілі → clip» (стовпцями) і положення ока відносно цілі.
@@ -112,8 +120,9 @@ export function viewProj(c, W, H, dist = c.dist) {
       eye: [u[0] * 400, u[1] * 400, u[2] * 400], ortho: true,
     };
   }
+  if (c.mode === FIRST) dist = 0;                                    // око — у цілі
   const e = eyeDir(c), eye = [e[0] * dist, e[1] * dist, e[2] * dist];
-  const f = 1 / Math.tan(FOV / 2), near = 0.1, far = FAR_R * 1.6, A = (far + near) / (near - far), B = 2 * far * near / (near - far);
+  const f = 1 / Math.tan(fovOf(c) / 2), near = 0.1, far = FAR_R * 1.6, A = (far + near) / (near - far), B = 2 * far * near / (near - far);
   const fx = f * H / W;
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
   const tr = -dot(r, eye), tu = -dot(up, eye), tz = -dot(u, eye);

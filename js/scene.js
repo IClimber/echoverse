@@ -18,9 +18,9 @@ import { LEVEL, S } from './iso.js';
 import { CS } from './gen/chunk.js';
 import { SEA, MAX_AMP } from './universe.js';
 import { figureParts } from './gen/mesh.js';
-import { poseMatrices } from './anim.js';
+import { poseMatrices, viewArms } from './anim.js';
 import { skyState, applyWeather, lightsOf, pcIntensity } from './sky.js';
-import { ISO, VIEW_R, FAR_R, SEAM, viewProj, isoRadius, project, basis, aabbInView, aabbInside, LOD_R, LOD_CAP, LOD_ON, lodOf, keepLod, colDist, FLORA_NEAR, FLORA_FADE, FLORA_THIN } from './camera.js';
+import { ISO, FIRST, fovOf, VIEW_R, FAR_R, SEAM, viewProj, isoRadius, project, basis, aabbInView, aabbInside, LOD_R, LOD_CAP, LOD_ON, lodOf, keepLod, colDist, FLORA_NEAR, FLORA_FADE, FLORA_THIN } from './camera.js';
 import { regionOf, RS, RW, RH, PO, PQ } from './gen/pack.js';
 import { ck } from './world.js';
 import { texturesOf, TEX } from './textures.js';
@@ -108,33 +108,43 @@ export async function createScene(canvas, settings = {}) {
     return v;
   };
 
-  // ---- фігура: один меш на всі частини, вершини — на CPU за матрицями пози ----
-  const figP = figureParts([226, 92, 70]), figParts = [];
-  let figN = 0, figI = 0;
-  for (const p in figP) { figParts.push([p, figN, figP[p]]); figN += figP[p].pos.length / 3; figI += figP[p].count; }
-  const figPos = new Float32Array(figN * 3), figNor = new Float32Array(figN * 3), figCol = new Uint8Array(figN * 4), figIdx = new Uint32Array(figI);
-  { let ii = 0; for (const [, v0, m] of figParts) { const n = m.pos.length / 3; for (let i = 0; i < n; i++) figCol.set([m.col[i * 3], m.col[i * 3 + 1], m.col[i * 3 + 2], m.mat[i]], (v0 + i) * 4); for (let i = 0; i < m.count; i++) figIdx[ii++] = m.idx[i] + v0; } }
-  const figMesh = new pc.Mesh(dev);
-  figMesh.setPositions(figPos); figMesh.setNormals(figNor); figMesh.setColors32(figCol); figMesh.setIndices(figIdx); figMesh.update(pc.PRIMITIVE_TRIANGLES, false);
-  const figNode = new pc.GraphNode('фігура'); G.root.addChild(figNode);
-  const figMI = new pc.MeshInstance(figMesh, mats.fig, figNode);
-  figMI.castShadow = true; figMI.visible = false;
-  G.layers.world.addMeshInstances([figMI]);
-  const poseFig = (pose) => {
-    for (const [p, v0, m] of figParts) {
-      const Mx = pose[p], n = m.pos.length / 3;
-      for (let i = 0; i < n; i++) {
-        const x = m.pos[i * 3], y = m.pos[i * 3 + 1], z = m.pos[i * 3 + 2], o = (v0 + i) * 3;
-        figPos[o] = Mx[0] * x + Mx[4] * y + Mx[8] * z + Mx[12]; figPos[o + 1] = Mx[1] * x + Mx[5] * y + Mx[9] * z + Mx[13]; figPos[o + 2] = Mx[2] * x + Mx[6] * y + Mx[10] * z + Mx[14];
-        const a = m.nor[i * 3], b = m.nor[i * 3 + 1], c = m.nor[i * 3 + 2];
-        const nx = Mx[0] * a + Mx[4] * b + Mx[8] * c, ny = Mx[1] * a + Mx[5] * b + Mx[9] * c, nz = Mx[2] * a + Mx[6] * b + Mx[10] * c, l = Math.hypot(nx, ny, nz) || 1;
-        figNor[o] = nx / l; figNor[o + 1] = ny / l; figNor[o + 2] = nz / l;
+  // ---- фігура: один меш на всі частини, вершини — на CPU за матрицями пози; руки першої особи — так само ----
+  const figP = figureParts([226, 92, 70]);
+  const posedMesh = (names) => {
+    const parts = [];
+    let nv = 0, ni = 0;
+    for (const p of names) { parts.push([p, nv, figP[p]]); nv += figP[p].pos.length / 3; ni += figP[p].count; }
+    const pos = new Float32Array(nv * 3), nor = new Float32Array(nv * 3), col = new Uint8Array(nv * 4), idx = new Uint32Array(ni);
+    { let ii = 0; for (const [, v0, m] of parts) { const n = m.pos.length / 3; for (let i = 0; i < n; i++) col.set([m.col[i * 3], m.col[i * 3 + 1], m.col[i * 3 + 2], m.mat[i]], (v0 + i) * 4); for (let i = 0; i < m.count; i++) idx[ii++] = m.idx[i] + v0; } }
+    const mesh = new pc.Mesh(dev);
+    mesh.setPositions(pos); mesh.setNormals(nor); mesh.setColors32(col); mesh.setIndices(idx); mesh.update(pc.PRIMITIVE_TRIANGLES, false);
+    const pose = (P) => {
+      for (const [p, v0, m] of parts) {
+        const Mx = P[p], n = m.pos.length / 3;
+        for (let i = 0; i < n; i++) {
+          const x = m.pos[i * 3], y = m.pos[i * 3 + 1], z = m.pos[i * 3 + 2], o = (v0 + i) * 3;
+          pos[o] = Mx[0] * x + Mx[4] * y + Mx[8] * z + Mx[12]; pos[o + 1] = Mx[1] * x + Mx[5] * y + Mx[9] * z + Mx[13]; pos[o + 2] = Mx[2] * x + Mx[6] * y + Mx[10] * z + Mx[14];
+          const a = m.nor[i * 3], b = m.nor[i * 3 + 1], c = m.nor[i * 3 + 2];
+          const nx = Mx[0] * a + Mx[4] * b + Mx[8] * c, ny = Mx[1] * a + Mx[5] * b + Mx[9] * c, nz = Mx[2] * a + Mx[6] * b + Mx[10] * c, l = Math.hypot(nx, ny, nz) || 1;
+          nor[o] = nx / l; nor[o + 1] = ny / l; nor[o + 2] = nz / l;
+        }
       }
-    }
-    // update(…, true) — PlayCanvas перераховує AABB з позицій (Mesh.update): поза змінює межі, інакше камера відсікає
-    // фігуру за AABB першого кадру (тінь лишалась, фігури не було)
-    figMesh.setPositions(figPos); figMesh.setNormals(figNor); figMesh.update(pc.PRIMITIVE_TRIANGLES, true);
+      // update(…, true) — PlayCanvas перераховує AABB з позицій (Mesh.update): поза змінює межі, інакше камера відсікає
+      // фігуру за AABB першого кадру (тінь лишалась, фігури не було)
+      mesh.setPositions(pos); mesh.setNormals(nor); mesh.update(pc.PRIMITIVE_TRIANGLES, true);
+    };
+    return { mesh, pose };
   };
+  const fig = posedMesh(Object.keys(figP)), arms = posedMesh(['armL', 'armR']);
+  const figNode = new pc.GraphNode('фігура'); G.root.addChild(figNode);
+  // фігура: видима — у World (без тіні), тінь — завжди окремим екземпляром у шарі «Тіні» (камера його не бачить): у першій
+  // особі й з камерою впритул фігури не видно, а тінь лишається
+  const figMI = new pc.MeshInstance(fig.mesh, mats.fig, figNode), figSh = new pc.MeshInstance(fig.mesh, mats.fig, figNode);
+  figMI.castShadow = false; figMI.visible = false; figSh.castShadow = true; figSh.visible = false;
+  G.layers.world.addMeshInstances([figMI]); G.layers.shadow.addMeshInstances([figSh]);
+  const armsMI = new pc.MeshInstance(arms.mesh, mats.fig, figNode);
+  armsMI.castShadow = false; armsMI.visible = false;
+  G.layers.arms.addMeshInstances([armsMI]);
 
   // ---- тіла: шаблон → меш і група екземплярів ----
   const tmpl = new Map();
@@ -404,6 +414,7 @@ export async function createScene(canvas, settings = {}) {
 
   let cullOn = true, shownU = null, lastCol = '', lastRad = 0, lawsKey = null;
   const M4 = new pc.Mat4(), Q = new pc.Quat(), V3 = new pc.Vec3(), engRegs = [];
+  let linesPC = new Float32Array(0);
   const dirsBuf = [], cutF = new Float32Array(4), cut2 = new Float32Array(4), cut3 = new Float32Array(2), eyePC = new Float32Array(3), tgtPC = new Float32Array(3), wind4 = new Float32Array(4), fade2 = new Float32Array(2), thin2 = new Float32Array(2), xfade2 = new Float32Array(2);
   const viewC = { m: null, eye: null, ud: null, t: null };
   let next = null;
@@ -493,7 +504,7 @@ export async function createScene(canvas, settings = {}) {
 
       const { target: t, view, laws } = st, sk = skyState(laws, st.clock || 0), wt = st.weather;
       if (wt) applyWeather(sk, laws, wt.W, st.clock || 0);
-      const vk = sk.visK ?? 1, iso = st.camera.mode === ISO, lodOn = LOD_ON && !iso;
+      const vk = sk.visK ?? 1, iso = st.camera.mode === ISO, first = st.camera.mode === FIRST, lodOn = LOD_ON && !iso;
       const me = st.me, m = view.m, b = basis(st.camera);
       const tk = `${laws.d}:${laws.n}:${laws.ds}`;
       // новий всесвіт: текстури (sRGB — правило PlayCanvas «Color textures must be sRGB»), прозорість рідини, слоти
@@ -525,7 +536,7 @@ export async function createScene(canvas, settings = {}) {
         cam.orthoHeight = G.height / (2 * S * st.camera.zoom); cam.nearClip = 1; cam.farClip = 800;
       } else {
         if (cam.projection !== pc.PROJECTION_PERSPECTIVE) cam.projection = pc.PROJECTION_PERSPECTIVE;
-        cam.fov = 55; cam.nearClip = 0.1; cam.farClip = FAR_R * 1.6;
+        cam.fov = fovOf(st.camera) / Math.PI * 180; cam.nearClip = first ? 0.05 : 0.1; cam.farClip = FAR_R * 1.6;
       }
 
       // Світло: сонця й місяці — напрямлені (лінійні сили з законів, lightsOf); розсіяне — з неба (envAtlas), каліброване
@@ -555,10 +566,11 @@ export async function createScene(canvas, settings = {}) {
       const camD = Math.hypot(...e);
       thin2[0] = FLORA_THIN * (FLORA_NEAR - FLORA_FADE); thin2[1] = FLORA_NEAR - FLORA_FADE;   // трава й квіти рідшають до смуги переходу
       xfade2[0] = FLORA_NEAR - FLORA_FADE; xfade2[1] = FLORA_NEAR;
-      if (iso) { fade2[0] = -2; fade2[1] = -1; } else { fade2[0] = Math.min(1, camD * 0.3); fade2[1] = Math.max(2.5, camD * 0.65); }
+      // розчинення рослин біля ока й «вікно» крізь те, що закриває гравця, — лише в третій особі (згори — лише «вікно»)
+      if (iso || first) { fade2[0] = -2; fade2[1] = -1; } else { fade2[0] = Math.min(1, camD * 0.3); fade2[1] = Math.max(2.5, camD * 0.65); }
       let cut = null;
       cut2[3] = 0;
-      if (me) {
+      if (me && !first) {
         const pcx = me.x - G.O[0], pcy = me.z + 0.45, pcz = me.y - G.O[1];
         const d = Math.hypot(pcx - eyePC[0], pcy - eyePC[1], pcz - eyePC[2]) || 1;
         cutF[0] = pcx; cutF[1] = pcy; cutF[2] = pcz;
@@ -684,11 +696,20 @@ export async function createScene(canvas, settings = {}) {
       }
       for (const g of tmpl.values()) { g.inst.update(g.buf, g.n); tris += g.n * g.mesh.primitive[0].count / 3; }
 
-      // Фігура (камера впритул — не малюємо, інакше око в голові); пристрій не світиться (рішення 10.10.2026)
-      if (me && (view.ortho || camD > 0.7)) {
-        poseFig(poseMatrices(me.anim, me.x - G.O[0], me.y - G.O[1], me.z, me.yaw));
-        figMI.visible = true;
-      } else figMI.visible = false;
+      // Фігура (у першій особі й з камерою впритул — лише тінь, інакше око в голові); пристрій не світиться (рішення 10.10.2026).
+      // Руки першої особи — у шарі «Руки» (поверх світу, глибина очищена)
+      if (me) fig.pose(poseMatrices(me.anim, me.x - G.O[0], me.y - G.O[1], me.z, me.yaw));
+      figSh.visible = !!me;
+      figMI.visible = !!me && !first && (view.ortho || camD > 0.7);
+      armsMI.visible = !!me && first;
+      if (armsMI.visible) arms.pose(viewArms(me.anim, me, b, [t[0] + e[0] - G.O[0], t[1] + e[1] - G.O[1], t[2] + e[2]], G.width / G.height, fovOf(st.camera)));
+
+      // ?dev: каркас зіткнень (відрізки в координатах світу, без перевірки глибини — видно й крізь поверхню)
+      if (st.lines && st.lines.pos.length) {
+        const P = st.lines.pos, out = linesPC.length >= P.length ? linesPC : (linesPC = new Float32Array(P.length * 2));
+        for (let i = 0; i < P.length; i += 3) { out[i] = P[i] - G.O[0]; out[i + 1] = P[i + 2]; out[i + 2] = P[i + 1] - G.O[1]; }
+        G.app.drawLineArrays(out.subarray(0, P.length), st.lines.col, false, G.layers.immediate);
+      }
 
       // Опади й пил: частинки PlayCanvas, лише поточний тип; під дахом — не падають (карта укриттів)
       const loc = wt && wt.loc, want = loc && loc.type && st.rain && PART[loc.type] ? loc.type : null;

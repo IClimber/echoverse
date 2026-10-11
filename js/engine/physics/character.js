@@ -4,7 +4,7 @@
 // хід уздовж прохідної підлоги) і CharacterController в Unity (slopeLimit, stepOffset, skinWidth).
 // src — джерело трикутників: gather(x0, y0, z0, x1, y1, z1, list) і solidAt(x, y, z) (точка в твердому).
 // s — стан {x, y, z} (z — низ форми, «ноги»). Без імпортів гри.
-import { createList, clearList, sweepSphere, overlapSphere, minDist, rayCast } from './collide.js';
+import { createList, clearList, sweepSphere, overlapSphere, nearest, rayCast } from './collide.js';
 
 export const SKIN = 0.002;           // відступ від дотику після руху
 const EPS = 1e-4;
@@ -16,7 +16,7 @@ export function capsule(R, H, n = 4) {
   return { R, H, pts };
 }
 
-const LST = createList(1024), H1 = {}, H2 = {}, F1 = {}, OV = {}, RY = {};
+const LST = createList(1024), H1 = {}, H2 = {}, F1 = {}, OV = {}, RY = {}, NQ = {};
 // Трикутники навколо форми в (x, y, z), зсунутої на (dx, dy, dz), із запасом m
 function around(src, sh, x, y, z, dx, dy, dz, m) {
   clearList(LST);
@@ -25,8 +25,9 @@ function around(src, sh, x, y, z, dx, dy, dz, m) {
   return LST;
 }
 
-// Найглибший дотик форми з трикутниками {depth, nx, ny, nz, ref} або null; «глибоко всередині» (центр кулі в твердому
-// без трикутника ближче 0,6) — depth = Infinity
+// Найглибший дотик форми з трикутниками {depth, nx, ny, nz, ref} або null. Куля, що поверхні не перетинає, але центр — у
+// твердому: за найближчим трикутником (промінь до нього влучає в тильний бік) — усередині, depth = відстань + R уздовж
+// нормалі того трикутника; трикутника ближче 0,6 нема — «глибоко всередині», depth = Infinity
 export function overlap(src, sh, x, y, z) {
   const L = around(src, sh, x, y, z, 0, 0, 0, 0.7);
   let best = null;
@@ -34,7 +35,11 @@ export function overlap(src, sh, x, y, z) {
     const cx = x + ox, cy = y + oy, cz = z + oz;
     const o = overlapSphere(L, cx, cy, cz, sh.R, OV);
     if (o && (!best || o.depth > best.depth)) best = { depth: o.depth, nx: o.nx, ny: o.ny, nz: o.nz, ref: o.ref };
-    if (!o && src.solidAt(cx, cy, cz) && minDist(L, cx, cy, cz) > 0.6) return { depth: Infinity, nx: 0, ny: 0, nz: 1, ref: null };
+    if (o || !src.solidAt(cx, cy, cz)) continue;
+    const q = nearest(L, cx, cy, cz, NQ);
+    if (!q || q.d > 0.6) return { depth: Infinity, nx: 0, ny: 0, nz: 1, ref: null };
+    const dx = (q.x - cx) * 1.05, dy = (q.y - cy) * 1.05, dz = (q.z - cz) * 1.05, r = rayCast(L, cx, cy, cz, dx, dy, dz, 1, RY);
+    if (r && r.nx * dx + r.ny * dy + r.nz * dz > 0 && (!best || q.d + sh.R > best.depth)) best = { depth: q.d + sh.R, nx: r.nx, ny: r.ny, nz: r.nz, ref: r.ref };
   }
   return best;
 }
@@ -176,16 +181,26 @@ function stepUp(src, sh, s, rx, ry, o) {
   return null;
 }
 
-// Виштовхнути форму з поверхні: уздовж найглибшого дотику (до 8 разів); не вийшло — угору до 1. true — вільно
-export function depenetrate(src, sh, s) {
+// Виштовхнути форму з поверхні: уздовж найглибшого дотику (до 8 разів); не вийшло — найближче вільне до 1 (угору, униз,
+// убік). Глибоко в твердому
+// (трикутників поруч немає: телепорт, секцію догенеровано) — угору до maxUp, до першого вільного місця (інакше форма
+// провалювалась би крізь товщу, де нема об чого спертися). true — вільно
+export function depenetrate(src, sh, s, maxUp = 64) {
+  let deep = false;
   for (let i = 0; i < 8; i++) {
     const o = overlap(src, sh, s.x, s.y, s.z);
     if (!o) return true;
-    if (o.depth === Infinity) break;
+    if (o.depth === Infinity) { deep = true; break; }
     const k = o.depth + SKIN;
     s.x += o.nx * k; s.y += o.ny * k; s.z += o.nz * k;
   }
   if (!overlap(src, sh, s.x, s.y, s.z)) return true;
-  for (let dz = 0.05; dz <= 1 + 1e-9; dz += 0.05) if (!overlap(src, sh, s.x, s.y, s.z + dz)) { s.z += dz; return true; }
+  if (deep) { for (let dz = 0.5; dz <= maxUp + 1e-9; dz += 0.5) if (!overlap(src, sh, s.x, s.y, s.z + dz)) { s.z += dz; return true; } return false; }
+  // затисло (стеля й підлога, тіло): найближче вільне місце — угору, униз, убік до 1
+  for (let d = 0.05; d <= 1 + 1e-9; d += 0.05) {
+    for (const [ax, ay, az] of [[0, 0, 1], [0, 0, -1], [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0]]) {
+      if (!overlap(src, sh, s.x + ax * d, s.y + ay * d, s.z + az * d)) { s.x += ax * d; s.y += ay * d; s.z += az * d; return true; }
+    }
+  }
   return false;
 }

@@ -83,6 +83,16 @@ export function minDist(L, cx, cy, cz) {
   for (let i = 0; i < L.n; i++) m = Math.min(m, dist2(cx, cy, cz, L.t, i * 12));
   return Math.sqrt(m);
 }
+// Найближча точка списку: out = {d, x, y, z, i} або null (список порожній)
+const NQ = [0, 0, 0];
+export function nearest(L, cx, cy, cz, out = {}) {
+  let m = Infinity, bi = -1;
+  for (let i = 0; i < L.n; i++) { const d = dist2(cx, cy, cz, L.t, i * 12); if (d < m) { m = d; bi = i; } }
+  if (bi < 0) return null;
+  closestOnTri(cx, cy, cz, L.t, bi * 12, NQ);
+  out.d = Math.sqrt(m); out.x = NQ[0]; out.y = NQ[1]; out.z = NQ[2]; out.i = bi;
+  return out;
+}
 
 // ---- рух кулі ----
 // Куля (центр c, радіус R) рухається на d (t від 0 до 1). Перший дотик: out = {t, nx, ny, nz (від точки дотику до

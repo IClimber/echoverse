@@ -27,7 +27,7 @@ export function createLights(G, { shadows = 'pcf3' } = {}) {
   const L = scene.lighting;
   L.shadowsEnabled = true; L.cookiesEnabled = false; L.areaLightsEnabled = false;
   L.shadowAtlasResolution = 2048;
-  const LAY = [layers.world.id, layers.shadow.id];
+  const LAY = [layers.world.id, layers.shadow.id, ...(layers.arms ? [layers.arms.id] : [])];
 
   // Поворот світла: +Y — до джерела (напрямлене світить уздовж −Y сутності; код _updateSunLight скрипта ProceduralSky)
   const X = new pc.Vec3(), Z = new pc.Vec3(), S = new pc.Vec3(), M4 = new pc.Mat4(), Q = new pc.Quat();

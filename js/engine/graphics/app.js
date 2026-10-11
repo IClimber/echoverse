@@ -22,13 +22,18 @@ export async function createApp(canvas, { device = 'webgl2', maxPixelRatio = 2, 
   // мова шейдерів: матеріали отримують шматки лише цієї мови (як у прикладі shaders/trees)
   const lang = dev.isWebGPU ? pc.SHADERLANGUAGE_WGSL : pc.SHADERLANGUAGE_GLSL;
 
-  // Шари: типові World, Skybox, Immediate, UI (+ Depth) і «Тіні» — кидачі тіней (бачать світла, не камера)
+  // Шари: типові World, Skybox, Immediate, UI (+ Depth), «Тіні» — кидачі тіней (бачать світла, не камера) і «Руки»
   const L = app.scene.layers;
   const world = L.getLayerByName('World'), sky = L.getLayerByName('Skybox');
   world.opaqueSortMode = pc.SORTMODE_FRONT2BACK;
   const shadow = new pc.Layer({ name: 'Тіні' });
   L.push(shadow);
-  const layers = { world, sky, shadow, immediate: L.getLayerByName('Immediate'), ui: L.getLayerByName('UI') };
+  // «Руки» (перша особа): після прозорого World, до Immediate й UI, з очищенням глибини — не входять у стіни
+  // (як шар гізмо, extras/gizmo/gizmo.js createLayer; manual graphics/cameras/multiple-cameras.md — «first-person weapon rendering»)
+  const immediate = L.getLayerByName('Immediate');
+  const arms = new pc.Layer({ name: 'Руки', clearDepthBuffer: true, opaqueSortMode: pc.SORTMODE_NONE, transparentSortMode: pc.SORTMODE_NONE });
+  L.insert(arms, L.layerList.indexOf(immediate));
+  const layers = { world, sky, shadow, arms, immediate, ui: L.getLayerByName('UI') };
 
   // Камера: тональна компресія й гама — PlayCanvas (кольори лінійні; правило покажчика manual/llms/…/engine/llms.txt)
   const camE = new pc.Entity('камера');

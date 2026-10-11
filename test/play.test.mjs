@@ -677,3 +677,60 @@ test('камера третьої особи — куля: стіна, стов�
   assert.ok(u.dist >= CAM_MIN && uz < 2.85 && uz > 2.6, `під водою: око ${uz}, відстань ${u.dist}`);
   cam.pitch3 = 0;
 });
+
+test('перша особа: цикл V, погляд — куди обернений гравець, кут огляду 70°, без згладжування; руки — у кутах кадру', async () => {
+  const { createCamera, viewProj, project, basis, rotate, smooth, facing, setYaw, NEXT, FIRST, THIRD, ISO, FOV1, LIMITS } = await import('../js/camera.js');
+  const { viewArms } = await import('../js/anim.js');
+  assert.deepEqual([NEXT[FIRST], NEXT[THIRD], NEXT[ISO]], [THIRD, ISO, FIRST]);
+  const c = createCamera(FIRST);
+  setYaw(c, 1.2 + Math.PI);
+  const f = facing(c), u = basis(c).u;
+  assert.ok(Math.abs(-u[0] - Math.cos(f)) < 1e-9 && Math.abs(-u[1] - Math.sin(f)) < 1e-9, 'погляд — куди обернений');
+  // ціль (око) — у центрі; точка на відстані 1 під кутом FOV1/2 угору — на верхньому краї кадру
+  const W = 1600, H = 900, v = viewProj(c, W, H, 5);
+  assert.ok(v.eye.every((x) => x === 0), 'око — у цілі');
+  const fw = [-u[0], -u[1], -u[2]], up = basis(c).up, k = Math.tan(FOV1 / 2) * 0.999;
+  const top = project(v.m, [fw[0] + up[0] * k, fw[1] + up[1] * k, fw[2] + up[2] * k], W, H);
+  assert.ok(Math.abs(top[0] - W / 2) < 1e-3 && top[1] > 0 && top[1] < 2, `верх кадру: ${top}`);
+  // миша — одразу, нахил до ±89°
+  rotate(c, 0, 1e5); smooth(c, 1 / 60);
+  assert.equal(c.pitch1, LIMITS.first.pitch[1]);
+  rotate(c, 50, 0); smooth(c, 1 / 60);
+  assert.equal(c.yaw, c.yawT);
+  // руки: кисті — у точках екрана (±0,6, −0,75)
+  c.pitch1 = c.pitch1T = 0.3;
+  const vp = viewProj(c, W, H), b = basis(c), A = viewArms({ arm: 0, punch: 0 }, {}, b, [0, 0, 0], W / H, FOV1);
+  for (const [p, s] of [['armR', 1], ['armL', -1]]) {
+    const M = A[p], py = p === 'armR' ? -0.2625 : 0.2625, hz = 0.375;
+    const hand = [M[4] * py + M[8] * hz + M[12], M[5] * py + M[9] * hz + M[13], M[6] * py + M[10] * hz + M[14]];
+    const q = project(vp.m, hand, W, H);
+    assert.ok(Math.abs((q[0] / W * 2 - 1) - 0.6 * s) < 1e-6 && Math.abs((1 - q[1] / H * 2) + 0.75) < 1e-6, `${p}: ${q}`);
+  }
+});
+
+test('у товщі породи (телепорт, секцію догенеровано) — нагору до першого вільного місця, а не крізь породу в печеру під нею', () => {
+  const P = { liquid: { swim: true }, obj: () => null, block: (x, y, k) => k >= 6 && k < 10 ? B_AIR : k < 20 ? B_STONE : B_AIR };
+  const p = { x: 5.5, y: 5.5, z: 6, vz: 0, ground: false };
+  for (let i = 0; i < 120; i++) step(p, 0, 0, false, 1 / 120, P, PH1);
+  assert.ok(p.z === 10 && p.ground, `${p.z} ${p.ground}`);
+  // трохи під поверхнею (куля поверхні не перетинає, але центр — у породі): теж перетин, нагору
+  assert.ok(hits(P, 5.5, 5.5, 9.6), 'під поверхнею — перетин');
+  const q = { x: 5.5, y: 5.5, z: 9.6, vz: 0, ground: false };
+  for (let i = 0; i < 60; i++) step(q, 0, 0, false, 1 / 120, P, PH1);
+  assert.ok(Math.abs(q.z - 10) < 1e-6 && q.ground, `${q.z}`);
+  // приземлення: вузький хід заввишки 2 блоки (по блоках можна стати, видимо 0,75) — ні; зала в 4 блоки — так
+  const two = { liquid: { swim: true }, obj: () => null, block: (x, y, k) => (x < 9 ? y === 5 && k >= 6 && k < 8 : k >= 6 && k < 10) ? B_AIR : B_STONE };
+  const l = landing(two, 5.5, 5.5, 3);
+  assert.ok(l[0] >= 9 && !hits(two, ...l), `приземлення в ході у 2 блоки: ${l}`);
+});
+
+test('незгенероване під гравцем (телепорт у печеру, секції ще в генераторі) — чекає на місці, не падає й не виштовхується', () => {
+  let ready = false;
+  const P = { liquid: { swim: true }, obj: () => null, block: (x, y, k) => !ready && k < 16 ? -1 : k >= 6 && k < 10 ? B_AIR : k < 20 ? B_STONE : B_AIR };
+  const p = { x: 5.5, y: 5.5, z: 3, vz: 0, ground: false };
+  for (let i = 0; i < 60; i++) step(p, 1, 0, false, 1 / 120, P, PH1);
+  assert.ok(p.z === 3 && p.x === 5.5, `чекає: ${p.x} ${p.z}`);
+  ready = true;
+  for (let i = 0; i < 60; i++) step(p, 0, 0, false, 1 / 120, P, PH1);
+  assert.ok(p.z === 3 && p.ground, `у печері: ${p.z}`);
+});

@@ -5,7 +5,7 @@
 // удар — права рука вперед.
 // Стан — у me.anim; кути плавно наздоганяють ціль, тож переходи без ривків.
 import { chain, translate, rotZ, rotY, rotX, scale } from './engine/core/mat.js';
-import { PIVOT } from './gen/mesh.js';
+import { PIVOT, FIG_K } from './gen/mesh.js';
 
 const RATE = 14;                     // як швидко кути наздоганяють ціль, 1/с
 const STRIDE = 11;                   // кроків (радіан фази) на секунду при звичайній швидкості
@@ -69,4 +69,28 @@ export function poseMatrices(a, ox, oy, oz, yaw) {
     armL: arm(1, -a.arm + a.up),
     armR: arm(-1, a.arm + a.up + (a.punch || 0) * 1.6),
   };
+}
+
+// Перша особа: руки в кадрі (шар «Руки»). b — базис камери {r, up, u} (u — від погляду до ока), eye — око в тих самих
+// координатах, що й матриці, aspect — ширина / висота, fovY — кут огляду по вертикалі. Кисть — у точці екрана (±0,6, −0,75)
+// на глибині 0,45 від ока, вісь кисть → плече — назовні, униз і до ока; хода — кисті похитуються навхрест, удар — права
+// вперед, плавання й політ — руки нижче. Права рука (б'є) — праворуч на екрані. Камера не хитається (рішення 11.10.2026)
+const ARM_D = 0.45;
+export function viewArms(a, me, b, eye, aspect, fovY) {
+  const ty = Math.tan(fovY / 2) * ARM_D, tx = ty * aspect, { r, up, u } = b, low = me.swim || me.fly ? 0.05 : 0;
+  const out = {};
+  for (const [part, s, py] of [['armR', 1, -PIVOT.armY], ['armL', -1, PIVOT.armY]]) {
+    const sw = (a.arm || 0) * s, fw = ARM_D - 0.015 * sw + (s > 0 ? 0.22 * (a.punch || 0) : 0);
+    const kx = s * 0.6 * tx, ky = -0.75 * ty + 0.02 * sw - low;
+    const H = [0, 1, 2].map((i) => eye[i] - u[i] * fw + r[i] * kx + up[i] * ky);
+    let A = [0, 1, 2].map((i) => s * 0.35 * r[i] - 0.45 * up[i] + u[i]);
+    const al = Math.hypot(...A); A = A.map((v) => v / al);
+    const fa = -(u[0] * A[0] + u[1] * A[1] + u[2] * A[2]);
+    let X = [0, 1, 2].map((i) => -u[i] - fa * A[i]);
+    const xl = Math.hypot(...X); X = X.map((v) => v / xl);
+    const Y = [A[1] * X[2] - A[2] * X[1], A[2] * X[0] - A[0] * X[2], A[0] * X[1] - A[1] * X[0]];
+    const hz = 0.3 * FIG_K, T = [0, 1, 2].map((i) => H[i] - py * Y[i] - hz * A[i]);
+    out[part] = [X[0], X[1], X[2], 0, Y[0], Y[1], Y[2], 0, A[0], A[1], A[2], 0, T[0], T[1], T[2], 1];
+  }
+  return out;
 }

@@ -8,6 +8,7 @@ import { dayPhase, clockStr } from './sky.js';
 import { weatherAt, WEATHER_NAMES } from './weather.js';
 import { LEVEL } from './iso.js';
 import { LOD_ON } from './camera.js';
+import { stats as CST } from './collision.js';
 
 // Рельєф 3.1: скелі, родини кривої, ерозія, куести, останці, карст, рифти
 function land3(L) {
@@ -25,18 +26,18 @@ function speciesLine(L, x, y, bm) {
 
 export const fmtN = (n) => n > 0 ? '+' + n : n < 0 ? '−' + -n : '0';
 
-const f1 = (v) => v.toFixed(1).replace('.', ',');
+const f1 = (v) => v.toFixed(1).replace('.', ','), f2 = (v) => v.toFixed(2).replace('.', ',');
 export function debugText(g, perf, meshCount, cam, R, lod) {
   const { world, rec, me } = g, L = world.laws(g.d, g.n);
   const tx = Math.floor(me.x), ty = Math.floor(me.y), c = world.column(g.d, g.n, tx, ty);
-  const kf = Math.floor((me.z ?? 0) / LEVEL + 1e-4), under = world.block(g.d, g.n, tx, ty, kf - 1);
+  const kf = Math.floor((me.z ?? 0) / LEVEL + 1e-4), under = me.floorB ?? -1;
   const cx = Math.floor(tx / CS), cy = Math.floor(ty / CS), C = world.col(g.d, g.n, cx, cy), st = world.stats(), ph = physOf(L);
   return [
     `зерно      «${rec.seedText}» (${rec.seed})  генератор v${rec.gen}`,
     `адреса     глибина ${g.d}, всесвіт ${fmtN(g.n)}`,
     `позиція    ${me.x.toFixed(2)}, ${me.y.toFixed(2)}  z ${me.z.toFixed(2)}${me.air ? '  у повітрі' : ''}`,
     `гравітація ${L.grav.toFixed(L.grav < 0.1 ? 3 : 2)} g: стрибок ${(jumpHeight(L.grav) / LEVEL).toFixed(1)} рівня, крок угору ${ph.up}, хода ×${ph.speed.toFixed(2)}`,
-    `клітинка   ${c ? `поверхня ${c.h}, ${TYPE_NAMES[c.t]}; під ногами — ${under >= 0 ? BLOCK_NAMES[under] : '—'} (блок ${kf - 1})${me.ground ? '' : me.swim ? ', пливе' : ', у повітрі'}` : '—'}`,
+    `клітинка   ${c ? `поверхня ${c.h}, ${TYPE_NAMES[c.t]}; під ногами — ${me.ground && under > 0 ? BLOCK_NAMES[under] : '—'}${me.ground ? '' : me.swim ? ', пливе' : ', у повітрі'}` : '—'}`,
     `чанк       ${cx}, ${cy}, секція ${Math.floor(kf / 16)}  відбиток стовпця ${C ? digest(C) : '—'}`,
     `дивність   ${STRANGE_NAMES[L.strange.cls]} (qs ${L.strange.qs.toFixed(2)})${Object.keys(L.tiers).length ? '; ' + Object.entries(L.tiers).map(([k, t]) => `${k} — ${TIER_NAMES[t]}`).join(', ') : ''}`,
     `закони     море ${L.seaE.toFixed(2)}, рельєф ${L.amp}, t ${L.temp.toFixed(2)}, вологість ${L.wet.toFixed(2)}`,
@@ -53,7 +54,8 @@ export function debugText(g, perf, meshCount, cam, R, lod) {
     `небо       доба ${L.sky.lock ? 'вічна (припливне захоплення)' : (L.sky.dayMin / L.phys.time).toFixed(1) + ' хв'}, ${clockStr(dayPhase(L, g.clock || 0))}, сонць ${L.sky.suns.length}, місяців ${L.sky.moons.length}${L.sky.rings ? ', кільця' : ''}, широта ${(L.sky.lat * 69).toFixed(0)}°`,
     `повітря    тиск ${L.air.pressure.toFixed(2)} атм, ${L.air.gasName}, радіація ${(L.air.rad * 100).toFixed(0)} %, серпанок ${(L.air.haze * 100).toFixed(0)} %, вітер ${(L.air.wind * 1.8 * 3.6).toFixed(0)} км/год (у грозу ×2,2)`,
     `погода     ${WEATHER_NAMES[weatherAt(L, g.clock || 0).kind]} (зміна раз на ${L.air.segMin.toFixed(1)} хв; ${Object.entries(L.air.w).filter(([, v]) => v > 0.05).map(([k, v]) => k + ' ' + v.toFixed(1)).join(', ')})`,
-    `камера     ${cam.mode === 'iso' ? `згори, масштаб ${cam.zoom.toFixed(2)}` : `третя особа, відстань ${cam.dist.toFixed(1)}`}, азимут ${Math.round(cam.yaw * 180 / Math.PI) % 360}°, видно стовпців ${g.visible || 0}`,
+    `камера     ${cam.mode === 'iso' ? `згори, масштаб ${cam.zoom.toFixed(2)}` : cam.mode === 'first' ? `перша особа, око ${f2(g.eyeZ ?? 0)}` : `третя особа, відстань ${f1(g.camDist ?? cam.dist)} з ${f1(cam.dist)}`}${g.under ? ' · під рідиною' : ''}, азимут ${Math.round(cam.yaw * 180 / Math.PI) % 360}°, видно стовпців ${g.visible || 0}`,
+    `зіткнення  секцій ${CST.secs}, трикутників ${(CST.tris / 1000).toFixed(1).replace('.', ',')} тис., побудов ${CST.builds} (${f1(CST.buildMs)} мс) · крок ${f1(g.stepUs || 0)} мкс${me.ground ? ` · підлога ${me.floorN ? (Math.acos(Math.min(1, me.floorN[2])) * 180 / Math.PI).toFixed(0) + '°' : '—'}` : ''}`,
     `кадр       ${perf.fps.toFixed(0)} к/с · ${f1(perf.frameMs)} мс (p99 ${f1(perf.p99)}) · CPU ${perf.upd.toFixed(2).replace('.', ',')} + ${perf.drw.toFixed(2).replace('.', ',')} мс · GPU ${R && R.gpuMs !== null ? R.gpuMs.toFixed(2).replace('.', ',') + ' мс' : '—'}`,
     `рендер     викликів ${R ? R.stats.draws : 0} · трикутників ${R ? (R.stats.tris / 1e6).toFixed(2).replace('.', ',') : 0} млн · завантажено ${R ? (R.stats.up / 1024).toFixed(0) : 0} КБ/кадр · у GPU ${R ? ((R.stats.gpuBytes + R.stats.arenaUsed) / 1048576).toFixed(0) : 0} з ${R ? ((R.stats.gpuBytes + R.stats.arenaBytes) / 1048576).toFixed(0) : 0} МБ · секцій ${meshCount}${lod && LOD_ON ? ` · LOD увімкнено (0/1/2: ${lod[0]}/${lod[1]}/${lod[2]})` : ''}${R && !R.cullOn ? ' · відсікання вимкнено' : ''}${R && R.stats.over ? ' · бюджет GPU перевищено' : ''}${R && R.info ? ` · ${R.info.device} · тіні ${R.info.shadows === 'off' ? 'вимкнено' : R.info.shadows.toUpperCase()} · світел ${R.info.lights.dir} + ${R.info.lights.local}` : ''}`,
     `генерація  воркерів ${st.workers} · ${st.colsPerSec} стовпців/с · ${st.genMs.toFixed(2).replace('.', ',')} мс/робота · стовпців ${st.cols}, секцій ${st.secs}, у черзі ${st.pending} · стрімінг ${(g.streamMs || 0).toFixed(1).replace('.', ',')} мс`,

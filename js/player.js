@@ -178,6 +178,8 @@ export function liquidAt(P, x, y, z) {
 export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
   if (p.stepOff === undefined) p.stepOff = 0;
   if (p.footOff === undefined) { p.footOff = 0; p.offX = 0; p.offY = 0; }
+  // незгенероване під центром капсули (телепорт у печеру, секції ще в генераторі) — чекати на місці, як перед стіною
+  if (P.block(Math.floor(p.x), Math.floor(p.y), Math.floor((p.z + 0.5) / LEVEL)) === -1) { p.vz = 0; p.moving = false; p.vis = p.z + p.stepOff + p.footOff; return; }
   const C = colliderOf(P);
   if (overlap(C, SHAPE, p.x, p.y, p.z)) depenetrate(C, SHAPE, p);    // тіло налетіло, секцію догенеровано, телепорт
   if (p.fly) return fly(p, ix, iy, dt, P, C, ph, mb, ctl.vert || 0);
