@@ -448,7 +448,7 @@ test('нові сили: вітер — чесний опір (на землі �
   assert.ok(q.x > 21, `нахил: ${q.x}`);
 });
 
-test('тіла: левітуюче висить на висоті ширяння, звичайне падає й лежить; удар — легке відлітає, важке ледь зрушить; на тіло можна стати', async () => {
+test('тіла: левітуюче висить на висоті появи, звичайне падає й лежить; удар — легке відлітає, важке ледь зрушить; на тіло можна стати', async () => {
   const { configureBodies } = await import('../js/engine/physics/bodies.js'); const { solidB: sB } = await import('../js/gen/chunk.js'); const pl = await import('../js/player.js'); const { LEVEL: LV } = await import('../js/iso.js');
   configureBodies({ level: LV, solid: sB, gravity: pl.GRAVITY, refMass: pl.PLAYER_MASS, refArea: pl.PLAYER_AREA });
   const { makeBody, stepBody, push, rayBody } = await import('../js/engine/physics/bodies.js'); const { HIT_IMPULSE } = pl;
@@ -456,7 +456,7 @@ test('тіла: левітуюче висить на висоті ширяння
   const run = (b, n) => { for (let i = 0; i < n; i++) stepBody(b, 1 / 60, P, env); };
   const fl = makeBody({ x: 20.5, y: 20.5, z: 4 * LEVEL + 2, hx: 0.2, hy: 0.2, hz: 0.15, lift: 1.3, hover: 1.5 });
   fl.sleep = false; run(fl, 300);
-  assert.ok(Math.abs(fl.z - fl.hz - (4 * LEVEL + 1.5)) < 0.1, `висота ширяння: ${fl.z}`);
+  assert.ok(Math.abs(fl.z - fl.hz - (4 * LEVEL + 2)) < 0.02, `висота появи: ${fl.z}`);
   const rock = makeBody({ x: 10.5, y: 10.5, z: 4 * LEVEL + 3, hx: 0.2, hy: 0.2, hz: 0.15, lift: 0 });
   rock.sleep = false; run(rock, 300);
   assert.ok(Math.abs(rock.z - rock.hz - 4 * LEVEL) < 0.05 && rock.sleep, `лежить: ${rock.z} ${rock.sleep}`);
@@ -537,6 +537,18 @@ test('тіла й вітер: сплячий левітуючий камінь �
   const calm = mk(0.15);
   for (let i = 0; i < 300; i++) stepBody(calm, 1 / 60, P, { ...env, wind: [0, 0] });
   assert.ok(calm.sleep && Math.abs(calm.x - 30.5) < 1e-6, 'без вітру спить на місці');
+});
+
+test('левітуюче тіло тримає висоту появи: над уступом униз і над водою — та сама висота, не відстань до ґрунту', async () => {
+  const { configureBodies, makeBody, stepBody } = await import('../js/engine/physics/bodies.js'); const { solidB: sB } = await import('../js/gen/chunk.js'); const pl = await import('../js/player.js');
+  configureBodies({ level: LEVEL, solid: sB, gravity: pl.GRAVITY, refMass: pl.PLAYER_MASS, refArea: pl.PLAYER_AREA });
+  // суходіл висотою 4 рівні (x 0…9), уступ униз на 2 рівні (x 10…19), далі вода (x 20…39)
+  const P = world(Array(9).fill('4'.repeat(10) + '2'.repeat(10) + 'w'.repeat(20))), env = { g: 1, vT: 20, bounce: 0, friction: 1, wind: [0, 0] };
+  const b = makeBody({ x: 4.5, y: 4.5, z: 4 * LEVEL + 1.2, hx: 0.3, hy: 0.3, hz: 0.2, lift: 1.3, hover: 1.2 }), alt = b.z;
+  b.sleep = false; b.ax = null;                       // штовхнули: летить уздовж x над уступом і водою
+  let dz = 0;
+  for (let i = 0; i < 360 && b.x < 34; i++) { b.vx = 6; stepBody(b, 1 / 60, P, env); dz = Math.max(dz, Math.abs(b.z - alt)); }
+  assert.ok(b.x > 30 && dz < 0.02, `x ${b.x}, найбільше відхилення висоти ${dz}`);
 });
 
 test('погода в місці не мигтить на межі пустелі: пустеля й сухість — за околом з гістерезисом', async () => {

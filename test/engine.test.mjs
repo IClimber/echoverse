@@ -496,7 +496,7 @@ test('сутності: змінена переїхала в сусідній ч
   E.load(KE(1, 0), 1, 0, A(1));
   assert.equal(E.get(1), e); assert.equal(E.get(1).x, 20);
 });
-test('settle: тіло в повітрі лягає на ґрунт, левітуюче — на висоту ширяння', () => {
+test('settle: тіло в повітрі лягає на ґрунт, левітуюче — на висоту появи', () => {
   cfgB({ level: 0.5, solid: (v) => v > 0, gravity: 25.6 });
   const P = { block: (x, y, k) => (k < 10 ? 1 : 0) };   // ґрунт до висоти 5
   const b = mkB({ x: 1.5, y: 1.5, z: 9, hx: 0.3, hy: 0.3, hz: 0.25, dens: 1, lift: 0 });
@@ -506,5 +506,5 @@ test('settle: тіло в повітрі лягає на ґрунт, левіт�
   const f = mkB({ x: 1.5, y: 1.5, z: 12, hx: 0.3, hy: 0.3, hz: 0.25, dens: 1, lift: 1.5, hover: 2 });
   f.x = 3.5;
   assert.ok(settleBody(f, P));
-  assert.equal(f.z, 7.25); assert.equal(f.ax, 3.5);
+  assert.equal(f.z, 12.25); assert.equal(f.ax, 3.5);
 });

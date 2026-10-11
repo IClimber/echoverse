@@ -16,12 +16,14 @@ const EPS = 1e-4;
 const SLEEP_V = 0.06, SLEEP_T = 1.2;         // спокій: швидкість нижче й стільки секунд — засинає
 const DENSITY = 1800;                         // маса одиниці об'єму каменю (умовна; еталон — REF_MASS)
 
-// Тіло з опису: {x, y, z (низ), hx, hy, hz, dens (×), lift, hover (висота ширяння низу над ґрунтом)}
+// Тіло з опису: {x, y, z (низ), hx, hy, hz, dens (×), lift, hover (висота ширяння низу над ґрунтом у місці появи)}
 export function makeBody(o) {
   const b = { vx: 0, vy: 0, vz: 0, yaw: 0, spin: 0, sleep: true, calm: 0, ...o };
   b.z = o.z + o.hz;                           // центр
   b.mass = DENSITY * (o.dens || 1) * 8 * o.hx * o.hy * o.hz;
-  if ((o.lift || 0) > 1) { b.ax = o.x; b.ay = o.y; }   // поле породи тримає левітуюче тіло біля цього місця
+  // поле породи тримає левітуюче тіло біля місця появи й на висоті появи (alt — центр): над уступом, урвищем чи водою
+  // висота та сама, а не відстань до ґрунту під ним (рішення користувача 12.10.2026)
+  if ((o.lift || 0) > 1) { b.ax = o.x; b.ay = o.y; b.alt = b.z; }
   return b;
 }
 
@@ -47,13 +49,17 @@ function groundBelow(P, x, y, z) {
   return null;
 }
 
-// Дорахунок тіла, що заснуло в русі (сутності: повернулось у зону симуляції): левітуюче — на висоті ширяння над ґрунтом,
-// поле тримає його тут; решта — на опорі. Швидкості — нуль, сон. Ґрунту не знайдено (стовпець не завантажено) — де є
+// Дорахунок тіла, що заснуло в русі (сутності: повернулось у зону симуляції): левітуюче — на висоті появи (без неї — на
+// висоті ширяння над ґрунтом), поле тримає його тут; решта — на опорі. Швидкості — нуль, сон. Ґрунту не знайдено
+// (стовпець не завантажено) — де є
 export function settle(b, P) {
-  const gz = groundBelow(P, b.x, b.y, b.z);
-  if (gz === null) return false;
   const lev = (b.lift || 0) > 1;
-  b.z = gz + (lev ? b.hover || 0 : 0) + b.hz;
+  if (lev && b.alt !== undefined) b.z = b.alt;
+  else {
+    const gz = groundBelow(P, b.x, b.y, b.z);
+    if (gz === null) return false;
+    b.z = gz + (lev ? b.hover || 0 : 0) + b.hz;
+  }
   if (lev) { b.ax = b.x; b.ay = b.y; }
   b.vx = b.vy = b.vz = 0; b.sleep = true; b.calm = 0;
   return true;
@@ -77,10 +83,12 @@ export function stepBody(b, dt, P, env) {
   if (b.held) { b.sleep = false; b.calm = 0; return moveBody(b, dt, P, env); }
   if (b.sleep) { if (!windy) return; b.sleep = false; b.calm = 0; }
   const g = GRAVITY * env.g, lift = b.lift || 0;
-  // тяжіння мінус підйом породи; левітуюче — пружина до висоти ширяння (немає ґрунту під — просто висить)
+  // тяжіння мінус підйом породи; левітуюче — пружина до висоти появи (тіла без неї — до висоти ширяння над ґрунтом;
+  // немає ґрунту під — просто висить)
   let az = -g * (1 - Math.min(1, lift));
   if (lift > 1) {
-    const gz = groundBelow(P, b.x, b.y, b.z), target = gz === null ? b.z : gz + b.hover + b.hz;
+    let target = b.alt;
+    if (target === undefined) { const gz = groundBelow(P, b.x, b.y, b.z); target = gz === null ? b.z : gz + b.hover + b.hz; }
     az += (target - b.z) * 6 - b.vz * 2.2;
   }
   // опір повітря й вітер — як у гравця: прискорення g·(v_відн / vT)², межа падіння тіла vTb — від маси на площу
