@@ -18,7 +18,7 @@ export const SHADOW_D = 128;                   // тіні — лише ближ
 const SHADOW_STEP = Math.cos(0.25 * Math.PI / 180);
 const MAX_DIR = 3;
 
-// G — застосунок (app.js); shadows — 'pcf3' | 'pcss'
+// G — застосунок (app.js); shadows — 'pcf3' | 'pcss' | 'off' (без тіней)
 export function createLights(G, { shadows = 'pcf3' } = {}) {
   const { pc, app, scene, layers, O } = G;
   const pcss = () => q === 'pcss' && G.info.pcss;
@@ -51,7 +51,7 @@ export function createLights(G, { shadows = 'pcf3' } = {}) {
   const makeSlot = (i) => {
     const e = new pc.Entity(`світло ${i}`);
     e.addComponent('light', i ? { type: 'directional', intensity: 0, castShadows: false, layers: LAY } : {
-      type: 'directional', intensity: 0, castShadows: true, shadowDistance: shD, layers: LAY,
+      type: 'directional', intensity: 0, castShadows: q !== 'off', shadowDistance: shD, layers: LAY,
       cascadeDistribution: 0.5, cascadeBlend: 0.1, shadowBias: 0.3, normalOffsetBias: 0.2,
       numCascades: 4, shadowResolution: 2048, shadowUpdateMode: pc.SHADOWUPDATE_NONE, ...typeOf(),
     });
@@ -139,11 +139,16 @@ export function createLights(G, { shadows = 'pcf3' } = {}) {
     }
   });
 
-  // Якість: тип тіней напрямлених і кластерів (PCSS — лише напрямлені; кластерні — PCF5, найм'якший доступний)
+  // Якість: тип тіней напрямлених і кластерів (PCSS — лише напрямлені; кластерні — PCF5, найм'якший доступний);
+  // 'off' — без тіней: головне не кидає тіні, кластерні тіні вимкнено (scene.lighting.shadowsEnabled)
   function setQuality(s) {
     q = s;
-    const t = typeOf();
-    if (slots[0]) Object.assign(slots[0].l, t);
+    const on = q !== 'off', s0 = slots[0];
+    if (s0) {
+      s0.l.castShadows = on;
+      if (on) { Object.assign(s0.l, typeOf()); s0.l.shadowUpdateMode = s0.on ? pc.SHADOWUPDATE_REALTIME : pc.SHADOWUPDATE_NONE; }
+    }
+    L.shadowsEnabled = on;
     L.shadowType = pcss() ? pc.SHADOW_PCF5_32F : pc.SHADOW_PCF3_32F;
   }
   setQuality(q);
@@ -152,7 +157,7 @@ export function createLights(G, { shadows = 'pcf3' } = {}) {
   const LOC = [];
   return {
     setDirectionalCount, setDirectional, setShadowDistance, warmUp, addLight, setQuality,
-    get quality() { return pcss() ? 'pcss' : 'pcf3'; },
+    get quality() { return q === 'off' ? 'off' : pcss() ? 'pcss' : 'pcf3'; },
     get slots() { return slots; },
     // напрямлені з тінями на кадр: [{dir — до світила, shD}] (для regions.cullCasters)
     dirs(out = []) {
@@ -163,14 +168,14 @@ export function createLights(G, { shadows = 'pcf3' } = {}) {
     // увімкнені точкові джерела й прожектори з тінями: [{pos, range}] (наші координати)
     locals() {
       LOC.length = 0;
-      for (const H of locals) if (H.e.enabled && H.e.light.castShadows && H.e.light.intensity > 0) LOC.push(H);
+      if (L.shadowsEnabled) for (const H of locals) if (H.e.enabled && H.e.light.castShadows && H.e.light.intensity > 0) LOC.push(H);
       return LOC;
     },
     info() {
       let dir = 0, shadowed = 0;
       for (const s of slots) if (s.on) { dir++; if (s.l.castShadows) shadowed++; }
       let local = 0;
-      for (const H of locals) if (H.e.enabled) { local++; if (H.e.light.castShadows) shadowed++; }
+      for (const H of locals) if (H.e.enabled) { local++; if (H.e.light.castShadows && L.shadowsEnabled) shadowed++; }
       return { dir, local, shadowed };
     },
   };

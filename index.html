@@ -65,13 +65,17 @@
   h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 20px 0 8px; }
   .row { display: flex; gap: 8px; }
   .row input { flex: 1; }
-  .range { align-items: center; font-size: 13px; }
-  .range span { min-width: 210px; }
   button.wide { width: 100%; margin-top: 20px; }
-  .seg { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
-  .seg label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
-  .seg label:has(input:disabled) { opacity: .5; cursor: default; }
+  /* Налаштування: рядок «Назва ‹ значення ›», як у налаштуваннях ігор */
+  .opts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; margin-top: 12px; }
+  .opt { display: grid; grid-template-columns: 1fr auto 150px auto; align-items: center; gap: 6px; font-size: 15px; margin-top: 10px; }
+  .opt .val { text-align: center; font-weight: 600; cursor: pointer; user-select: none; }
+  .opt .arr { padding: 4px 12px; }
+  .opt.range { grid-template-columns: auto minmax(0, 1fr) auto; gap: 16px; }
+  .opt.range input { width: 100%; }
+  .opt.range .val { cursor: default; white-space: nowrap; font-weight: 400; font-size: 13px; }
   .note { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .opts .note { margin-top: 0; text-align: right; }
   .note a { color: var(--accent); }
   #worlds { display: grid; gap: 8px; }
   .world { display: flex; align-items: center; gap: 8px; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
@@ -124,20 +128,13 @@
   <div class="card" id="settings" hidden>
     <h1>Налаштування</h1>
     <div class="sub">Баланс якості й швидкості — на ваш вибір; зберігається в цьому браузері</div>
-    <h2>Графіка</h2>
-    <div class="seg" id="gpuSeg">
-      <label><input type="radio" name="gpu" value="webgl2"> WebGL2</label>
-      <label><input type="radio" name="gpu" value="webgpu"> WebGPU</label>
+    <div class="opts">
+      <div class="opt" id="optGpu"><span>Графіка</span><button class="arr" title="Попереднє">‹</button><span class="val"></span><button class="arr" title="Наступне">›</button></div>
+      <div class="note" id="gpuNote" hidden></div>
+      <div class="opt" id="optSh"><span>Тіні</span><button class="arr" title="Попереднє">‹</button><span class="val"></span><button class="arr" title="Наступне">›</button></div>
+      <div class="note" id="shNote"></div>
+      <label class="opt range"><span>Дальність</span><input id="view" type="range" min="8" max="32" step="1"><span class="val" id="viewLabel"></span></label>
     </div>
-    <div class="note" id="gpuNote" hidden>Браузер не підтримує WebGPU</div>
-    <h2>Тіні</h2>
-    <div class="seg" id="shSeg">
-      <label><input type="radio" name="shadows" value="pcf3"> PCF3 — чіткі краї, швидше</label>
-      <label><input type="radio" name="shadows" value="pcss"> PCSS — м'які, повільніше</label>
-    </div>
-    <div class="note" id="pcssNote" hidden>Відеокарта не підтримує — буде PCF3</div>
-    <h2>Дальність</h2>
-    <label class="row range"><span id="viewLabel">Дальність</span><input id="view" type="range" min="8" max="32" step="1"></label>
     <div class="note">Зміна графіки — після перезавантаження (гру буде збережено)</div>
     <div class="row foot">
       <button id="back">Назад</button>

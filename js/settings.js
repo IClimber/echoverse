@@ -1,8 +1,8 @@
-// settings.js — налаштування графіки гравця (на браузер): графічний пристрій (WebGL2 / WebGPU), тіні (PCF3 / PCSS),
+// settings.js — налаштування графіки гравця (на браузер): графічний пристрій (WebGL2 / WebGPU), тіні (без тіней / PCF3 / PCSS),
 // дальність (8–32 чанки). Типово — WebGL2 · PCF3 · 16 (рішення користувача 10.10.2026). URL перевизначає:
-// ?gpu=webgl2|webgpu, ?shadows=pcf3|pcss. Сховище може бути недоступне (приватне вікно, заблоковані дані) — тоді типові
+// ?gpu=webgl2|webgpu, ?shadows=off|pcf3|pcss. Сховище може бути недоступне (приватне вікно, заблоковані дані) — тоді типові
 export const KEYS = { gpu: 'echoverse-gpu', shadows: 'echoverse-shadows', view: 'echoverse-view' };
-const OK = { gpu: ['webgl2', 'webgpu'], shadows: ['pcf3', 'pcss'] };
+const OK = { gpu: ['webgl2', 'webgpu'], shadows: ['off', 'pcf3', 'pcss'] };
 export const DEFAULTS = { gpu: 'webgl2', shadows: 'pcf3', view: 16 };
 const get = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
 export function loadSettings(QS = new URLSearchParams(location.search)) {

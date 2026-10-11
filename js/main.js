@@ -53,7 +53,7 @@ function boot(renderer) {
   const setView = (c) => {
     c = setViewChunks(c);
     $('view').value = c;
-    $('viewLabel').textContent = `Дальність: ${c} чанків (${c * CS} клітинок)`;
+    $('viewLabel').textContent = `${c} чанків (${c * CS} клітинок)`;
     if (g) g.world.setKeep(keepFor(VIEW_R));
     renderer.setBudget(budgetFor(VIEW_R));
     streamer.force();
@@ -122,7 +122,7 @@ function boot(renderer) {
     toggleCamera() { toggleCam(); return camera.mode; },
     // Скинути кільця замірів (інтервали кадрів, час GPU) — заміри з чистого аркуша
     resetFrames() { frameN = 0; frameI = 0; if (renderer.R.gpuHist) renderer.R.gpuHistI = 0; },
-    // Тип тіней головного світла — 'pcf3' | 'pcss' (як у налаштуваннях) → фактичний
+    // Тіні — 'off' | 'pcf3' | 'pcss' (як у налаштуваннях) → фактичні
     shadows(m) { return renderer.setShadows(m); },
     // Рівні деталізації далекої землі: false — усе повне (порівняння)
     setLod(on) { setLod(on); streamer.force(); },
@@ -161,35 +161,45 @@ function boot(renderer) {
 
   // ---- Налаштування: графіка (після перезавантаження), тіні й дальність (одразу) ----
   const info = renderer.R.info || null, cfg = loadSettings(QS);
-  const radios = (name) => [...document.querySelectorAll(`input[name=${name}]`)];
   const showCard = (set) => { $('settings').hidden = !set; $('menu').firstElementChild.hidden = set; };
   $('openSettings').onclick = () => showCard(true);
   $('back').onclick = () => showCard(false);
-  for (const r of radios('gpu')) {
-    r.checked = r.value === (info ? info.device : 'webgl2');
-    // navigator.gpu браузер дає лише в захищеному контексті (localhost, 127.0.0.1, https); http://0.0.0.0:8123 — посилання,
-    // яке друкує python3 -m http.server, — не захищений: WebGPU там немає, хоч браузер його й підтримує
-    if (r.value === 'webgpu' && !navigator.gpu) {
-      r.disabled = true;
-      const n = $('gpuNote'), here = `${location.protocol}//${location.host}`;
-      if (isSecureContext) n.textContent = 'Браузер не надав WebGPU на цій сторінці (navigator.gpu немає)';
-      else {
-        const to = `http://localhost:${location.port || 80}${location.pathname}${location.search}`;
-        n.innerHTML = `WebGPU браузер дає лише на захищених адресах (localhost, 127.0.0.1, https), а сторінку відкрито з ${here}. ` +
-          `Відкрийте <a href="${to}">${to.replace(/\/$/, '')}</a>. Світи зберігаються окремо для кожної адреси — перенести: експорт тут, імпорт там`;
-      }
-      n.hidden = false;
+  // Перемикач «Назва ‹ значення ›»: стрілки й клацання по значенню — по колу; недоступні значення пропускаються
+  function selector(el, opts, cur, pick) {
+    const [prev, next] = el.querySelectorAll('.arr'), val = el.querySelector('.val'), ok = opts.filter((o) => !o.off);
+    let i = Math.max(0, ok.findIndex((o) => o.v === cur));
+    const show = () => { val.textContent = ok[i].t; prev.disabled = next.disabled = ok.length < 2; };
+    const go = (d) => { i = (i + d + ok.length) % ok.length; show(); pick(ok[i].v); };
+    prev.onclick = () => go(-1); next.onclick = () => go(1); val.onclick = () => go(1);
+    show();
+    return ok[i].v;
+  }
+  // Графіка: navigator.gpu браузер дає лише в захищеному контексті (localhost, 127.0.0.1, https); http://0.0.0.0:8123 —
+  // посилання, яке друкує python3 -m http.server, — не захищений: WebGPU там немає, хоч браузер його й підтримує
+  if (!navigator.gpu) {
+    const n = $('gpuNote'), here = `${location.protocol}//${location.host}`;
+    if (isSecureContext) n.textContent = 'WebGPU недоступний: браузер не надав його на цій сторінці';
+    else {
+      const to = `http://localhost:${location.port || 80}${location.pathname}${location.search}`;
+      n.innerHTML = `WebGPU браузер дає лише на захищених адресах (localhost, 127.0.0.1, https), а сторінку відкрито з ${here}. ` +
+        `Відкрийте <a href="${to}">${to.replace(/\/$/, '')}</a>. Світи зберігаються окремо для кожної адреси — перенести: експорт тут, імпорт там`;
     }
-    r.onchange = () => { saveSetting('gpu', r.value); $('reload').hidden = !info || r.value === info.device; };
+    n.hidden = false;
   }
-  for (const r of radios('shadows')) {
-    r.checked = r.value === cfg.shadows;
-    r.onchange = () => {
-      saveSetting('shadows', r.value);
-      renderer.setShadows(r.value); renderer.warmUp();   // перекомпіляція — поки відкрите меню
-    };
-  }
-  if (info && !info.pcss) $('pcssNote').hidden = false;
+  const gpuNow = selector($('optGpu'), [{ v: 'webgl2', t: 'WebGL2' }, { v: 'webgpu', t: 'WebGPU', off: !navigator.gpu }], cfg.gpu, (v) => {
+    saveSetting('gpu', v); $('reload').hidden = !info || v === info.device;
+  });
+  $('reload').hidden = !info || gpuNow === info.device;
+  // Тіні: одразу (перекомпіляція й прогрів — поки відкрите меню)
+  const shNote = (v) => {
+    $('shNote').textContent = v === 'off' ? 'Найшвидше; сонце світить і крізь стіни — у печерах світло'
+      : v === 'pcf3' ? 'PCF3 — чіткі краї, швидше'
+      : info && !info.pcss ? 'Відеокарта не підтримує м\'які тіні — будуть чіткі' : 'PCSS — м\'які краї, повільніше';
+  };
+  shNote(selector($('optSh'), [{ v: 'off', t: 'Без тіней' }, { v: 'pcf3', t: 'Чіткі' }, { v: 'pcss', t: 'М\'які' }], cfg.shadows, (v) => {
+    saveSetting('shadows', v); shNote(v);
+    renderer.setShadows(v); renderer.warmUp();
+  }));
   $('reload').onclick = async () => {
     if (g) { await putWorld(snapshot()); try { sessionStorage.setItem(RESUME_KEY, g.rec.id); } catch { /* недоступне */ } }
     location.reload();

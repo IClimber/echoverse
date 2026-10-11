@@ -57,7 +57,7 @@ const KINDS = {
 // поруч — один діапазон; матеріал без відсікання граней), 2 — рослини зблизька
 const BS = 2, NB = RS / BS;
 
-// settings: { gpu: 'webgl2' | 'webgpu', shadows: 'pcf3' | 'pcss' }
+// settings: { gpu: 'webgl2' | 'webgpu', shadows: 'off' | 'pcf3' | 'pcss' }
 export async function createScene(canvas, settings = {}) {
   const G = await createApp(canvas, { device: settings.gpu || 'webgl2', far: FAR_R * 1.6 });
   const { app, dev, scene } = G, camE = G.camE, cam = G.cam;

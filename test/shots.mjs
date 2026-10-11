@@ -5,7 +5,7 @@ const arg = (k, d) => { const a = process.argv.find((s) => s.startsWith(`--${k}=
 const port = 9337;
 const OUT = arg('out', `${tmpdir()}/echoverse-shots`); mkdirSync(OUT, { recursive: true });
 // поєднання налаштувань (графіка : тіні : дальність): кожне має запуститися без помилок
-const COMBOS = arg('combos', 'webgl2:pcf3:16,webgl2:pcss:16,webgpu:pcf3:16').split(',').map((s) => s.split(':'));
+const COMBOS = arg('combos', 'webgl2:pcf3:16,webgl2:pcss:16,webgl2:off:16,webgpu:pcf3:16').split(',').map((s) => s.split(':'));
 // сцена: [всесвіт, x, y, фаза доби ('best' — найбільше світил), особливе]. Порядок важливий: сцени того самого всесвіту
 // й місця — підряд без телепорту; печера — остання з них (переносить гравця під землю), далі — стрибок в інший всесвіт
 const ALL = { plain: [1, -52, -45, 0.4], night: [1, -52, -45, 0.0], rain: [1, -52, -45, 0.4, 'rain'], iso: [1, -52, -45, 0.4, 'iso'],

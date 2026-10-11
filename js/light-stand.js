@@ -62,7 +62,7 @@ export async function runLight() {
 <div id="panel" style="position:fixed;left:8px;top:8px;background:#000a;color:#eee;font:13px system-ui;padding:8px 10px;border-radius:6px;display:grid;gap:6px;min-width:230px">
   <b>?light — світло й тіні рушія</b>
   <label>Доба <input id="day" type="range" min="0" max="1" step="0.005" value="0.36"></label>
-  <label>Тіні <select id="sh"><option value="pcf3">PCF3</option><option value="pcss">PCSS</option></select></label>
+  <label>Тіні <select id="sh"><option value="off">без тіней</option><option value="pcf3">PCF3</option><option value="pcss">PCSS</option></select></label>
   <label>Джерел <select id="nl"><option>1</option><option selected>8</option><option>32</option></select></label>
   <label><input id="mv" type="checkbox" checked> рух</label>
   <label><input id="ao" type="checkbox" checked> AO</label>
