@@ -5,7 +5,7 @@ import { createScene, BODY_R, budgetFor } from './scene.js';
 import { loadSettings, saveSetting } from './settings.js';
 import { createWorld, findSpawn, keepFor } from './world.js';
 import { createDevice, landing, landingChunks, CHARGE } from './device.js';
-import { step, support, standable, windShelter, SPRINT, GRAVITY, FOOT, PLAYER_MASS, HIT_IMPULSE } from './player.js';
+import { step, standableB, settle, windShelter, SPRINT, GRAVITY, FOOT, PLAYER_MASS, HIT_IMPULSE } from './player.js';
 import { stepBody, windMoves, push, rayBody, collideBodies } from './engine/physics/bodies.js';
 import { initInput, moveAxis, turnAxis, sprintHeld, vertAxis, takeActions, takeWheel, takeDrag, clearInput, lockPointer, unlockPointer, locked } from './input.js';
 import { listWorlds, putWorld, deleteWorld, serialize, deserialize, newId } from './save.js';
@@ -109,11 +109,11 @@ function boot(renderer) {
         for (let z = top - 6; z >= me.z - 30; z -= LEVEL) {
           const d = Math.hypot(dx, dy, z - me.z);
           if (d >= bd) continue;
-          if (standable(P, x, y, z)) { best = [x, y, z]; bd = d; break; }
+          if (standableB(P, x, y, z)) { best = settle(P, x, y, z); bd = d; break; }
         }
       }
       if (!best) return null;
-      me.x = best[0]; me.y = best[1]; me.z = best[2]; me.vz = 0; me.vis = me.z; me.px = me.x; me.py = me.y; me.pv = me.z;
+      me.x = best[0]; me.y = best[1]; me.z = best[2]; me.vz = 0; me.vis = me.z; me.offX = me.offY = 0; me.visX = me.px = me.x; me.visY = me.py = me.y; me.pv = me.z;
       g.cam = [...best];
       streamer.force();
       return best;
@@ -364,7 +364,7 @@ function boot(renderer) {
     const lq = g.world.laws(g.d, g.n).liquid, wet = !!g.me.wet, me = g.me;
     if (wet && !wasWet && lq.danger) toast(`${lq.name[0].toUpperCase() + lq.name.slice(1)}: ${lq.danger} — небезпечно`);
     wasWet = wet;
-    const hot = me.ground && g.world.block(g.d, g.n, Math.floor(me.x), Math.floor(me.y), Math.floor(me.z / LEVEL + 1e-4) - 1) === B_MAGMA;
+    const hot = me.ground && me.floorB === B_MAGMA;
     if (hot && !wasHot) toast('Під ногами розпечена лава — небезпечно');
     wasHot = hot;
   }
@@ -376,7 +376,7 @@ function boot(renderer) {
     const P = g.world.laws(g.d, g.n), was = P.grav, L = g.world.laws(d, n), depth = d !== g.d;
     g.dev.done([g.d, g.n]);
     g.prev = [g.d, g.n];
-    g.d = d; g.n = n; g.world.setCurrent(d, n); g.me.x = at[0]; g.me.y = at[1]; g.me.z = at[2]; g.me.vz = 0; g.me.vx = 0; g.me.vy = 0; g.me.ground = false; g.me.stepOff = 0; g.me.fly = false;
+    g.d = d; g.n = n; g.world.setCurrent(d, n); g.me.x = at[0]; g.me.y = at[1]; g.me.z = at[2]; g.me.vz = 0; g.me.vx = 0; g.me.vy = 0; g.me.ground = false; g.me.stepOff = 0; g.me.offX = g.me.offY = 0; g.me.visX = g.me.x; g.me.visY = g.me.y; g.me.fly = false;
     const msg = [];
     if (depth) msg.push(`глибина ${d}`);
     if (Math.abs(L.grav - was) >= 0.12) msg.push(`гравітація ${gStr(L)} — ${L.grav < was ? 'легше' : 'важче'}`);
@@ -476,7 +476,7 @@ function boot(renderer) {
       const at = placeIn(g.d, g.n, me.x, me.y, me.z);
       if (at !== undefined) {
         me.x = at[0]; me.y = at[1]; me.z = at[2];
-        me.ground = false; me.stepOff = 0; me.vis = me.z; me.px = me.x; me.py = me.y; me.pv = me.z;
+        me.ground = false; me.stepOff = 0; me.vis = me.z; me.offX = me.offY = 0; me.visX = me.px = me.x; me.visY = me.py = me.y; me.pv = me.z;
         g.cam = [me.x, me.y, me.z]; me.placed = true;
         $('loading').hidden = true;
         $('mouseHint').hidden = camera.mode !== THIRD || locked();
@@ -488,7 +488,7 @@ function boot(renderer) {
       g.jumpLatch = g.jumpLatch || jump;
       for (let s = physT.advance(dt); s > 0; s--) {
         const L = g.world.laws(g.d, g.n), W = weatherAt(L, g.clock);   // вітер — сила опору (густина повітря — у vT)
-        me.px = me.x; me.py = me.y; me.pv = me.vis ?? me.z; g.stamp++;
+        me.px = me.visX ?? me.x; me.py = me.visY ?? me.y; me.pv = me.vis ?? me.z; g.stamp++;
         g.ph = physAt(L, me.x, me.y);
         const probe = g.world.probe(g.d, g.n);
         g.lee = windShelter(probe, me.x, me.y, me.z, W.wind);       // затишок: стіна, дерево чи камінь з навітряного боку, печера
@@ -498,7 +498,7 @@ function boot(renderer) {
         if (camera.mode === THIRD) me.yaw = facing(camera);                 // спиною до камери; S — задкує
         simBodies(PHYS_DT, L, W);
         warnLiquid();
-        if (g.dev.update(PHYS_DT)) { tryJump(); me.px = me.x; me.py = me.y; me.pv = me.vis ?? me.z; }   // стрибок — без «шлейфу»
+        if (g.dev.update(PHYS_DT)) { tryJump(); me.px = me.visX ?? me.x; me.py = me.visY ?? me.y; me.pv = me.vis ?? me.z; }   // стрибок — без «шлейфу»
         if (!me.placed) break;
       }
       if (camera.mode === THIRD) me.yaw = facing(camera);                   // і в кадрі без кроку фізики (камера — щокадру)
@@ -514,7 +514,7 @@ function boot(renderer) {
     }
     // Інтерполяція між двома останніми кроками фізики (кадр не смикається при частоті, не кратній такту)
     const al = physT.alpha, lerp = (a, b) => a === undefined ? b : a + (b - a) * al;
-    me.ix = lerp(me.px, me.x); me.iy = lerp(me.py, me.y); me.iv = lerp(me.pv, me.vis ?? me.z);
+    me.ix = lerp(me.px, me.visX ?? me.x); me.iy = lerp(me.py, me.visY ?? me.y); me.iv = lerp(me.pv, me.vis ?? me.z);
     // Ціль камери: гравець (у третій особі — його голова); плавно, по висоті — повільніше (стрибок не трусить камеру)
     const k = Math.min(1, dt * (camera.mode === ISO ? 8 : 14)), kz = Math.min(1, dt * 5);
     let tz = (me.iv ?? me.z ?? 0) + (camera.mode === THIRD ? HEAD : 0), capped = false;
@@ -555,7 +555,6 @@ function boot(renderer) {
     const C = me.placed && clim;
     let loc = localWeather(L, W, !!C && C.cold, !!C && C.desert, !!C && C.arid);
     if (wOver !== null) loc = { ...loc, type: wOver || null, k: 1 };
-    const under = me.placed ? support(g.world.probe(g.d, g.n), me.x, me.y, me.z + 0.01) : null;
     const anim = animate(me, dt, now, physOf(L).speed * (me.run ? SPRINT * 0.85 : 1));
     if (!g.view) return;
     renderer.pump();
@@ -567,7 +566,7 @@ function boot(renderer) {
     }
     const sk = renderer.draw({
       camera, target: g.cam, view: g.view, laws: L, far: g.far, clock: g.clock, bodies, weather: { W: loc.W, loc }, rain: me.placed && loc.type ? rainMap(now) : null,
-      me: me.placed ? { x: me.ix ?? me.x, y: me.iy ?? me.y, z: me.iv ?? me.vis ?? me.z, gz: under ? under.z : me.z, yaw: me.yaw, swim: me.swim, fly: me.fly, anim } : null,
+      me: me.placed ? { x: me.ix ?? me.x, y: me.iy ?? me.y, z: me.iv ?? me.vis ?? me.z, yaw: me.yaw, swim: me.swim, fly: me.fly, anim } : null,
     });
     setText('addr', `Глибина ${g.d} · всесвіт ${fmtN(g.n)} · ${clockStr(sk.phase)}${L.sky.lock ? ' (вічно)' : ''}`);
     const an = g.ph && g.ph.anom ? ` · аномалія ×${g.ph.anom.toFixed(1).replace('.', ',')}` : '';

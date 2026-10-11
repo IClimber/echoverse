@@ -2,7 +2,7 @@
 // Без DOM. Стрибків скільки завгодно, але кожен — CHARGE с заряджання (повторне натискання скасовує).
 // Координати зберігаються; якщо там, куди потрапиш, не можна стояти, — найближча клітинка, де можна, у радіусі
 // LAND_R; такої немає — вільне місце в тому самому стовпці (у рідині — пливеш, у повітрі — падаєш). Стрибок вдається завжди.
-import { standable, hits } from './player.js';
+import { standableB, hitsB, settle } from './player.js';
 import { LEVEL } from './iso.js';
 import { KMIN, KMAX } from './universe.js';
 
@@ -20,25 +20,30 @@ OFFS.sort((a, b) => (a[0] * a[0] + a[1] * a[1]) - (b[0] * b[0] + b[1] * b[1]) ||
 // Спершу — найближче місце, де можна стояти: по стовпцях від найближчих, у кожному — висота, найближча до z
 // (не вище +8 і не нижче −16 блоків), і хоч на одного сусіда можна перейти (не стовп у ямі). Немає — вільне місце
 // в тому самому стовпці в межах тих самих висот (рідина, повітря над урвищем), зрештою — перше вільне вище (ноги
-// в товщі гори — на її поверхню, а не в печеру під нею). Повертає [x, y, z]
+// в товщі гори — на її поверхню, а не в печеру під нею). Шукає по блоках (швидко й детерміновано), потім ставить ноги
+// на видиму поверхню (settle). Повертає [x, y, z]
 export function landing(P, x, y, z, ph = { up: 1 }) {
+  const [lx, ly, lz] = landingB(P, x, y, z, ph);
+  return settle(P, lx, ly, lz);
+}
+function landingB(P, x, y, z, ph) {
   const fx = Math.floor(x), fy = Math.floor(y), kp = Math.max(KMIN + 2, Math.round(z / LEVEL));
   const exit = (cx, cy, zz) => [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([ax, ay]) => {
-    for (let q = -16; q <= ph.up; q++) if (standable(P, cx + ax, cy + ay, zz + q * LEVEL)) return true;
+    for (let q = -16; q <= ph.up; q++) if (standableB(P, cx + ax, cy + ay, zz + q * LEVEL)) return true;
     return false;
   });
-  if (standable(P, x, y, kp * LEVEL) && exit(x, y, kp * LEVEL)) return [x, y, kp * LEVEL];
+  if (standableB(P, x, y, kp * LEVEL) && exit(x, y, kp * LEVEL)) return [x, y, kp * LEVEL];
   for (const [dx, dy] of OFFS) {
     const cx = fx + dx + 0.5, cy = fy + dy + 0.5;
     for (let s = 0; s <= 16; s++) for (const k of s ? [kp + s, kp - s] : [kp]) {
       if (k < kp - 16 || k > kp + 8 || k < KMIN) continue;
-      if (standable(P, cx, cy, k * LEVEL) && exit(cx, cy, k * LEVEL)) return [cx, cy, k * LEVEL];
+      if (standableB(P, cx, cy, k * LEVEL) && exit(cx, cy, k * LEVEL)) return [cx, cy, k * LEVEL];
     }
   }
   for (let s = 0; s <= 16; s++) for (const k of s ? [kp + s, kp - s] : [kp]) {
-    if (k >= KMIN && !hits(P, x, y, k * LEVEL)) return [x, y, k * LEVEL];
+    if (k >= KMIN && !hitsB(P, x, y, k * LEVEL)) return [x, y, k * LEVEL];
   }
-  for (let k = kp + 17; k <= KMAX; k++) if (!hits(P, x, y, k * LEVEL)) return [x, y, k * LEVEL];
+  for (let k = kp + 17; k <= KMAX; k++) if (!hitsB(P, x, y, k * LEVEL)) return [x, y, k * LEVEL];
   return [x, y, (KMAX + 1) * LEVEL];
 }
 

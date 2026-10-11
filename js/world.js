@@ -7,7 +7,7 @@ import { lawsOf, physOf, KMIN, KMAX } from './universe.js';
 import { CS, ci, bv, solidB, blocks, genColumn, B_AIR, B_STONE, O_FLOAT, SEC } from './gen/chunk.js';
 import { LEVEL } from './iso.js';
 import { createGen } from './gen/client.js';
-import { standable, GRAVITY, PLAYER_MASS, PLAYER_AREA } from './player.js';
+import { standableB, GRAVITY, PLAYER_MASS, PLAYER_AREA } from './player.js';
 import { floatPose } from './gen/mesh.js';
 import { footprint } from './gen/plants.js';
 import { makeBody, configureBodies, settle } from './engine/physics/bodies.js';
@@ -110,7 +110,7 @@ export function createWorld(seed, onMesh) {
   }
   const gen = createGen(seed, (key, q, data, mesh, ms) => {
     genMs += ms; genN++;
-    if (q.type === 'col') { colTimes.push(performance.now()); addCol(data); W.dirty = true; return; }
+    if (q.type === 'col') { colTimes.push(performance.now()); addCol(data); W.dirty = true; W.ver++; return; }
     if (q.type === 'far') {
       fars.delete(key); fars.set(key, data); onMesh('far', q.d, q.n, key, q, data, mesh);
       if (fars.size > keep.fars) for (const k of fars.keys()) { if (fars.size <= keep.fars * 0.9) break; fars.delete(k); }
@@ -122,12 +122,14 @@ export function createWorld(seed, onMesh) {
     if (was) { was.dead = true; U.secs.delete(k); } else nSecs++;
     data.used = ++stamp;
     U.secs.set(k, data);
+    W.ver++;
     onMesh('sec', q.d, q.n, k, q, data, mesh);
     nSecs = trim('secs', nSecs, keep.secs);
   });
 
   // Стовпець і секція точки; останні знайдені пам'ятаємо (фізика питає сусідні блоки підряд)
   let lastC = null, lastS = null;
+  const probes = new Map();
   const colOf = (d, n, x, y) => {
     const cx = Math.floor(x / CS), cy = Math.floor(y / CS);
     if (lastC && lastC.cx === cx && lastC.cy === cy && lastC.d === d && lastC.n === n && !lastC.dead) return lastC;
@@ -196,12 +198,22 @@ export function createWorld(seed, onMesh) {
     // Реєстр сутностей всесвіту (d, n)
     ents: (d, n) => entsOf(d, n),
     // «Щуп» для фізики гравця у всесвіті (d, n) — див. player.js
+    // Той самий об'єкт для всесвіту (4 останні): у ньому живе кеш зіткнень (collision.js). sec — секція з блоками
+    // (швидкий шлях зіткнень), ver — лічильник прийнятих стовпців і секцій (віртуальні секції з невідомим перебудовуються)
     probe(d, n) {
-      return {
-        liquid: W.laws(d, n).liquid, block: (x, y, k) => W.block(d, n, x, y, k), obj: (x, y) => W.obst(d, n, x, y), get objR() { return objR; },
-        bodies: (x, y) => W.bodiesNear(d, n, x, y, 2),
+      const k = `${d}:${n}`;
+      let P = probes.get(k);
+      if (P) { probes.delete(k); probes.set(k, P); return P; }
+      const L = W.laws(d, n);
+      P = {
+        liquid: L.liquid, laws: L, block: (x, y, k) => W.block(d, n, x, y, k), obj: (x, y) => W.obst(d, n, x, y), get objR() { return objR; },
+        bodies: (x, y, r = 2) => W.bodiesNear(d, n, x, y, r), sec: (cx, cy, cz) => W.sec(d, n, cx, cy, cz), ver: () => W.ver,
       };
+      probes.set(k, P);
+      if (probes.size > 4) probes.delete(probes.keys().next().value);
+      return P;
     },
+    ver: 0,
     wantCol(d, n, cx, cy, pri) { const key = `c${d}:${n}:${cx}:${cy}`; gen.want(key, { type: 'col', d, n, cx, cy }, pri); return key; },
     // Плитка далечі (крок s): запит (готова — far(key): zmin, zmax; меш — у рендері), ключ
     wantFar(d, n, tx, ty, s, pri) { const key = `f${d}:${n}:${tx}:${ty}:${s}`; gen.want(key, { type: 'far', d, n, tx, ty, s }, pri); return key; },
@@ -239,10 +251,10 @@ export function findSpawn(seed, d = 0, n = 0, maxR = 200) {
       const c = col(dx, dy), k = surf(c);
       if (k < 0 || !solidB(c.at(k))) continue;
       const z = (k + 1) * LEVEL, x = dx + 0.5, y = dy + 0.5;
-      if (!standable(P, x, y, z)) continue;
+      if (!standableB(P, x, y, z)) continue;
       let exits = 0;
       for (const [ax, ay] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        for (let s = -16; s <= ph.up; s++) if (standable(P, x + ax, y + ay, z + s * LEVEL)) { exits++; break; }
+        for (let s = -16; s <= ph.up; s++) if (standableB(P, x + ax, y + ay, z + s * LEVEL)) { exits++; break; }
       }
       if (exits >= 2) return [x, y, z];
     }
