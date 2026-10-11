@@ -708,6 +708,26 @@ test('перша особа: цикл V, погляд — куди оберне�
   }
 });
 
+test('руки першої особи: viewArms читає зі стану гравця лише VIEW_KEYS — знімок для сцени дає те саме, що повний стан', async () => {
+  const { viewArms, animate, VIEW_KEYS } = await import('../js/anim.js');
+  const { createCamera, basis, FIRST, FOV1 } = await import('../js/camera.js');
+  const b = basis(createCamera(FIRST));
+  const states = [
+    { swim: true, moving: true }, { dive: true, wet: true, ground: true, moving: true }, { wet: true, ground: true, moving: true },
+    { climb: { kind: 'wall', nx: 1, ny: 0 }, climbD: 0.7, moving: true }, { climb: { kind: 'ladder', nx: 0, ny: 1 }, climbD: 0.3 },
+    { carry: true }, { pose: 'crawl', moving: true }, { pose: 'swim', wet: true, moving: true }, { fly: true }, { moving: true },
+  ];
+  for (const st of states) {
+    const me = { x: 0, y: 0, z: 0, yaw: 0.4, vx: 1, vy: 0, vz: -0.3, pose: 'stand', look: { p: 0, y: 0 }, ...st };
+    for (let i = 0; i < 40; i++) animate(me, 1 / 60, i * 16.7);
+    const read = new Set(), spy = new Proxy(me, { get: (t, k) => { read.add(k); return t[k]; } });
+    const full = viewArms(me.anim, spy, b, [0, 0, 1], 16 / 9, FOV1);
+    for (const k of read) assert.ok(VIEW_KEYS.includes(k), `viewArms читає «${String(k)}», а в VIEW_KEYS його немає (${JSON.stringify(st)})`);
+    const snap = Object.fromEntries(VIEW_KEYS.map((k) => [k, me[k]])), part = viewArms(me.anim, snap, b, [0, 0, 1], 16 / 9, FOV1);
+    assert.deepEqual(part, full, JSON.stringify(st));
+  }
+});
+
 test('у товщі породи (телепорт, секцію догенеровано) — нагору до першого вільного місця, а не крізь породу в печеру під нею', () => {
   const P = { liquid: { swim: true }, obj: () => null, block: (x, y, k) => k >= 6 && k < 10 ? B_AIR : k < 20 ? B_STONE : B_AIR };
   const p = { x: 5.5, y: 5.5, z: 6, vz: 0, ground: false };

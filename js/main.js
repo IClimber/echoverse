@@ -17,7 +17,7 @@ import { GEN, SEA, physOf, physAt } from './universe.js';
 import { CS, SEC, B_LIQ, B_MAGMA, solidB, BLOCK_NAMES } from './gen/chunk.js';
 import { LEVEL } from './iso.js';
 import { debugText, fmtN } from './debug.js';
-import { animate } from './anim.js';
+import { animate, VIEW_KEYS } from './anim.js';
 import { clockStr, skyState, lightsOf } from './sky.js';
 import { weatherAt, localWeather, areaClimate } from './weather.js';
 import { createCamera, rotate, wheel, smooth, moveBasis, camHead, camCollide, camDist, facing, setYaw, basis, pitchOf, setViewChunks, setLod, setFloraNear, ISO, THIRD, FIRST, NEXT, LIMITS, HEAD, EYE, EYE_OF, HEAD_OF, VIEW_R } from './camera.js';
@@ -791,7 +791,8 @@ function boot(renderer) {
     const sk = renderer.draw({
       lines, under: g.under ? L.liquid : null, skyOpen: (x, y, z) => g.world.skyOpen(g.d, g.n, x, y, z),
       camera, target: g.cam, view: g.view, laws: L, far: g.far, clock: g.clock, bodies, aim: g.aimFx === false ? null : g.aim, weather: { W: loc.W, loc }, rain: me.placed && loc.type ? rainMap(now) : null,
-      me: me.placed ? { x: fx, y: fy, z: fz, yaw: me.yaw, swim: me.swim, fly: me.fly, anim, ao: g.world.skyOpen(g.d, g.n, fx, fy, fz + 0.5) } : null,
+      // вигляд гравця: положення — інтерпольоване, стан — усе, що читають руки першої особи (VIEW_KEYS у anim.js)
+      me: me.placed ? { ...Object.fromEntries(VIEW_KEYS.map((k) => [k, me[k]])), x: fx, y: fy, z: fz, anim, ao: g.world.skyOpen(g.d, g.n, fx, fy, fz + 0.5) } : null,
     });
     setText('addr', g.rec.stand ? `Стенд руху · g ${gStr(L)} · тертя ${String(+L.phys.friction.toFixed(2)).replace('.', ',')}${wOver === 'rain' ? ' · дощ' : ''}`
       : `Глибина ${g.d} · всесвіт ${fmtN(g.n)} · ${clockStr(sk.phase)}${L.sky.lock ? ' (вічно)' : ''}`);
