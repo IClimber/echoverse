@@ -22,7 +22,9 @@ export const GRAVITY = 25.6;         // прискорення при 1 g, од�
 export const JUMP_V = 7.67;          // поштовх стрибка: при 1 g — 1,15 одиниці (2 блоки) і 0,6 с у повітрі
 export const FLOAT_Z = 0.6;          // той, хто пливе у воді, тримається ногами на стільки нижче поверхні (густіша — вище)
 export const SPRINT = 1.6;           // біг (Shift): множник швидкості пішки (у воді — половина надбавки)
-export const FLY_SPEED = 12;         // політ: клітинок за секунду по горизонталі
+// Політ: клітинок за секунду по горизонталі, з Shift. ТИМЧАСОВО на час розробки (користувач, 11.10.2026) — 48 / 120;
+// у грі повернути 12 / 24 (×2, як у Minecraft) — docs/roadmap.md, «Інше»
+export const FLY_SPEED = 48, FLY_FAST = 120;
 export const FLY_V = 8;              // політ: швидкість угору / униз
 const FLY_TOP = 2040;                // політ: вище цієї висоти не піднятися (майже верх світу)
 const CLIMB_OUT = 2;                 // з рідини можна вилізти на берег до 2 блоків над її поверхнею
@@ -582,7 +584,7 @@ function fly(p, ix, iy, dt, P, C, ph, mb, vert, fast) {
   p.moving = !!(ix || iy);
   if (p.moving) {
     let vx = ix * mb[0][0] + iy * mb[1][0], vy = ix * mb[0][1] + iy * mb[1][1];
-    const l = Math.hypot(vx, vy), sp = FLY_SPEED * (fast ? 2 : 1) * dt / l;
+    const l = Math.hypot(vx, vy), sp = (fast ? FLY_FAST : FLY_SPEED) * dt / l;
     vx *= sp; vy *= sp;
     p.yaw = Math.atan2(vy, vx);
     moveAir(C, sh, p, vx, vy, 0, 2);

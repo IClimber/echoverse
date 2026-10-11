@@ -291,8 +291,8 @@ test('біг і політ: Shift — швидше; у польоті без г�
   for (let i = 0; i < 60; i++) step(p, 0, 0, false, 1 / 60, P, PH1);
   assert.equal(p.z, zh);                                   // без гравітації
   const x0 = p.x, y0 = p.y;
-  for (let i = 0; i < 30; i++) step(p, 1, 0, false, 1 / 60, P, PH1);
-  assert.ok(Math.abs(Math.hypot(p.x - x0, p.y - y0) - FLY_SPEED * 0.5) < 1e-6);
+  for (let i = 0; i < 10; i++) step(p, 1, 0, false, 1 / 60, P, PH1);   // 1/6 с: карта 20 клітинок
+  assert.ok(Math.abs(Math.hypot(p.x - x0, p.y - y0) - FLY_SPEED / 6) < 1e-6);
   for (let i = 0; i < 120; i++) step(p, 0, 0, false, 1 / 60, P, PH1, undefined, { vert: -1 });
   assert.ok(!p.fly && p.ground && Math.abs(p.z - z0) < 1e-9);
   // у стіну не влетиш

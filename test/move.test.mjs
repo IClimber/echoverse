@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { LEVEL } from '../js/iso.js';
-import { step, hits, shapeOf, slideZ, SPEED, SNEAK, PH1, FOOT, CLIMB_V, SPRINT, FLY_SPEED, FLOAT_Z } from '../js/player.js';
+import { step, hits, shapeOf, slideZ, SPEED, SNEAK, PH1, FOOT, CLIMB_V, SPRINT, FLY_SPEED, FLY_FAST, FLOAT_Z } from '../js/player.js';
 import { B_AIR, B_LIQ, B_GRASS, B_STONE, B_ICE, B_LADDER, B_VINE, solidB } from '../js/gen/chunk.js';
 
 const X = [[1, 0], [0, 1]];                  // базис руху: праворуч = +x, униз екрана = +y (iy −1 — уздовж −y)
@@ -227,16 +227,16 @@ test('під водою щілину в 1 блок пропливаєш біго
   assert.ok(t.x < 10, `без бігу: ${t.x}`);
 });
 
-test('політ: Ctrl — униз, пробіл — угору, Shift — по горизонталі вдвічі швидше', () => {
+test('політ: Ctrl — униз, пробіл — угору, Shift — по горизонталі швидше (FLY_FAST)', () => {
   const F = box((x, y, k) => k < 2 ? B_STONE : B_AIR), p = man(0.5, 0.5, 10);
   p.fly = true; p.ground = false;
   go(p, F, 60, 0, 0, { vert: -1, crouch: true });
   assert.ok(p.z < 10 - 3.9 && p.fly, `Ctrl: ${p.z}`);
   go(p, F, 60, 0, 0, { vert: 1 });
   assert.ok(p.z > 9.9, `пробіл: ${p.z}`);
-  const a = p.x; go(p, F, 120, 1, 0);
-  const b = p.x; go(p, F, 120, 1, 0, { sprint: true });
-  assert.ok(Math.abs((p.x - b) / (b - a) - 2) < 0.04 && Math.abs(b - a - FLY_SPEED) < 0.01, `Shift: ${b - a} → ${p.x - b}`);
+  const a = p.x; go(p, F, 20, 1, 0);                 // 1/6 с: карта ±40, а політ — до 120 клітинок/с
+  const b = p.x; go(p, F, 20, 1, 0, { sprint: true });
+  assert.ok(Math.abs((p.x - b) / (b - a) - FLY_FAST / FLY_SPEED) < 0.04 && Math.abs(b - a - FLY_SPEED * 20 * DT) < 0.01, `Shift: ${b - a} → ${p.x - b}`);
 });
 
 test('фігура: голова — за поглядом; присів — ступні на землі й нижче; лежить — горизонтально над капсулою; на стіні — обличчям до неї', async () => {
