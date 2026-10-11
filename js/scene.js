@@ -669,11 +669,14 @@ export async function createScene(canvas, settings = {}) {
                 const fx = lod === 0 && dn < FLORA_NEAR && Un.flora.has(ck(E.cx, E.cy));
                 const nf = fx && colFar(ax, ay) < FLORA_NEAR - FLORA_FADE ? 0 : sl.nf;
                 const nc = lod > 0 && (lod !== want || dn < LOD_R[lod - 1] + LOD_CAP) ? sl.nc : 0;
-                let j = ring ? L_RING : L_PLAIN;
-                if (!ring && cut && (iso || dn <= camD + 8) && cutHit(m, cut, ox + c[0], oy + c[1], oz + c[2], ox + c[3], oy + c[4], oz + c[5])) j = L_CUT;
-                if (sl.ns) pushR(j, seg[j * 2], sl.off, sl.ns);
-                if (nc) pushR(j, seg[j * 2], sl.off + sl.ns + sl.nf, nc);
-                if (nf) { const jo = fx ? L_OBJF : L_OBJ + j; pushR(jo, seg[jo * 2], sl.off + sl.ns, nf); }
+                // «вікно»: рослини — завжди; земля — лише згори (у третій особі камера з землею зіштовхується — лінія до
+                // гравця вільна, а вікно в землі лише прорізало б стіни біля камери в тісній печері)
+                const j = ring ? L_RING : L_PLAIN;
+                const jc = !ring && cut && (iso || dn <= camD + 8) && cutHit(m, cut, ox + c[0], oy + c[1], oz + c[2], ox + c[3], oy + c[4], oz + c[5]) ? L_CUT : j;
+                const js = iso ? jc : j;
+                if (sl.ns) pushR(js, seg[js * 2], sl.off, sl.ns);
+                if (nc) pushR(js, seg[js * 2], sl.off + sl.ns + sl.nf, nc);
+                if (nf) { const jo = fx ? L_OBJF : L_OBJ + jc; pushR(jo, seg[jo * 2], sl.off + sl.ns, nf); }
               }
             }
             if (sl.loff >= 0 && sl.lbb) {
@@ -742,7 +745,7 @@ export async function createScene(canvas, settings = {}) {
       // як на землі поруч
       if (me) { const ao = me.ao ?? 1; figMI.setParameter('eco_ao', ao); armsMI.setParameter('eco_ao', ao); }
       figSh.visible = !!me;
-      figMI.visible = !!me && !first && (view.ortho || camD > 0.7);
+      figMI.visible = !!me && !first && (view.ortho || camD > 0.9);
       armsMI.visible = !!me && first;
       if (armsMI.visible) arms.pose(viewArms(me.anim, me, b, [t[0] + e[0] - G.O[0], t[1] + e[1] - G.O[1], t[2] + e[2]], G.width / G.height, fovOf(st.camera)));
 
