@@ -145,9 +145,12 @@ export function viewArms(a, me, b, eye, aspect, fovY) {
     if (me.climb) { nx = s * 0.45; ny = -0.1 + 0.25 * alt; d = 0.35; }
     else if (me.carry) { nx = s * 0.35; ny = -0.55; d = 0.5; }
     else if (me.pose === 'crawl') { nx = s * 0.5; ny = -0.85; d = 0.35 + 0.1 * alt; }
-    else if ((me.dive || me.pose === 'swim') && me.moving) {
+    else if ((me.swim || me.dive) && me.moving || me.pose === 'swim') {   // ті самі умови, що й брас фігури (animate)
       const t = a.phase || 0, k = t < Math.PI ? (1 - Math.cos(t)) / 2 : (1 + Math.cos(t)) / 2;   // гребок: з центру в сторони й назад
       nx = s * (0.1 + 0.7 * k); ny = -0.4 - 0.2 * k; d = ARM_D;
+    } else if (me.swim || me.dive) {                                     // на місці — руки повільно розводяться, як у фігури
+      const w = Math.sin(a.phase || 0);
+      nx = s * (0.45 + 0.15 * w); ny = -0.55 + 0.05 * w; d = ARM_D;
     }
     const kx = nx * ty * aspect * d, ky = ny * ty * d;
     const H = [0, 1, 2].map((i) => eye[i] - u[i] * d + r[i] * kx + up[i] * ky);
