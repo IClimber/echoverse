@@ -235,7 +235,7 @@ export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
       const r = moveH(C, SHAPE, p, dx, dy, { step: up, walkZ: walkZ(ph), standZ: STAND_Z, floorN: p.ground ? p.floorN : null, round });
       walls = r.walls;
       if (r.stepped > 0) { if (r.stepped > 0.05) p.stepOff -= r.stepped; p.offX -= r.ex; p.offY -= r.ey; p.vz = 0; p.ground = true; }
-    } else walls = moveAir(C, SHAPE, p, dx, dy, 0, STAND_Z).walls;
+    } else walls = moveAir(C, SHAPE, p, dx, dy, 0, STAND_Z, walkZ(ph)).walls;
     for (const [nx, ny] of walls) { const d = p.vx * nx + p.vy * ny; if (d < 0) { p.vx -= d * nx; p.vy -= d * ny; } }   // складова в стіну гасне
   }
   // Вертикаль: у рідині, що тримає, — виштовхує до поверхні (м'яка пружина); у рідкій, що не тримає, — повільно

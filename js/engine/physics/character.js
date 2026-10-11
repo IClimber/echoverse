@@ -114,9 +114,18 @@ export const stands = (f, standZ) => !!f && (f.nz >= standZ || (!!f.nU && f.nU[2
 const walks = (f, walkZ) => !!f && (f.nz >= walkZ || (!!f.nU && f.nU[2] >= walkZ));
 
 // Ковзання в повітрі на (dx, dy, dz), до 4 відбиттів. Повертає дотики: floor (дотик з n_z ≥ standZ), ceil, walls
-// ([[nx, ny], …] горизонтальні нормалі)
-export function moveAir(src, sh, s, dx, dy, dz, standZ) {
+// ([[nx, ny], …] горизонтальні нормалі). walkZ (падіння, не політ): ковзання вздовж непрохідної поверхні (n_z < walkZ)
+// не піднімає вище, ніж ішов сам рух, — як HandleSlopeBoosting в Unreal (CharacterMovementComponent: «don't move any
+// higher than we originally intended») і «remove the vertical tangent motion induced by the forward motion» у Rapier:
+// інакше стрибок із розбігу в крутий схил підкидав на третину вище за стрибок.
+// Площини дотиків одного виклику пам'ятаються (J. Linahan, «Improving the Numerical Robustness of Sphere Swept Collision
+// Detection», 2012; TwoWallAdjust в Unreal): друга, ковзання вздовж якої веде назад у першу, — рух лише вздовж їхньої складки
+// (n1 × n2); третя — стоп. І залишок проти початкового напрямку — стоп (Quake, PM_SlideMove: «stop dead to avoid tiny
+// occilations in sloping corners»). Інакше в куті форма щокроку перескакувала між площинами (тремтіння)
+export function moveAir(src, sh, s, dx, dy, dz, standZ, walkZ = null) {
   const res = { floor: null, ceil: false, walls: [] };
+  const ox = dx, oy = dy, oz = dz;
+  let p1 = null, np = 0;
   for (let it = 0; it < 4; it++) {
     const len = Math.hypot(dx, dy, dz);
     if (len < 1e-9) break;
@@ -129,7 +138,31 @@ export function moveAir(src, sh, s, dx, dy, dz, standZ) {
     else if (h.nz < -0.3) res.ceil = true;
     else { const l = Math.hypot(h.nx, h.ny); if (l > 1e-6) res.walls.push([h.nx / l, h.ny / l]); }
     const dn = dx * h.nx + dy * h.ny + dz * h.nz;
-    if (dn < 0) { dx -= dn * h.nx; dy -= dn * h.ny; dz -= dn * h.nz; }
+    if (dn < 0) {
+      const z0 = dz;
+      dx -= dn * h.nx; dy -= dn * h.ny; dz -= dn * h.nz;
+      if (p1 && dx * p1[0] + dy * p1[1] + dz * p1[2] < -1e-12) {
+        // назад у попередню площину — уздовж складки; третя площина чи складка вгору понад рух (падіння) — стоп
+        let cx = p1[1] * h.nz - p1[2] * h.ny, cy = p1[2] * h.nx - p1[0] * h.nz, cz = p1[0] * h.ny - p1[1] * h.nx;
+        const cl = Math.hypot(cx, cy, cz);
+        if (np >= 2 || cl < 1e-9) { dx = dy = dz = 0; break; }
+        cx /= cl; cy /= cl; cz /= cl;
+        const along = dx * cx + dy * cy + dz * cz;
+        dx = along * cx; dy = along * cy; dz = along * cz;
+        if (walkZ !== null && dz > Math.max(0, z0) + 1e-9) { dx = dy = dz = 0; break; }
+        np++;
+        continue;
+      }
+      p1 = [h.nx, h.ny, h.nz]; np = 1;
+      if (walkZ !== null && h.nz < walkZ && dz > Math.max(0, z0) + 1e-9) {
+        // угору — не більше, ніж ішов рух: увесь вектор пропорційно (інакше знову в поверхню), решта — по горизонталі
+        // вздовж горизонтальної нормалі
+        const k = z0 > 0 ? z0 / dz : 0, rx = dx * (1 - k), ry = dy * (1 - k), l = Math.hypot(h.nx, h.ny);
+        dx *= k; dy *= k; dz *= k;
+        if (l > 1e-6) { const nx = h.nx / l, ny = h.ny / l, d = rx * nx + ry * ny; dx += rx - Math.min(0, d) * nx; dy += ry - Math.min(0, d) * ny; }
+      }
+    }
+    if (dx * ox + dy * oy + dz * oz <= 0) break;                            // проти початкового напрямку — стоп
   }
   return res;
 }
@@ -158,8 +191,13 @@ export function moveH(src, sh, s, dx, dy, o) {
     if (l < 1e-6) { fn = null; continue; }                                  // стеля над схилом — далі по горизонталі
     const nx = h.nx / l, ny = h.ny / l, d = rx * nx + ry * ny;
     res.walls.push([nx, ny]);
+    const prev = last;
     last = { nx, ny, ref: h.ref };
     if (d < 0) { rx -= d * nx; ry -= d * ny; } else fn = null;
+    // друга стіна, ковзання вздовж якої веде назад у першу, — кут: складка двох стін вертикальна, по горизонталі — стоп
+    // (Linahan 2012, TwoWallAdjust в Unreal; без цього в тупому куті форма щокроку перескакувала між стінами)
+    if (prev && rx * prev.nx + ry * prev.ny < -1e-12) { rx = ry = 0; break; }
+    if (rx * dx + ry * dy <= 0) { rx = ry = 0; break; }                     // проти початкового напрямку — стоп (Quake)
   }
   // уперся й майже не зрушив: лобом у круглу перешкоду — уздовж дотичної (обходиш збоку; точно в центр — ліворуч),
   // інакше — запасний хід по осях, як у блоковому світі (у кут — ні)

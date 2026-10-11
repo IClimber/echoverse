@@ -177,3 +177,41 @@ test('підлога на вершині й гребені похилих три
   const g = findFloor(src, sh, 0.5, 0.5, 2, 3);
   assert.ok(g && g.z > 0.7 && g.z <= 1, `гребінь: ${g && g.z}`);
 });
+
+// джерело трикутників для контролера з готового списку (без гри)
+const srcOf = (T) => ({ gather: (x0, y0, z0, x1, y1, z1, L) => { for (let i = 0; i < T.n; i++) { const o = i * 12; pushTri(L, ...T.t.subarray(o, o + 9), T.ref[i], T.t[o + 9], T.t[o + 10], T.t[o + 11]); } return L; }, solidAt: () => false });
+
+test('у повітрі ковзання вздовж непрохідного схилу не підкидає вгору (HandleSlopeBoosting); прохідний — можна', async () => {
+  const { capsule, moveAir } = await import('../js/engine/physics/character.js');
+  const sh = capsule(0.24, 0.98);
+  for (const deg of [55, 65, 75, 30]) {
+    const T = createList(), k = Math.tan(deg * Math.PI / 180);
+    pushTri(T, 2, -20, 0, 12, -20, 10 * k, 12, 20, 10 * k, null, -1, 0, 1); pushTri(T, 2, -20, 0, 12, 20, 10 * k, 2, 20, 0, null, -1, 0, 1);
+    const s = { x: 1.5, y: 0, z: 0.5 };
+    for (let i = 0; i < 60; i++) moveAir(srcOf(T), sh, s, 0.06, 0, 0, 0.17, Math.cos(50 * Math.PI / 180));
+    if (deg > 50) assert.ok(s.z < 0.5 + 1e-9, `${deg}°: піднявся до ${s.z}`);
+    else assert.ok(s.z > 1, `${deg}°: прохідний, а не піднявся (${s.z})`);
+  }
+});
+
+test('у куті (дві стіни, будь-який розхил) форма завмирає, а не перескакує щокроку між стінами (Linahan 2012, Quake)', async () => {
+  const { capsule, moveH, moveAir } = await import('../js/engine/physics/character.js');
+  const sh = capsule(0.24, 0.98);
+  for (const half of [10, 35, 60, 80]) {
+    const T = createList(), a = half * Math.PI / 180;
+    pushTri(T, -20, -20, 0, 20, -20, 0, 20, 20, 0, null, 0, 0, 1); pushTri(T, -20, -20, 0, 20, 20, 0, -20, 20, 0, null, 0, 0, 1);
+    for (const sg of [1, -1]) {
+      const bx = 5 - 10 * Math.cos(a), by = sg * 10 * Math.sin(a), hx = -Math.sin(a), hy = -sg * Math.cos(a);
+      pushTri(T, 5, 0, 0, bx, by, 0, bx, by, 3, null, hx, hy, 0); pushTri(T, 5, 0, 0, bx, by, 3, 5, 0, 3, null, hx, hy, 0);
+    }
+    for (const mode of ['h', 'air']) {
+      const s = { x: 2, y: 0.05, z: mode === 'h' ? 0 : 1 }, seen = new Set();
+      for (let i = 0; i < 300; i++) {
+        if (mode === 'h') moveH(srcOf(T), sh, s, 0.05, 0.004, { step: 0.5, walkZ: 0.64, standZ: 0.17, floorN: [0, 0, 1], round: () => false });
+        else moveAir(srcOf(T), sh, s, 0.05, 0.004, 0, 0.17, 0.64);
+        if (i >= 280) seen.add(`${s.x.toFixed(6)},${s.y.toFixed(6)}`);
+      }
+      assert.equal(seen.size, 1, `розхил ${2 * half}°, ${mode}: ${[...seen].join(' | ')}`);
+    }
+  }
+});
