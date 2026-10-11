@@ -135,9 +135,12 @@ export function poseMatrices(a, ox, oy, oz, yaw) {
 // Стіна й драбина — кисті вгорі поперемінно; тіло в руках — обидві ближче до центру; лежачи — унизу поперемінно; під
 // рідиною — брасом (з центру в сторони)
 const ARM_D = 0.45;
+const ARM_L = 0.3 * FIG_K, SH_R = 0.2, SH_UP = -0.22, SH_F = 0.25, SQ_UP = 0.35;   // у рідині: довжина руки, плече відносно ока (праворуч, угору, уперед — винесено в кадр, як руки першої особи в іграх)
 export function viewArms(a, me, b, eye, aspect, fovY) {
   const ty = Math.tan(fovY / 2), { r, up, u } = b, low = me.swim || me.fly ? 0.05 : 0;
   const out = {};
+  // у рідині (пливе, під рідиною, ще лежить після плавання) — руки за позою фігури, як її тінь
+  const fig = !me.climb && !me.carry && (me.swim || me.dive || me.pose === 'swim' || (me.wet && a.lean > 0.5)) ? poseMatrices(a, 0, 0, 0, me.yaw) : null;
   for (const [part, s, py] of [['armR', 1, -PIVOT.armY], ['armL', -1, PIVOT.armY]]) {
     const sw = (part === 'armR' ? a.armR : -a.armL) * s || 0;
     let nx = s * 0.6, ny = -0.75 + 0.02 * sw / ty / ARM_D - low / ty / ARM_D, d = ARM_D - 0.015 * sw + (s > 0 ? 0.22 * (a.punch || 0) : 0) + 0.2 * (a.both || 0);
@@ -145,17 +148,24 @@ export function viewArms(a, me, b, eye, aspect, fovY) {
     if (me.climb) { nx = s * 0.45; ny = -0.1 + 0.25 * alt; d = 0.35; }
     else if (me.carry) { nx = s * 0.35; ny = -0.55; d = 0.5; }
     else if (me.pose === 'crawl') { nx = s * 0.5; ny = -0.85; d = 0.35 + 0.1 * alt; }
-    else if ((me.swim || me.dive) && me.moving || me.pose === 'swim') {   // ті самі умови, що й брас фігури (animate)
-      const t = a.phase || 0, k = t < Math.PI ? (1 - Math.cos(t)) / 2 : (1 + Math.cos(t)) / 2;   // гребок: з центру в сторони й назад
-      nx = s * (0.1 + 0.7 * k); ny = -0.4 - 0.2 * k; d = ARM_D;
-    } else if (me.swim || me.dive) {                                     // на місці — руки повільно розводяться, як у фігури
-      const w = Math.sin(a.phase || 0);
-      nx = s * (0.45 + 0.15 * w); ny = -0.55 + 0.05 * w; d = ARM_D;
+    let H, A;
+    if (fig) {
+      // у рідині — напрям руки фігури (ті самі згладжені кути, що й у тіні: брас, на місці, перехід на дно), плече — біля
+      // ока в кадрі; кисть — на довжину руки від плеча
+      // (рука фігури того самого боку екрана: трійка осей дзеркальна — ліва рука фігури праворуч у кадрі); вертикаль
+      // напрямку стиснуто (SQ_UP): гребок у сторони той самий, а рука під тілом не ховається глибоко під кадр
+      const m = fig[s > 0 ? 'armL' : 'armR'];
+      const dr = -(m[8] * r[0] + m[9] * r[1] + m[10] * r[2]), du = -(m[8] * up[0] + m[9] * up[1] + m[10] * up[2]) * SQ_UP;
+      const df = m[8] * u[0] + m[9] * u[1] + m[10] * u[2], dl = Math.hypot(dr, du, df) || 1;
+      A = [0, 1, 2].map((i) => -(r[i] * dr + up[i] * du - u[i] * df) / dl);   // від кисті до плеча
+      const S = [0, 1, 2].map((i) => eye[i] + r[i] * s * SH_R + up[i] * SH_UP - u[i] * SH_F);
+      H = [0, 1, 2].map((i) => S[i] - A[i] * ARM_L);
+    } else {
+      const kx = nx * ty * aspect * d, ky = ny * ty * d;
+      H = [0, 1, 2].map((i) => eye[i] - u[i] * d + r[i] * kx + up[i] * ky);
+      A = [0, 1, 2].map((i) => s * 0.35 * r[i] - 0.45 * up[i] + u[i]);
+      const al = Math.hypot(...A); A = A.map((v) => v / al);
     }
-    const kx = nx * ty * aspect * d, ky = ny * ty * d;
-    const H = [0, 1, 2].map((i) => eye[i] - u[i] * d + r[i] * kx + up[i] * ky);
-    let A = [0, 1, 2].map((i) => s * 0.35 * r[i] - 0.45 * up[i] + u[i]);
-    const al = Math.hypot(...A); A = A.map((v) => v / al);
     const fa = -(u[0] * A[0] + u[1] * A[1] + u[2] * A[2]);
     let X = [0, 1, 2].map((i) => -u[i] - fa * A[i]);
     const xl = Math.hypot(...X); X = X.map((v) => v / xl);
