@@ -137,3 +137,26 @@ test('тіло в руках: чи піднімеш — від ваги (мас�
     if (m === 45) assert.ok(Math.abs(vl - HIT_IMPULSE / s.mass * Math.hypot(d[0], d[1], d[2] + 0.25)) < 1e-6, 'важче — імпульс / маса');
   }
 });
+
+test('F3: рядок цілі — для кожного предмета будь-якого всесвіту, з назвою (камінь — стиль: брила, колода…)', async () => {
+  // 12.10.2026: у каменю форма виду 'stone', якої немає у FORMS — рядок кидав виняток і зупиняв цикл гри
+  const { aimLine } = await import('../js/debug.js');
+  const { lawsOf } = await import('../js/universe.js');
+  const { runJob } = await import('../js/gen/job.js');
+  const { O_FLOAT, O_ROCK } = await import('../js/gen/chunk.js');
+  const names = new Set();
+  for (const [d, n] of [[0, 51119], [4, 777], [8, -4242], [12, 99]]) {
+    const L = lawsOf(1178118268, d, n), cache = new Map();
+    for (const [cx, cy] of [[290, 391], [-111, 123], [0, 0]]) {
+      const C = runJob(L, { type: 'col', d, n, cx, cy }, cache).data;
+      C.cx = cx; C.cy = cy;
+      C.obj.forEach((o, i) => {
+        if (o.k === O_FLOAT) return;
+        const s = aimLine({ kind: 'obj', t: 1, obj: { o, C, i } }, 1);
+        assert.match(s, /^(камінь|дерево|рослина) \(.+\) · /, s);
+        if (o.k === O_ROCK) names.add(s);
+      });
+    }
+  }
+  assert.ok(names.size >= 1, 'каміння трапилось');
+});

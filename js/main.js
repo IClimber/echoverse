@@ -819,7 +819,12 @@ function boot(renderer) {
 
   // ================= Цикл =================
   let last = performance.now(), fpsT = last, fpsN = 0;
+  // Наступний кадр — у finally: виняток у кадрі (його видно в консолі) не зупиняє цикл гри. До 12.10.2026 виняток рядка
+  // «ціль» F3 зупиняв цикл — гра застигала з захопленою мишею, і здавалося, що зависла вкладка
   function frame(now) {
+    try { frameBody(now); } finally { raf(frame); }
+  }
+  function frameBody(now) {
     const dt = Math.min(0.1, (now - last) / 1000);
     frameT[frameI] = now - last; frameI = (frameI + 1) % frameT.length; frameN++;
     last = now;
@@ -834,7 +839,6 @@ function boot(renderer) {
     }
     fpsN++;
     if (now - fpsT > 500) { perf.fps = fpsN * 1000 / (now - fpsT); fpsN = 0; fpsT = now; }
-    raf(frame);
   }
   raf(frame);
   showMenu();

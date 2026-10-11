@@ -538,7 +538,7 @@ export function objPose(C, L, o) {
 export const stoneTemplate = (g, v) => template(g, v & 3, 0, styleOf(g, v));
 
 // Стиль каміння клітинки — з ваг стилів області
-function styleOf(g, v) {
+export function styleOf(g, v) {
   let sum = 0;
   for (const [, w] of g.styles) sum += w;
   let u = ((v * 2654435761 >>> 0) / 4294967296) * sum;

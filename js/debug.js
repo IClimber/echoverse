@@ -9,6 +9,7 @@ import { dayPhase, clockStr } from './sky.js';
 import { weatherAt, WEATHER_NAMES } from './weather.js';
 import { LEVEL } from './iso.js';
 import { LOD_ON } from './camera.js';
+import { styleOf } from './gen/mesh.js';
 import { stats as CST } from './collision.js';
 
 // Рельєф 3.1: скелі, родини кривої, ерозія, куести, останці, карст, рифти
@@ -36,14 +37,18 @@ function poseLine(me) {
   if ((me.stam ?? 1) < 1 || me.climb) s.push(`витривалість ${Math.round((me.stam ?? 1) * 100)} %${me.tired ? ' (втома)' : ''}`);
   return s.join(' · ');
 }
+const STONE_NAMES = { boulder: 'брила', slabs: 'плити', spire: 'шпиль', cairn: 'купа', geode: 'жеода', log: 'колода' };
 // Ціль: блок x y k вид / тіло m кг (можна взяти / заважко) / рослина (форма) / камінь; відстань
-function aimLine(a, gg) {
+export function aimLine(a, gg) {
   if (!a) return '—';
   const t = ` · ${a.t.toFixed(2).replace('.', ',')}`;
   if (a.kind === 'block') return `блок ${a.x} ${a.y} ${a.k}, ${BLOCK_NAMES[a.b]}${t}`;
   if (a.kind === 'body') { const q = canLift(a.body, gg); return `тіло ${Math.round(a.body.mass)} кг (${q.ok ? 'можна взяти' : 'заважко'})${t}`; }
-  const o = a.obj.o;
-  return (o.k === O_ROCK ? 'камінь' : o.k === O_TREE ? 'дерево' : 'рослина') + (a.obj.C.sp && a.obj.C.sp[o.s] ? ` (${FORMS[a.obj.C.sp[o.s].form].name})` : '') + t;
+  // у каменю форма виду — 'stone' (її немає у FORMS), вигляд — стиль (брила, колода…); до 12.10.2026 тут був виняток,
+  // і він зупиняв цикл гри
+  const o = a.obj.o, g = a.obj.C.sp && a.obj.C.sp[o.s];
+  const name = !g ? '' : o.k === O_ROCK ? STONE_NAMES[styleOf(g, o.v)] : FORMS[g.form] && FORMS[g.form].name;
+  return (o.k === O_ROCK ? 'камінь' : o.k === O_TREE ? 'дерево' : 'рослина') + (name ? ` (${name})` : '') + t;
 }
 
 export const fmtN = (n) => n > 0 ? '+' + n : n < 0 ? '−' + -n : '0';
