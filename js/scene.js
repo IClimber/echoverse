@@ -18,7 +18,7 @@ import { SEA, MAX_AMP } from './universe.js';
 import { figureParts } from './gen/mesh.js';
 import { poseMatrices } from './anim.js';
 import { skyState, applyWeather, lightsOf, pcIntensity } from './sky.js';
-import { ISO, VIEW_R, FAR_R, SEAM, viewProj, isoRadius, project, basis, aabbInView, aabbInside, LOD_R, LOD_CAP, LOD_ON, lodOf, keepLod, colDist, FLORA_NEAR, FLORA_THIN } from './camera.js';
+import { ISO, VIEW_R, FAR_R, SEAM, viewProj, isoRadius, project, basis, aabbInView, aabbInside, LOD_R, LOD_CAP, LOD_ON, lodOf, keepLod, colDist, FLORA_NEAR, FLORA_FADE, FLORA_THIN } from './camera.js';
 import { regionOf, RS, RW, RH, PO, PQ } from './gen/pack.js';
 import { ck } from './world.js';
 import { texturesOf, TEX } from './textures.js';
@@ -43,13 +43,13 @@ const PARTICLES = 6000;
 const rkey = (rx, ry, rz) => ((rx + 0x20000) * 0x40000 + (ry + 0x20000)) * 256 + (rz + 128);
 // Списки діапазонів на кадр: 0 — тверде біля «вікна», 1 — тверде, 2 — тверде на шві далечі (0–2 — з відсіканням задніх
 // граней), 3 — рідина, 4 — рідина на шві, 5 — рослини зблизька, 6–8 — далекі рослини й каміння секцій (пара до 0–2, без
-// відсікання: листя видно з обох боків)
-const L_CUT = 0, L_PLAIN = 1, L_RING = 2, L_LIQ = 3, L_LIQR = 4, L_FL = 5, L_OBJ = 6, NL = 9;
+// відсікання: листя видно з обох боків), 9 — далекі рослини секцій у смузі переходу (проступають, де зникають повні)
+const L_CUT = 0, L_PLAIN = 1, L_RING = 2, L_LIQ = 3, L_LIQR = 4, L_FL = 5, L_OBJ = 6, L_OBJF = 9, NL = 10;
 const FALLBACK = [[1, 2], [0, 2], [1, 0]];     // рівень деталізації, коли потрібного ще немає: спершу тонший
 // Сітки камери регіону: вид → арена, матеріал, список кадру
 const KINDS = {
   solidC: ['op', 'solidC', L_CUT], solid: ['op', 'solid', L_PLAIN], solidR: ['op', 'solidR', L_RING],
-  objC: ['op', 'objC', L_OBJ + L_CUT], obj: ['op', 'obj', L_OBJ + L_PLAIN], objR: ['op', 'objR', L_OBJ + L_RING],
+  objC: ['op', 'objC', L_OBJ + L_CUT], obj: ['op', 'obj', L_OBJ + L_PLAIN], objR: ['op', 'objR', L_OBJ + L_RING], objF: ['op', 'objF', L_OBJF],
   liq: ['liq', 'liq', L_LIQ], liqR: ['liq', 'liqR', L_LIQR], fl: ['fl', 'fl', L_FL],
 };
 // Кидачі тіней — по блоку BS×BS стовпців регіону (regions.js): 0 — тверде з далекими рослинами й камінням секції (в арені
@@ -68,7 +68,8 @@ export async function createScene(canvas, settings = {}) {
   mk('solid', { cull: BACK, defines: ['ECO_CURVE'] }); mk('solidR', { cull: BACK, defines: ['ECO_CURVE', 'ECO_RING_IN'] }); mk('solidC', { cull: BACK, defines: ['ECO_CURVE', 'ECO_CUT'] });
   mk('obj', { defines: ['ECO_CURVE', 'ECO_WIND'] }); mk('objR', { defines: ['ECO_CURVE', 'ECO_WIND', 'ECO_RING_IN'] }); mk('objC', { defines: ['ECO_CURVE', 'ECO_WIND', 'ECO_CUT'] });
   mk('liq', { defines: ['ECO_CURVE'], blend: { opacity: 0.75 } }); mk('liqR', { defines: ['ECO_CURVE', 'ECO_RING_IN'], blend: { opacity: 0.75 } });
-  mk('fl', { defines: ['ECO_CURVE', 'ECO_WIND', 'ECO_FADE', 'ECO_CUTF', 'ECO_THIN'] });
+  mk('objF', { defines: ['ECO_CURVE', 'ECO_WIND', 'ECO_XIN'] });
+  mk('fl', { defines: ['ECO_CURVE', 'ECO_WIND', 'ECO_FADE', 'ECO_CUTF', 'ECO_THIN', 'ECO_XOUT'] });
   mk('far', { cull: BACK, matcol: true, defines: ['ECO_CURVE', 'ECO_RING_OUT'] });
   mk('fig', { matcol: true });
   mk('body', { matcol: true, defines: ['ECO_CURVE'] });
@@ -292,6 +293,8 @@ export async function createScene(canvas, settings = {}) {
     LF[j][i] = off; LC[j][i] = n; LN[j] = i + 1;
   };
   const visRegs = [];
+  // найдальша від цілі точка стовпця (ax, ay — кут стовпця від цілі)
+  const colFar = (ax, ay) => Math.hypot(Math.max(Math.abs(ax), Math.abs(ax + CS)), Math.max(Math.abs(ay), Math.abs(ay + CS)));
   // Секція біля «вікна» (на екрані — у колі навколо гравця, ближче за нього) — матеріал з вирізом
   const cutHit = (m, cut, x0, y0, z0, x1, y1, z1) => {
     let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity, dz = Infinity;
@@ -323,7 +326,7 @@ export async function createScene(canvas, settings = {}) {
       const sl = E.L[0];
       if (!sl || sl.off < 0 || !sl.bb) continue;
       const b = blockOf(Gr, E.cx, E.cy);
-      const nf = colDist(E.cx, E.cy, t) < FLORA_NEAR && U.flora.has(ck(E.cx, E.cy)) ? 0 : sl.nf;   // як у кадрі: зблизька — повні рослини замість спрощених
+      const nf = colDist(E.cx, E.cy, t) < FLORA_NEAR && U.flora.has(ck(E.cx, E.cy)) ? 0 : sl.nf;   // тінь у смузі переходу — від повних
       if (sl.ns + nf) pushS(b * 3, sl.off, sl.ns + nf);
       if (sl.ns || nf) growB(b, sl.bb);
     }
@@ -384,7 +387,7 @@ export async function createScene(canvas, settings = {}) {
 
   let cullOn = true, shownU = null, lastCol = '', lastRad = 0, lawsKey = null;
   const M4 = new pc.Mat4(), Q = new pc.Quat(), V3 = new pc.Vec3(), engRegs = [];
-  const dirsBuf = [], cutF = new Float32Array(4), cut2 = new Float32Array(4), cut3 = new Float32Array(2), eyePC = new Float32Array(3), tgtPC = new Float32Array(3), wind4 = new Float32Array(4), fade2 = new Float32Array(2), thin2 = new Float32Array(2);
+  const dirsBuf = [], cutF = new Float32Array(4), cut2 = new Float32Array(4), cut3 = new Float32Array(2), eyePC = new Float32Array(3), tgtPC = new Float32Array(3), wind4 = new Float32Array(4), fade2 = new Float32Array(2), thin2 = new Float32Array(2), xfade2 = new Float32Array(2);
   const viewC = { m: null, eye: null, ud: null, t: null };
   let next = null;
   G.onFrame(function loop(ts) { const f = next; next = null; if (f) f(ts); G.onFrame(loop); });
@@ -532,7 +535,8 @@ export async function createScene(canvas, settings = {}) {
       tgtPC[0] = t[0] - G.O[0]; tgtPC[1] = t[2]; tgtPC[2] = t[1] - G.O[1];
       eyePC[0] = tgtPC[0] + e[0]; eyePC[1] = tgtPC[1] + e[2]; eyePC[2] = tgtPC[2] + e[1];
       const camD = Math.hypot(...e);
-      thin2[0] = FLORA_THIN * FLORA_NEAR; thin2[1] = FLORA_NEAR;   // трава й квіти рідшають до краю кола рослин зблизька
+      thin2[0] = FLORA_THIN * (FLORA_NEAR - FLORA_FADE); thin2[1] = FLORA_NEAR - FLORA_FADE;   // трава й квіти рідшають до смуги переходу
+      xfade2[0] = FLORA_NEAR - FLORA_FADE; xfade2[1] = FLORA_NEAR;
       if (iso) { fade2[0] = -2; fade2[1] = -1; } else { fade2[0] = Math.min(1, camD * 0.3); fade2[1] = Math.max(2.5, camD * 0.65); }
       let cut = null;
       cut2[3] = 0;
@@ -548,7 +552,7 @@ export async function createScene(canvas, settings = {}) {
         const q = p && project(m, [pt[0] + b.r[0] * 0.7, pt[1] + b.r[1] * 0.7, pt[2]], G.width, G.height);
         if (p && q) cut = { x: p[0], y: p[1], r: Math.hypot(q[0] - p[0], q[1] - p[1]) * (iso ? 1.6 : 2.4), depth: p[2] };
       }
-      M.setFrame({ wind: wind4, curve: laws.phys ? 0.5 / laws.phys.planetR : 0, target: tgtPC, seam: SEAM, time: lt, minLight: Lt.min, eye: eyePC, fade: fade2, cut: cutF, cut2, cut3, thin: thin2 });
+      M.setFrame({ wind: wind4, curve: laws.phys ? 0.5 / laws.phys.planetR : 0, target: tgtPC, seam: SEAM, time: lt, minLight: Lt.min, eye: eyePC, fade: fade2, cut: cutF, cut2, cut3, thin: thin2, xfade: xfade2 });
 
       // Видимі регіони й діапазони в них
       const farOn = !!(st.far && st.far.length), rad = view.rad, Un = uni(laws.d, laws.n);
@@ -590,13 +594,15 @@ export async function createScene(canvas, settings = {}) {
             if (sl.off >= 0 && sl.bb) {
               const c = sl.bb;
               if (inside || aabbInView(m, ox + c[0], oy + c[1], oz + c[2], ox + c[3], oy + c[4], oz + c[5])) {
-                const nf = lod === 0 && dn < FLORA_NEAR && Un.flora.has(ck(E.cx, E.cy)) ? 0 : sl.nf;
+                // є повні рослини: стовпець увесь до смуги переходу — спрощених не малюємо, у смузі — проступають (objF)
+                const fx = lod === 0 && dn < FLORA_NEAR && Un.flora.has(ck(E.cx, E.cy));
+                const nf = fx && colFar(ax, ay) < FLORA_NEAR - FLORA_FADE ? 0 : sl.nf;
                 const nc = lod > 0 && (lod !== want || dn < LOD_R[lod - 1] + LOD_CAP) ? sl.nc : 0;
                 let j = ring ? L_RING : L_PLAIN;
                 if (!ring && cut && (iso || dn <= camD + 8) && cutHit(m, cut, ox + c[0], oy + c[1], oz + c[2], ox + c[3], oy + c[4], oz + c[5])) j = L_CUT;
                 if (sl.ns) pushR(j, seg[j * 2], sl.off, sl.ns);
                 if (nc) pushR(j, seg[j * 2], sl.off + sl.ns + sl.nf, nc);
-                if (nf) pushR(L_OBJ + j, seg[(L_OBJ + j) * 2], sl.off + sl.ns, nf);
+                if (nf) { const jo = fx ? L_OBJF : L_OBJ + j; pushR(jo, seg[jo * 2], sl.off + sl.ns, nf); }
               }
             }
             if (sl.loff >= 0 && sl.lbb) {

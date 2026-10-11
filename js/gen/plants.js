@@ -63,7 +63,10 @@ const THIN = 0.025;                                        // спрощений
 function prism(G, a, b, r0, r1, sides, col, mat, o = {}) {
   if (G.cheap) {
     if (Math.max(r0, r1) < THIN) return;
-    sides = Math.min(sides, Math.max(r0, r1) > 0.06 ? 4 : 3); o = { ...o, star: 0, bot: false };
+    // великі (крони-конуси, стовбури велетнів) — до 6 граней: силует той самий, що в повного (4-гранний конус ялини
+    // — піраміда, помітно інша); решта — 4 / 3
+    const rm = Math.max(r0, r1);
+    sides = Math.min(sides, rm >= 0.25 ? 6 : rm > 0.06 ? 4 : 3); o = { ...o, star: 0, bot: false };
   }
   const d = norm(sub(b, a)), [u, v] = frame(d), n = o.star ? sides * 2 : sides, rot = o.rot || 0;
   const ring = (c, r) => {

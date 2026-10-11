@@ -23,10 +23,12 @@ export let SEAM = VIEW_R - 8;        // шов: ближче — повні се
 // (gen/chunk.js genCoarse). Меш іншого рівня тримаємо, поки він потрібен на dn ± LOD_HYST; обрізи грубої секції
 // малюємо ближче LOD_R + LOD_CAP від внутрішньої межі її рівня
 // Рослини зблизька (повна будова, трава й квіти): стовпці, найближча точка яких ближче FLORA_NEAR до цілі камери (colDist) —
-// усе коло FLORA_NEAR вкрите повними рослинами; трава й квіти від FLORA_THIN · FLORA_NEAR до краю кола рідшають
-// поштучно (мітка проріджування, gen/materials.js) — межі чанків не видно; далі — спрощені великі рослини й каміння
-export let FLORA_NEAR = 64;
-export const FLORA_THIN = 0.5;
+// усе коло FLORA_NEAR вкрите повними рослинами; далі — спрощені великі рослини й каміння. Перехід — смугою FLORA_FADE
+// перед краєм кола: повна версія розчиняється, спрощена проступає (дизеринг піксель у піксель, engine/graphics/chunks.js)
+// — межі чанків не видно; трава й квіти від FLORA_THIN до початку смуги рідшають поштучно (мітка проріджування,
+// gen/materials.js)
+export let FLORA_NEAR = 72;
+export const FLORA_FADE = 16, FLORA_THIN = 0.5;
 export function setFloraNear(r) { FLORA_NEAR = r; }
 export const LOD_R = [192, 384], LOD_HYST = 32, LOD_CAP = 48;
 export let LOD_ON = false;                       // вимкнено за замовчуванням (09.10.2026: GPU на 1440p лише −10 %, а далечінь помітно грубіша); ?dev: eco.setLod(true)

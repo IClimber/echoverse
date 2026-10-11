@@ -10,7 +10,10 @@
 //   (opacityDither, transparency.md), лише в прямому проході (FORWARD_PASS, shader-pass.js): тіні лишаються;
 // - проріджування малих рослин (ECO_THIN): старші 11 біт номера матеріалу у вершині — мітка 1…2047 (0 — ні); далі від
 //   цілі, ніж mix(eco_thin.x, eco_thin.y, мітка / 2047), піксель відкидається в обох проходах (і тінь теж) — до краю кола
-//   трава рідшає поштучно, без межі (як відстань відсікання трави з плавним згасанням в ігрових рушіях).
+//   трава рідшає поштучно, без межі (як відстань відсікання трави з плавним згасанням в ігрових рушіях);
+// - перехід між рівнями деталізації дизерингом (як Cross Fade у LOD Group Unity): у смузі eco_xfade (від, до — відстань
+//   від цілі по горизонталі) повна версія (ECO_XOUT) зникає, а спрощена (ECO_XIN) проступає — ті самі пікселі за тим самим
+//   шумом (interleaved gradient noise), без перекриття й дірок; лише прямий прохід (тінь — від однієї з версій).
 // Варіанти: ECO_MATCOL — матеріал у color.a (float-меші), інакше — у pos.w, а AO — у color.a (aoVertexColor)
 import { pc } from './app.js';
 
@@ -62,6 +65,7 @@ uniform vec2 eco_fade;
 uniform vec4 eco_cut;
 uniform vec4 eco_cut2;
 uniform vec2 eco_cut3;
+uniform vec2 eco_xfade;
 varying float vEcoMat;
 varying float vEcoThin;
 vec3 eco_col;
@@ -114,6 +118,15 @@ void getOpacity() {
     if (length(vPositionW.xz - eco_target.xz) > vEcoThin) dAlpha = 0.0;
   #endif
   #ifdef FORWARD_PASS
+  #if defined(ECO_XIN) || defined(ECO_XOUT)
+    float eco_xf = clamp((length(vPositionW.xz - eco_target.xz) - eco_xfade.x) / (eco_xfade.y - eco_xfade.x), 0.0, 1.0);
+    float eco_xn = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+    #ifdef ECO_XOUT
+      if (eco_xf > eco_xn) dAlpha = 0.0;
+    #else
+      if (eco_xf <= eco_xn) dAlpha = 0.0;
+    #endif
+  #endif
   float eco_d = distance(vPositionW, eco_eye);
   #ifdef ECO_FADE
     dAlpha *= pow(clamp((eco_d - eco_fade.x) / (eco_fade.y - eco_fade.x), 0.0, 1.0), 2.2);
@@ -187,6 +200,7 @@ uniform eco_fade: vec2f;
 uniform eco_cut: vec4f;
 uniform eco_cut2: vec4f;
 uniform eco_cut3: vec2f;
+uniform eco_xfade: vec2f;
 varying vEcoMat: f32;
 varying vEcoThin: f32;
 var<private> eco_col: vec3f;
@@ -238,6 +252,15 @@ fn getOpacity() {
     if (length(vPositionW.xz - uniform.eco_target.xz) > vEcoThin) { dAlpha = 0.0; }
   #endif
   #ifdef FORWARD_PASS
+  #if defined(ECO_XIN) || defined(ECO_XOUT)
+    let eco_xf: f32 = clamp((length(vPositionW.xz - uniform.eco_target.xz) - uniform.eco_xfade.x) / (uniform.eco_xfade.y - uniform.eco_xfade.x), 0.0, 1.0);
+    let eco_xn: f32 = fract(52.9829189 * fract(dot(pcPosition.xy, vec2f(0.06711056, 0.00583715))));
+    #ifdef ECO_XOUT
+      if (eco_xf > eco_xn) { dAlpha = 0.0; }
+    #else
+      if (eco_xf <= eco_xn) { dAlpha = 0.0; }
+    #endif
+  #endif
   let eco_d: f32 = distance(vPositionW, uniform.eco_eye);
   #ifdef ECO_FADE
     dAlpha = dAlpha * pow(clamp((eco_d - uniform.eco_fade.x) / (uniform.eco_fade.y - uniform.eco_fade.x), 0.0, 1.0), 2.2);
