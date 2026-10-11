@@ -264,8 +264,10 @@ export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
     // підлога в межах падіння за крок; на землі — ще й прилипання схилом униз (на вигляд схил: ноги лишаються на землі,
     // вигляд опускається плавно); стійкої немає — падаєш (крутий схил — ковзаєш уздовж нього)
     const drop = -p.vz * dt, snap = wasGround && s2 === null ? SNAP : 0;
-    const f = findFloor(C, SHAPE, p.x, p.y, p.z, drop + snap), st = stands(f, STAND_Z);
+    // поверхня рідини (натяг) нижча за падіння за крок — підлогу шукаємо до неї: інакше гравця ставило б на поверхню крізь
+    // крутий берег між ними (стрес-тест, 11.10.2026)
     const lt = onLiq ? liqFloor(P, p.x, p.y, p.z, drop + snap) : null;
+    const f = findFloor(C, SHAPE, p.x, p.y, p.z, lt !== null ? Math.max(drop + snap, p.z - lt) : drop + snap), st = stands(f, STAND_Z);
     const fz = lt !== null && (!f || lt > f.z) ? lt : st ? f.z : null;
     if (fz !== null) {
       if (p.z - drop - fz > 0.05) p.stepOff += p.z - fz;

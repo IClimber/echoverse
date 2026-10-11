@@ -16,7 +16,7 @@ export function capsule(R, H, n = 4) {
   return { R, H, pts };
 }
 
-const LST = createList(1024), H1 = {}, H2 = {}, F1 = {}, OV = {}, RY = {}, NQ = {};
+const LST = createList(1024), H1 = {}, H2 = {}, HM = {}, F1 = {}, OV = {}, RY = {}, NQ = {};
 // Трикутники навколо форми в (x, y, z), зсунутої на (dx, dy, dz), із запасом m
 function around(src, sh, x, y, z, dx, dy, dz, m) {
   clearList(LST);
@@ -25,9 +25,34 @@ function around(src, sh, x, y, z, dx, dy, dz, m) {
   return LST;
 }
 
-// Найглибший дотик форми з трикутниками {depth, nx, ny, nz, ref} або null. Куля, що поверхні не перетинає, але центр — у
-// твердому: за найближчим трикутником (промінь до нього влучає в тильний бік) — усередині, depth = відстань + R уздовж
-// нормалі того трикутника; трикутника ближче 0,6 нема — «глибоко всередині», depth = Infinity
+// Центр кулі всередині опуклого тіла з посиланням (ref ≠ null: тіло-коробка, призма предмета; трикутники одного ref у
+// списку — підряд): точка за площинами всіх його граней. {depth — до найближчої грані, що не дивиться вниз (униз — у
+// землю, на якій тіло лежить), nx, ny, nz — її нормаль, ref} або null; із кількох — найглибше
+const IN = {};
+function insideRef(L, px, py, pz) {
+  const t = L.t;
+  let best = null;
+  for (let i = 0; i < L.n;) {
+    const ref = L.ref[i];
+    let j = i, far = -Infinity, ex = -Infinity, fi = -1;
+    for (; j < L.n && L.ref[j] === ref; j++) {
+      const o = j * 12, s = (px - t[o]) * t[o + 9] + (py - t[o + 1]) * t[o + 10] + (pz - t[o + 2]) * t[o + 11];
+      if (s > far) far = s;
+      if (t[o + 11] >= -0.5 && s > ex) { ex = s; fi = j; }
+    }
+    if (ref !== null && far < 0 && fi >= 0 && (!best || -ex > best.depth)) {
+      best = IN; IN.depth = -ex; IN.nx = t[fi * 12 + 9]; IN.ny = t[fi * 12 + 10]; IN.nz = t[fi * 12 + 11]; IN.ref = ref;
+    }
+    i = j;
+  }
+  return best;
+}
+
+// Найглибший дотик форми з трикутниками {depth, nx, ny, nz, ref} або null. Куля, що поверхні не перетинає, але центр —
+// усередині: в опуклому тілі з посиланням (тіло, предмет; накрило гравця — тіла з ним не зіштовхуються) — depth = до
+// найближчої грані + R уздовж її нормалі; у твердому (блоки) — за найближчим трикутником (промінь до нього влучає в
+// тильний бік), depth = відстань + R уздовж нормалі того трикутника; трикутника ближче 0,6 нема — «глибоко всередині»,
+// depth = Infinity
 export function overlap(src, sh, x, y, z) {
   const L = around(src, sh, x, y, z, 0, 0, 0, 0.7);
   let best = null;
@@ -35,7 +60,10 @@ export function overlap(src, sh, x, y, z) {
     const cx = x + ox, cy = y + oy, cz = z + oz;
     const o = overlapSphere(L, cx, cy, cz, sh.R, OV);
     if (o && (!best || o.depth > best.depth)) best = { depth: o.depth, nx: o.nx, ny: o.ny, nz: o.nz, ref: o.ref };
-    if (o || !src.solidAt(cx, cy, cz)) continue;
+    if (o) continue;
+    const w = insideRef(L, cx, cy, cz);
+    if (w) { if (!best || w.depth + sh.R > best.depth) best = { depth: w.depth + sh.R, nx: w.nx, ny: w.ny, nz: w.nz, ref: w.ref }; continue; }
+    if (!src.solidAt(cx, cy, cz)) continue;
     const q = nearest(L, cx, cy, cz, NQ);
     if (!q || q.d > 0.6) return { depth: Infinity, nx: 0, ny: 0, nz: 1, ref: null };
     const dx = (q.x - cx) * 1.05, dy = (q.y - cy) * 1.05, dz = (q.z - cz) * 1.05, r = rayCast(L, cx, cy, cz, dx, dy, dz, 1, RY);
@@ -68,7 +96,9 @@ export function findFloor(src, sh, x, y, z, down) {
   }
   if (!h) return null;
   const f = { nx: h.nx, ny: h.ny, nz: h.nz, px: h.px, py: h.py, pz: h.pz, ref: h.ref, nU: null, zU: null };
-  f.z = h.nz > 1 - 1e-9 ? L.t[h.i * 12 + 2] : Math.min(z, z - h.t * down + (h.t > 0 ? SKIN : 0));   // рівна — висота площини
+  // рівна (вертикальний дотик і горизонтальний сам трикутник) — точно висота площини; лише дотик вертикальний (вершина
+  // чи гребінь похилих трикутників точно під центром) — ні: висота вершини «a» там інша
+  f.z = h.nz > 1 - 1e-9 && L.t[h.i * 12 + 11] > 1 - 1e-9 ? L.t[h.i * 12 + 2] : Math.min(z, z - h.t * down + (h.t > 0 ? SKIN : 0));
   if (f.z > z) f.z = z;
   const r = rayCast(L, x, y, f.z + 0.1, 0, 0, -0.35, 1, RY);
   if (r && r.nz > 0) {
@@ -115,7 +145,8 @@ export function moveH(src, sh, s, dx, dy, o) {
   let rx = dx, ry = dy;
   for (let it = 0; it < 4 && Math.hypot(rx, ry) > 1e-9; it++) {
     const dz = fn ? -(fn[0] * rx + fn[1] * ry) / fn[2] : 0;
-    const len = Math.hypot(rx, ry, dz), h = sweep(src, sh, s.x, s.y, s.z, rx, ry, dz);
+    // свій об'єкт результату: stepUp пише в H1, а після невдалого кроку ковзання — за цим дотиком, не за пробою кроку
+    const len = Math.hypot(rx, ry, dz), h = sweep(src, sh, s.x, s.y, s.z, rx, ry, dz, HM);
     if (!h) { s.x += rx; s.y += ry; s.z += dz; rx = ry = 0; break; }
     const adv = Math.max(0, h.t - SKIN / len);
     s.x += rx * adv; s.y += ry * adv; s.z += dz * adv;

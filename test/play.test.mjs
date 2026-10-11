@@ -763,3 +763,39 @@ test('відкритість неба фігури й тіл: як AO неба �
   for (let x = -1; x <= 1; x += 0.05) { const k = skyOpenAt(top, x, 0.5, 0.5); assert.ok(k >= prev - 1e-12); prev = k; }
   assert.equal(skyOpenAt(() => null, 3.2, 7.9, -50), 1);
 });
+
+test('тіло чи стовбур накрили гравця (тіла з ним не зіштовхуються): це перетин — виходить до найближчої грані, не на верх', () => {
+  const ground = (x, y, k) => k < 6 ? B_STONE : B_AIR;                  // земля — верх k = 5 (z 3)
+  const body = { x: 5.4, y: 5.5, z: 4, hx: 1.2, hy: 1.2, hz: 1, mass: 500 };
+  const P = { liquid: { swim: true }, obj: () => null, block: ground, bodies: () => [body] };
+  assert.ok(hits(P, 5.5, 5.5, 3), 'усередині тіла — перетин');
+  const p = { x: 5.5, y: 5.5, z: 3, vz: 0, ground: true };
+  step(p, 0, 0, false, 1 / 120, P, PH1);
+  assert.ok(!hits(P, p.x, p.y, p.z) && Math.abs(p.z - 3) < 1e-6 && p.x > 6.6 + 0.24 - 1e-3, `з тіла — убік: ${p.x} ${p.z}`);
+  // стовбур-велетень (r 1,5, заввишки 30): убік, а не на верхівку
+  const tree = { cx: 5.5, cy: 5.5, z0: 3, z1: 33, r: 1.5 };
+  const T = { liquid: { swim: true }, objR: 1.5, obj: (x, y) => x === 5 && y === 5 ? tree : null, block: ground };
+  assert.ok(hits(T, 5.9, 5.5, 3), 'у стовбурі — перетин');
+  const q = { x: 5.9, y: 5.5, z: 3, vz: 0, ground: true };
+  step(q, 0, 0, false, 1 / 120, T, PH1);
+  assert.ok(!hits(T, q.x, q.y, q.z) && q.z < 3.1 && Math.hypot(q.x - 5.5, q.y - 5.5) > 1.5, `зі стовбура — убік: ${q.x} ${q.y} ${q.z}`);
+  // печера під деревом: центр кулі під основою призми — не «усередині» (призма замкнена знизу)
+  const cave = (x, y, k) => k >= 6 && k < 12 ? B_STONE : k < 2 ? B_STONE : B_AIR;   // підлога печери z 1, стеля k 6 (z 3), поверхня z 6
+  const C = { liquid: { swim: true }, objR: 1.5, obj: (x, y) => x === 5 && y === 5 ? { cx: 5.5, cy: 5.5, z0: 6, z1: 36, r: 1.5 } : null, block: cave };
+  assert.ok(!hits(C, 5.5, 5.5, 1), 'у печері під деревом — вільно');
+});
+
+test('поверхневий натяг: опускаючись на поверхню рідини біля крутого берега, гравець не входить у берег (стрес-тест)', async () => {
+  const { lawsOf, physOf } = await import('../js/universe.js');
+  const { hashStr } = await import('../js/rng.js');
+  const { genChunk, bi, H } = await import('../js/gen/chunk.js');
+  const L = lawsOf(hashStr('stress'), 2, 600), C = new Map();
+  assert.ok(L.liquid.tension, 'у цьому всесвіті рідина з натягом');
+  for (let cy = 0; cy < 3; cy++) for (let cx = 0; cx < 3; cx++) C.set(`${cx},${cy}`, genChunk(L, cx, cy));
+  const P = { liquid: L.liquid, laws: L, obj: () => null, block(x, y, k) { const c = C.get(`${Math.floor(x / 16)},${Math.floor(y / 16)}`); if (!c) return -1; if (k < 0) return B_STONE; if (k >= H) return B_AIR; return c.b[bi(x - Math.floor(x / 16) * 16, y - Math.floor(y / 16) * 16, k)]; } };
+  // стан за кадр до перетину (до 11.10.2026: поставило на поверхню 2,85 на 0,035 у березі 64°)
+  const p = { x: 28.054122908094406, y: 12.217532595552148, z: 2.9138528616076624, vz: 0.15155848212755305, ground: false, stepOff: 0, footOff: 0, offX: 0, offY: 0, leap: 0.1, vx: 1.4244183265294874, vy: -1.4244183265294874, jumped: true, floorN: null, floorB: 0 };
+  assert.ok(!hits(P, p.x, p.y, p.z));
+  step(p, 1, 0, false, 1 / 120, P, physOf(L), undefined, { sprint: true });
+  assert.ok(!hits(P, p.x, p.y, p.z), `перетин: ${p.x} ${p.y} ${p.z}`);
+});

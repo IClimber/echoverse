@@ -14,18 +14,21 @@ function room(L) {
   if (L.n * 12 < L.t.length) return;
   const t = new Float64Array(L.t.length * 2); t.set(L.t); L.t = t; L.ref.length = L.t.length / 12;
 }
-// Трикутник a-b-c; нормаль — cross(b − a, c − a), повернута за підказкою (hx, hy, hz), якщо вона є (≠ 0)
+// Трикутник a-b-c; нормаль — cross(b − a, c − a), повернута за підказкою (hx, hy, hz), якщо вона є (≠ 0). Повернута —
+// b і c міняються місцями: обхід вершин завжди проти годинникової стрілки, якщо дивитись з боку нормалі (на цьому стоїть
+// inTri; інакше внутрішня частина такої грані не тримала — лише ребра)
 export function pushTri(L, ax, ay, az, bx, by, bz, cx, cy, cz, ref = null, hx = 0, hy = 0, hz = 0) {
   const ux = bx - ax, uy = by - ay, uz = bz - az, vx = cx - ax, vy = cy - ay, vz = cz - az;
   let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
   const l = Math.hypot(nx, ny, nz);
   if (l < 1e-12) return;
   nx /= l; ny /= l; nz /= l;
-  if (nx * hx + ny * hy + nz * hz < 0) { nx = -nx; ny = -ny; nz = -nz; }
+  const flip = nx * hx + ny * hy + nz * hz < 0;
+  if (flip) { nx = -nx; ny = -ny; nz = -nz; }
   room(L);
-  const t = L.t, o = L.n * 12;
-  t[o] = ax; t[o + 1] = ay; t[o + 2] = az; t[o + 3] = bx; t[o + 4] = by; t[o + 5] = bz;
-  t[o + 6] = cx; t[o + 7] = cy; t[o + 8] = cz; t[o + 9] = nx; t[o + 10] = ny; t[o + 11] = nz;
+  const t = L.t, o = L.n * 12, b = flip ? o + 6 : o + 3, c = flip ? o + 3 : o + 6;
+  t[o] = ax; t[o + 1] = ay; t[o + 2] = az; t[b] = bx; t[b + 1] = by; t[b + 2] = bz;
+  t[c] = cx; t[c + 1] = cy; t[c + 2] = cz; t[o + 9] = nx; t[o + 10] = ny; t[o + 11] = nz;
   L.ref[L.n++] = ref;
 }
 
@@ -219,7 +222,8 @@ export function rayCast(L, ox, oy, oz, dx, dy, dz, maxT = 1, out = {}) {
 }
 
 // ---- прості тіла ----
-// Призма: правильний sides-кутник радіуса r навколо (cx, cy) від z0 до z1 — бічні грані й верх (низ — у землі)
+// Призма: правильний sides-кутник радіуса r навколо (cx, cy) від z0 до z1 — бічні грані, верх і низ (замкнена: «усередині»
+// — за всіма гранями, character.js; низ — у землі, знизу до нього не дістатися)
 export function prismTris(L, cx, cy, z0, z1, r, sides = 12, ref = null) {
   for (let i = 0; i < sides; i++) {
     const a0 = i / sides * Math.PI * 2, a1 = (i + 1) / sides * Math.PI * 2;
@@ -228,6 +232,7 @@ export function prismTris(L, cx, cy, z0, z1, r, sides = 12, ref = null) {
     pushTri(L, x0, y0, z0, x1, y1, z0, x1, y1, z1, ref, hx, hy, 0);
     pushTri(L, x0, y0, z0, x1, y1, z1, x0, y0, z1, ref, hx, hy, 0);
     pushTri(L, cx, cy, z1, x0, y0, z1, x1, y1, z1, ref, 0, 0, 1);
+    pushTri(L, cx, cy, z0, x1, y1, z0, x0, y0, z0, ref, 0, 0, -1);
   }
 }
 // Коробка — 12 трикутників назовні
