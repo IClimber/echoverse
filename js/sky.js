@@ -133,8 +133,12 @@ export function applyWeather(st, L, W, clock) {
 // вже сходило): сонце — bright × частка диска над обрієм; місяць — відбите світло головного сонця: альбедо × кутовий
 // радіус² × освітлена частка (фаза) × частка диска над обрієм (для Місяця й Сонця — ≈ 1/400 000; у грі місяці більші,
 // але й найбільший у повню ≤ 0,0008 сонця). Тож сонце, що показалось над обрієм на 1 %, уже яскравіше за місяць.
-// Пряме світло (Ed) ділиться за яскравістю, загальний рівень — від доби (I)
-export const REF_Z = 0.77, MIN_LIGHT = 0.03, NIGHT_TINT = [0.62, 0.72, 1.0], MOON_ALBEDO = 0.12;
+// Пряме світло (Ed): частка сонць P плавно спадає до 0 на останніх ~12° над обрієм (DIRECT_Z) — ковзне світло майже все
+// в тіні, а решта йде в розсіяне; місяців — лише після заходу, плавно за ~6° (TWILIGHT_Z, громадянські сутінки), × освітлена частка (серп —
+// слабко); що не пряме — розсіяне (×REF_Z). Загальний рівень — від доби (I). 11.10.2026, скарга: на заході темнішало
+// (усе пряме — ковзному сонцю), а щойно диск зникав — ставало світліше (пряме — у розсіяне); верх: 26 → 12 → 29 %,
+// тепер спадає плавно до нічного
+export const REF_Z = 0.77, MIN_LIGHT = 0.03, NIGHT_TINT = [0.62, 0.72, 1.0], MOON_ALBEDO = 0.12, DIRECT_Z = 0.2, TWILIGHT_Z = 0.1;
 // Частка диска над обрієм: z — синус висоти центру, r — кутовий радіус (сегмент круга)
 export function aboveHorizon(z, r) {
   const h = Math.max(-1, Math.min(1, Math.asin(Math.max(-1, Math.min(1, z))) / r));
@@ -142,23 +146,28 @@ export function aboveHorizon(z, r) {
 }
 export function lightsOf(sk, max = 3) {
   const L = [];
+  let P = 0, tw = 1, Bs = 0, Bm = 0, Mm = 0;
   for (const s of sk.suns) {
+    const z0 = -Math.sin(s.size);                                  // диск зайшов повністю
+    tw = Math.min(tw, 1 - smooth(z0 - TWILIGHT_Z, z0, s.dir[2]));
     const b = s.bright * aboveHorizon(s.dir[2], s.size);
     if (b <= 0) continue;
+    P = Math.max(P, smooth(z0, DIRECT_Z, s.dir[2])); Bs += b;
     const dk = Math.max(0, 1 - Math.abs(s.dir[2] - 0.02) / 0.22) * (sk.lock ? 0.5 : 1), warm = Math.max(0, dk - 0.2);
-    L.push({ dir: s.dir, b, col: mix(mix([1, 1, 1], s.col.map((v) => v / 255), 0.6), sk.duskCol.map((v) => v / 255), warm * 0.5) });
+    L.push({ dir: s.dir, b, sun: true, col: mix(mix([1, 1, 1], s.col.map((v) => v / 255), 0.6), sk.duskCol.map((v) => v / 255), warm * 0.5) });
   }
   const M = sk.main;
   for (const m of sk.moons) {
     const lit = (1 - (m.dir[0] * M.dir[0] + m.dir[1] * M.dir[1] + m.dir[2] * M.dir[2])) / 2;   // фаза: повня — навпроти сонця
-    const b = M.bright * MOON_ALBEDO * m.size * m.size * lit * aboveHorizon(m.dir[2], m.size);
-    if (b > 0) L.push({ dir: m.dir, b, col: NIGHT_TINT });
+    const vis = aboveHorizon(m.dir[2], m.size), b = M.bright * MOON_ALBEDO * m.size * m.size * lit * vis;
+    if (b > 0) { L.push({ dir: m.dir, b, sun: false, col: NIGHT_TINT }); Bm += b; Mm = Math.max(Mm, lit * vis); }
   }
   L.sort((a, b) => b.b - a.b); L.length = Math.min(L.length, max);
-  const B = L.reduce((s, l) => s + l.b, 0), S = (sk.I * (sk.dimK ?? 1)) ** 2.2, rho = sk.amb / (sk.amb + (1 - sk.amb) * REF_Z);
-  const Ea = S * rho ** 2.2, Ed = S * (1 - rho ** 2.2) / REF_Z;
-  for (const l of L) l.k = Ed * l.b / B;
-  return { dirs: L, amb: (B > 0 ? Ea : Ea + Ed * REF_Z) + (sk.flash ? (sk.flash * 1.6) ** 2.2 : 0), min: MIN_LIGHT ** 2.2 };
+  const S = (sk.I * (sk.dimK ?? 1)) ** 2.2, rho = sk.amb / (sk.amb + (1 - sk.amb) * REF_Z);
+  const Ea = S * rho ** 2.2, Ed = S * (1 - rho ** 2.2) / REF_Z, Pm = (1 - P) * tw * Mm;
+  for (const l of L) l.k = l.sun ? Ed * P * l.b / Bs : Ed * Pm * l.b / Bm;
+  const dirs = L.filter((l) => l.k > 0);
+  return { dirs, amb: Ea + Ed * REF_Z * (1 - (Bs > 0 ? P : 0) - (Bm > 0 ? Pm : 0)) + (sk.flash ? (sk.flash * 1.6) ** 2.2 : 0), min: MIN_LIGHT ** 2.2 };
 }
 // Лінійна сила → intensity PlayCanvas: менша за 1 множить колір до переведення в лінійне ((колір·i)^2,2), тож корінь
 // 2,2-го степеня; від 1 — як є (src/scene/light.js, Light._updateLinearColor)

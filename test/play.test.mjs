@@ -308,22 +308,35 @@ test('небо й час: біля старту — одне сонце, міс�
   assert.equal(deserialize(serialize(w)).world.clock, 1234.5);
 });
 
-test('світла неба: головне (з тінню) — найяскравіше; сонце, що показалось над обрієм на 1 %, яскравіше за місяць; серп слабший за повню', async () => {
+test('світла неба: головне (з тінню) — найяскравіше; сонце, що показалось над обрієм на 1 %, яскравіше за місяць; серп слабший за повню; захід без провалу й стрибка яскравості', async () => {
   const { lightsOf, aboveHorizon } = await import('../js/sky.js');
   const n = (v) => { const l = Math.hypot(...v); return v.map((x) => x / l); };
   const r = 0.04, zOf = (f) => { let lo = -1, hi = 1; for (let i = 0; i < 60; i++) { const m = (lo + hi) / 2; if (aboveHorizon(Math.sin(m * r), r) < f) lo = m; else hi = m; } return Math.sin(lo * r); };
   assert.ok(Math.abs(aboveHorizon(0, r) - 0.5) < 1e-9 && aboveHorizon(-0.1, r) === 0 && aboveHorizon(0.1, r) === 1);
   const sky = (sunZ, moonDir) => {
     const sun = { dir: n([Math.sqrt(1 - sunZ * sunZ), 0, sunZ]), col: [255, 240, 200], size: r, bright: 1 };
-    return { suns: [sun], moons: [{ dir: n(moonDir), col: [200, 200, 200], size: 0.08 }], main: sun, duskCol: [255, 140, 60], lock: false, I: 0.4, amb: 0.3, day: 0.2 };
+    const t = Math.max(0, Math.min(1, (sunZ + 0.1) / 0.32)), day = t * t * (3 - 2 * t);   // як skyState: доба й рівень світла
+    return { suns: [sun], moons: [{ dir: n(moonDir), col: [200, 200, 200], size: 0.08 }], main: sun, duskCol: [255, 140, 60], lock: false, I: 0.24 + 0.76 * day, amb: 0.3, day };
   };
   const full = [-0.3, 0, 0.95];                                     // високо, майже навпроти сонця — повня
   let L = lightsOf(sky(zOf(0.01), full), 3).dirs;
-  assert.equal(L.length, 2); assert.ok(L[0].dir[0] > 0.9, 'сонце на 1 % над обрієм — головне'); assert.ok(L[0].k > L[1].k * 5);
+  assert.ok(L[0].dir[0] > 0.9, 'сонце на 1 % над обрієм — головне'); assert.ok(L.every((l, i) => !i || l.k < L[0].k * 0.01), 'поки сонце видно, місяць прямо не світить');
   L = lightsOf(sky(-0.05, full), 3).dirs;
   assert.equal(L.length, 1); assert.ok(L[0].dir[2] > 0.9, 'сонце під обрієм — головний місяць');
   const bFull = L[0].b, bNew = lightsOf(sky(-0.05, [0.95, 0, 0.3]), 3).dirs[0].b;   // за 17° від сонця — вузький серп
   assert.ok(bNew < bFull * 0.05, 'серп світить у десятки разів слабше за повню');
+  // захід без провалу й стрибка: верх (освітлений і в тіні) змінюється плавно; освітлений не світлішає, поки сонце сідає
+  for (const moon of [full, [0.3, 0, -0.5]]) {
+    let pl = null, ps = null;
+    for (let z = 0.4; z >= -0.2; z -= 0.002) {
+      const o = lightsOf(sky(z, moon), 3), lit = o.amb + o.dirs.reduce((s, l) => s + l.k * Math.max(0, l.dir[2]), 0), sh = o.amb;
+      if (pl !== null) {
+        assert.ok(Math.abs(lit - pl) < 0.012 && Math.abs(sh - ps) < 0.012, `стрибок яскравості на z = ${z.toFixed(3)}`);
+        if (moon !== full && z > -0.05) assert.ok(lit <= pl + 1e-9, `освітлене світлішає на z = ${z.toFixed(3)}`);
+      }
+      pl = lit; ps = sh;
+    }
+  }
 });
 
 test('атмосфера й погода: біля старту — придатне повітря ~1 атм; трапляються інші; погода детермінована й змінюється; місце уточнює', async () => {
