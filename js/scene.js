@@ -11,6 +11,8 @@ import { createLights, SHADOW_D } from './engine/graphics/lights.js';
 import { floatMesh } from './engine/graphics/meshes.js';
 import { createInstances } from './engine/graphics/instances.js';
 import { createParticleVolume, setShelter } from './engine/graphics/particles.js';
+import { createSpriteAtlas } from './engine/graphics/sprites.js';
+import { SPR } from './gen/sprites.js';
 import { SKY_GLSL, SKY_WGSL } from './sky-shader.js';
 import { LEVEL, S } from './iso.js';
 import { CS } from './gen/chunk.js';
@@ -43,17 +45,18 @@ const PARTICLES = 6000;
 const rkey = (rx, ry, rz) => ((rx + 0x20000) * 0x40000 + (ry + 0x20000)) * 256 + (rz + 128);
 // Списки діапазонів на кадр: 0 — тверде біля «вікна», 1 — тверде, 2 — тверде на шві далечі (0–2 — з відсіканням задніх
 // граней), 3 — рідина, 4 — рідина на шві, 5 — рослини зблизька, 6–8 — далекі рослини й каміння секцій (пара до 0–2, без
-// відсікання: листя видно з обох боків), 9 — далекі рослини секцій у смузі переходу (проступають, де зникають повні)
-const L_CUT = 0, L_PLAIN = 1, L_RING = 2, L_LIQ = 3, L_LIQR = 4, L_FL = 5, L_OBJ = 6, L_OBJF = 9, NL = 10;
+// відсікання: листя видно з обох боків), 9 — далекі рослини секцій у смузі переходу (проступають, де зникають повні),
+// 10 — малі рослини зблизька спрайтами
+const L_CUT = 0, L_PLAIN = 1, L_RING = 2, L_LIQ = 3, L_LIQR = 4, L_FL = 5, L_OBJ = 6, L_OBJF = 9, L_GR = 10, NL = 11;
 const FALLBACK = [[1, 2], [0, 2], [1, 0]];     // рівень деталізації, коли потрібного ще немає: спершу тонший
 // Сітки камери регіону: вид → арена, матеріал, список кадру
 const KINDS = {
   solidC: ['op', 'solidC', L_CUT], solid: ['op', 'solid', L_PLAIN], solidR: ['op', 'solidR', L_RING],
   objC: ['op', 'objC', L_OBJ + L_CUT], obj: ['op', 'obj', L_OBJ + L_PLAIN], objR: ['op', 'objR', L_OBJ + L_RING], objF: ['op', 'objF', L_OBJF],
-  liq: ['liq', 'liq', L_LIQ], liqR: ['liq', 'liqR', L_LIQR], fl: ['fl', 'fl', L_FL],
+  liq: ['liq', 'liq', L_LIQ], liqR: ['liq', 'liqR', L_LIQR], fl: ['fl', 'fl', L_FL], gr: ['fl', 'gr', L_GR],
 };
 // Кидачі тіней — по блоку BS×BS стовпців регіону (regions.js): 0 — тверде з далекими рослинами й камінням секції (в арені
-// поруч — один діапазон; матеріал без відсікання граней), 2 — рослини зблизька
+// поруч — один діапазон; матеріал без відсікання граней), 1 — малі рослини спрайтами, 2 — рослини зблизька
 const BS = 2, NB = RS / BS;
 
 // settings: { gpu: 'webgl2' | 'webgpu', shadows: 'off' | 'pcf3' | 'pcss' }
@@ -70,6 +73,9 @@ export async function createScene(canvas, settings = {}) {
   mk('liq', { defines: ['ECO_CURVE'], blend: { opacity: 0.75 } }); mk('liqR', { defines: ['ECO_CURVE', 'ECO_RING_IN'], blend: { opacity: 0.75 } });
   mk('objF', { defines: ['ECO_CURVE', 'ECO_WIND', 'ECO_XIN'] });
   mk('fl', { defines: ['ECO_CURVE', 'ECO_WIND', 'ECO_FADE', 'ECO_CUTF', 'ECO_THIN', 'ECO_XOUT'] });
+  mk('gr', { defines: ['ECO_CURVE', 'ECO_WIND', 'ECO_SPRITE', 'ECO_FADE', 'ECO_CUTF', 'ECO_THIN', 'ECO_XOUT'] });
+  // атлас спрайтів малих рослин (engine/graphics/sprites.js); шар — у вершинах трави (putFlora)
+  const SA = createSpriteAtlas(G, { size: SPR, onTexture: (t) => M.setSpriteArray(t) });
   mk('far', { cull: BACK, matcol: true, defines: ['ECO_CURVE', 'ECO_RING_OUT'] });
   mk('fig', { matcol: true });
   mk('body', { matcol: true, defines: ['ECO_CURVE'] });
@@ -86,7 +92,7 @@ export async function createScene(canvas, settings = {}) {
   const kinds = {};
   for (const k in KINDS) kinds[k] = { arena: KINDS[k][0], material: mats[KINDS[k][1]] };
   const stats = { draws: 0, tris: 0, shTris: 0, shDraws: 0, up: 0, upBytes: 0, gpuBytes: 0, arenaBytes: 0, arenaUsed: 0, over: false };
-  const RG = createRegions(G, { size: [RW, RW, RH], PO, PQ, format: FMT, kinds, casters: [{ arena: 'op', material: mats.obj }, null, { arena: 'fl', material: mats.fl }], arena0: ARENA0, arenaMax: ARENA_MAX, stats });
+  const RG = createRegions(G, { size: [RW, RW, RH], PO, PQ, format: FMT, kinds, casters: [{ arena: 'op', material: mats.obj }, { arena: 'fl', material: mats.gr }, { arena: 'fl', material: mats.fl }], arena0: ARENA0, arenaMax: ARENA_MAX, stats });
 
   // ---- небо, світла, частинки ----
   // розсіяне з неба перепікається, коли сонце зсунулось на 2° (доба 6–40 хв × плин часу — до ~2°/с; розсіяне плавне)
@@ -180,7 +186,7 @@ export async function createScene(canvas, settings = {}) {
   const dropRegion = (U, Gr) => {
     RG.drop(Gr.R);
     for (const [k, E] of Gr.secs) { U.slots.delete(k); for (let l = 0; l < 3; l++) if (E.L[l]) nL[l]--; }
-    for (const k of Gr.fls.keys()) U.flora.delete(k);
+    for (const [k, f] of Gr.fls) { U.flora.delete(k); for (const l of f.layers) SA.release(l); }
     U.regions.delete(Gr.k);
   };
   const emptyCheck = (U, Gr) => { if (!Gr.secs.size && !Gr.fls.size) dropRegion(U, Gr); };
@@ -201,6 +207,8 @@ export async function createScene(canvas, settings = {}) {
     if (!Gr) return;
     const f = Gr.fls.get(k);
     if (f.off >= 0) RG.free(Gr.R, 'fl', f.off, f.n);
+    if (f.goff >= 0) RG.free(Gr.R, 'fl', f.goff, f.ng);
+    for (const l of f.layers) SA.release(l);
     Gr.fls.delete(k);
     dirtyCol(U, Gr.rx, Gr.ry);
     emptyCheck(U, Gr);
@@ -225,14 +233,21 @@ export async function createScene(canvas, settings = {}) {
     Gr.shDirty = true;
     U.added = frame; U.at = performance.now();
   }
-  // Рослини зблизька стовпця; порожні — позначка null (є, малювати нічого)
+  // Рослини зблизька стовпця (великі й каміння — fl, малі спрайтами — gr); порожні — позначка null (є, малювати нічого).
+  // Спрайти стовпця — в атлас; у вершинах трави номер спрайта стовпця (байт z нормалі) → шар атласу
   function putFlora(d, n, k, q, data, mesh) {
     const U = uni(d, n, true);
     removeFlora(U, k);
-    if (!mesh.n) { U.flora.set(k, null); return; }
+    if (!mesh.n && !mesh.ng) { U.flora.set(k, null); return; }
     const [rx, ry] = regionOf(q.cx, q.cy, 0), Gr = region(U, rx, ry, data.rz);
-    const off = RG.put(Gr.R, 'fl', mesh.fl, mesh.n);
-    Gr.fls.set(k, { cx: q.cx, cy: q.cy, off, n: off < 0 ? 0 : mesh.n, bb: mesh.bb });
+    const off = mesh.n ? RG.put(Gr.R, 'fl', mesh.fl, mesh.n) : -1, layers = data.sprites.map((sp) => SA.acquire(sp.key, sp.data));
+    let goff = -1;
+    if (mesh.ng) {
+      const i8 = new Int8Array(mesh.gr);
+      for (let j = 0; j < mesh.ng; j++) { const l = layers[i8[j * 16 + 10] + 127]; i8[j * 16 + 10] = (l < 0 ? 0 : l) - 127; }
+      goff = RG.put(Gr.R, 'fl', mesh.gr, mesh.ng);
+    }
+    Gr.fls.set(k, { cx: q.cx, cy: q.cy, off, n: off < 0 ? 0 : mesh.n, goff, ng: goff < 0 ? 0 : mesh.ng, layers, bb: mesh.bb });
     grow(Gr.bb, mesh.bb); RG.setBounds(Gr.R, Gr.bb);
     U.flora.set(k, Gr);
     dirtyCol(U, rx, ry);
@@ -260,7 +275,7 @@ export async function createScene(canvas, settings = {}) {
       const live = [];
       if (kind === 'op') { for (const E of Gr.secs.values()) for (const sl of E.L) if (sl && sl.off >= 0) live.push([sl, 'off', sl.ns + sl.nf + sl.nc]); }
       else if (kind === 'liq') { for (const E of Gr.secs.values()) for (const sl of E.L) if (sl && sl.loff >= 0) live.push([sl, 'loff', sl.nl]); }
-      else for (const f of Gr.fls.values()) if (f.off >= 0) live.push([f, 'off', f.n]);
+      else for (const f of Gr.fls.values()) { if (f.off >= 0) live.push([f, 'off', f.n]); if (f.goff >= 0) live.push([f, 'goff', f.ng]); }
       A.repack(cap2, live);
       Gr.shDirty = true;
     }
@@ -331,12 +346,14 @@ export async function createScene(canvas, settings = {}) {
       if (sl.ns || nf) growB(b, sl.bb);
     }
     for (const f of Gr.fls.values()) {
-      if (f.off < 0 || !f.n || colDist(f.cx, f.cy, t) >= FLORA_NEAR) continue;
+      if ((!f.n && !f.ng) || colDist(f.cx, f.cy, t) >= FLORA_NEAR) continue;
       const b = blockOf(Gr, f.cx, f.cy);
-      pushS(b * 3 + 2, f.off, f.n); growB(b, f.bb);
+      if (f.n) pushS(b * 3 + 2, f.off, f.n);
+      if (f.ng) pushS(b * 3 + 1, f.goff, f.ng);
+      growB(b, f.bb);
     }
     let n = 0;
-    for (let b = 0; b < NB * NB; b++) for (const j of [0, 2]) {
+    for (let b = 0; b < NB * NB; b++) for (const j of [0, 1, 2]) {
       const i = b * 3 + j;
       if (!SN[i]) continue;
       const B = blocks[n++];
@@ -420,10 +437,11 @@ export async function createScene(canvas, settings = {}) {
         upQ[upHead++] = null;
         pend.delete(pkey(kind === 's' ? 's' + (q.lod || 0) : kind, d, n, k));
         if (kind === 's') { putSection(d, n, k, q, mesh); b += mesh ? (mesh.ns + mesh.nf + (mesh.nc || 0) + mesh.nl) * 16 : 0; }
-        else { putFlora(d, n, k, q, data, mesh); b += mesh.n * 16; }
+        else { putFlora(d, n, k, q, data, mesh); b += (mesh.n + (mesh.ng || 0)) * 16; }
         i++;
       }
       if (upHead === upQ.length) { upQ.length = 0; upHead = 0; } else if (upHead > 4096) { upQ.splice(0, upHead); upHead = 0; }
+      SA.flush();
     },
     setBudget(bytes) { budget = bytes; },
     get overBudget() { return over; },
@@ -611,10 +629,13 @@ export async function createScene(canvas, settings = {}) {
             }
           }
           for (const f of Gr.fls.values()) {
-            if (f.off < 0 || !f.n) continue;
+            if (!f.n && !f.ng) continue;
             if (colDist(f.cx, f.cy, t) >= FLORA_NEAR) continue;
             const c = f.bb;
-            if (inside || aabbInView(m, ox + c[0], oy + c[1], oz + c[2], ox + c[3], oy + c[4], oz + c[5])) pushR(L_FL, seg[L_FL * 2], f.off, f.n);
+            if (inside || aabbInView(m, ox + c[0], oy + c[1], oz + c[2], ox + c[3], oy + c[4], oz + c[5])) {
+              if (f.n) pushR(L_FL, seg[L_FL * 2], f.off, f.n);
+              if (f.ng) pushR(L_GR, seg[L_GR * 2], f.goff, f.ng);
+            }
           }
           for (let j = 0; j < NL; j++) seg[j * 2 + 1] = LN[j];
         }

@@ -6,8 +6,9 @@ import { CS, SEC, H, O_TREE, O_FLOAT, O_COVER, solidB, B_AIR, B_LIQ, B_ICE, B_SA
 import { L_LAVA, SEA, gravityAt } from '../universe.js';
 import { LEVEL } from '../iso.js';
 import { template, place, footprint } from './plants.js';
+import { spriteOf, placeSprite } from './sprites.js';
 import { groundTint } from './flora.js';
-import { M_FLAT, M_ROCK, M_CLIFF, M_WATER, M_LAVA, M_ICE, M_SAND, M_LUSH, M_DRY, M_DESERT, M_SNOW, M_BED, M_MUD, M_SOIL, M_SANDSIDE, M_LIP, THIN_N } from './materials.js';
+import { M_FLAT, M_ROCK, M_CLIFF, M_WATER, M_LAVA, M_ICE, M_SAND, M_LUSH, M_DRY, M_DESERT, M_SNOW, M_BED, M_MUD, M_SOIL, M_SANDSIDE, M_LIP, M_BLADE, THIN_N } from './materials.js';
 import { hash3 } from '../rng.js';
 
 export const shade = (c, k) => [Math.min(255, c[0] * k | 0), Math.min(255, c[1] * k | 0), Math.min(255, c[2] * k | 0)];
@@ -389,15 +390,17 @@ export function chunkMesh(C, L, { near = true, far = true } = {}) {
       x += w;
     }
   }
-  const { F, Ff } = objMeshes(C, L, K0, NK, near, far);
-  return { solid: M.finish(), liquid: W.n ? W.finish() : null, caps: Mc.n ? Mc.finish() : null, flora: F.n ? F.finish() : null, far: Ff.n ? Ff.finish() : null };
+  const { F, Ff, Fg, sprites } = objMeshes(C, L, K0, NK, near, far);
+  return { solid: M.finish(), liquid: W.n ? W.finish() : null, caps: Mc.n ? Mc.finish() : null, flora: F.n ? F.finish() : null, grass: Fg.n ? Fg.finish() : null, sprites, far: Ff.n ? Ff.finish() : null };
 }
 
 // Рослини й каміння предметів з основою в K0…K0+NK−1: шаблон виду (варіант будови — від хешу) з поворотом, віком,
 // нахилом і розкидом кольору; висота — від K0. F — зблизька (повна будова, трава й квіти), Ff — здалеку (спрощені
-// великі рослини й каміння); near / far — що рахувати
+// великі рослини й каміння); Fg — малі рослини зблизька спрайтами (gen/sprites.js; sprites — набір спрайтів стовпця,
+// номер у ньому — у вершинах); near / far — що рахувати
+const SWAY = new Set(['grass', 'flower', 'bush', 'fern', 'shrub', 'reedlet']);   // малі, що гойдаються від вітру
 function objMeshes(C, L, K0, NK, near, far, dz = 0) {
-  const F = new Mesh(), Ff = new Mesh();
+  const F = new Mesh(), Ff = new Mesh(), Fg = new Mesh(), sprites = [], slotOf = new Map();
   for (const o of C.obj) {
     if (o.z < K0 || o.z >= K0 + NK) continue;                 // предмет — у секції своєї основи
     const z = (o.z - K0) * LEVEL + dz, v = o.v, g = C.sp[o.s], q = objPose(C, L, o);
@@ -407,14 +410,21 @@ function objMeshes(C, L, K0, NK, near, far, dz = 0) {
       const tl = ((v >> 2 & 7) / 7) * 0.1;
       if (near) place(F, template(g, v % 3, 0), cx, cy, z, rot, s, tl, cj, sk);
       if (far) place(Ff, template(g, v % 3, 1), cx, cy, z, rot, s, tl, cj, sk);   // той самий варіант, спрощений
-    } else if (o.k === O_COVER) { if (near) place(F, template(g, v & 1, 0), cx, cy, z, rot, s, 0, cj, sk, 1 + hash3(0x7f1a, o.x + C.cx * CS, o.y + C.cy * CS) % THIN_N); }
+    } else if (o.k === O_COVER) {
+      if (!near) continue;
+      const sp = spriteOf(g, v & 1);
+      let slot = slotOf.get(sp.key);
+      if (slot === undefined) { if (sprites.length >= 255) continue; slot = sprites.length; slotOf.set(sp.key, slot); sprites.push(sp); }
+      placeSprite(Fg, sp, slot, cx, cy, z, rot, s, cj, sk, (SWAY.has(g.form) ? M_BLADE : M_FLAT) | (1 + hash3(0x7f1a, o.x + C.cx * CS, o.y + C.cy * CS) % THIN_N) << 5);
+    }
     else { const T = template(o.st ? stoneGenome(L, g, o.st) : g, v & 3, 0, styleOf(g, v)); if (near) place(F, T, cx, cy, z, rot, s, 0, cj, sk); if (far) place(Ff, T, cx, cy, z, rot, s, 0, cj, sk); }
   }
-  return { F, Ff };
+  return { F, Ff, Fg, sprites };
 }
 
-// Рослини й каміння зблизька всього стовпця (окрема робота: потрібні лише біля камери); висота — від блоку K0
-export function floraMesh(C, L, K0) { return objMeshes(C, L, K0, 1e9, true, false).F; }
+// Рослини й каміння зблизька всього стовпця (окрема робота: потрібні лише біля камери); висота — від блоку K0.
+// → {F — великі й каміння, Fg — малі спрайтами, sprites — набір спрайтів стовпця}
+export function floraMesh(C, L, K0) { return objMeshes(C, L, K0, 1e9, true, false); }
 // Далекі рослини й каміння з основою в секції K0…K0+15 (груба секція: dz — опустити до грубої землі)
 export function farFlora(C, L, K0, dz = 0) { return objMeshes(C, L, K0, SEC, false, true, dz).Ff; }
 

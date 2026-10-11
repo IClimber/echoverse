@@ -13,7 +13,11 @@
 //   трава рідшає поштучно, без межі (як відстань відсікання трави з плавним згасанням в ігрових рушіях);
 // - перехід між рівнями деталізації дизерингом (як Cross Fade у LOD Group Unity): у смузі eco_xfade (від, до — відстань
 //   від цілі по горизонталі) повна версія (ECO_XOUT) зникає, а спрощена (ECO_XIN) проступає — ті самі пікселі за тим самим
-//   шумом (interleaved gradient noise), без перекриття й дірок; лише прямий прохід (тінь — від однієї з версій).
+//   шумом (interleaved gradient noise), без перекриття й дірок; лише прямий прохід (тінь — від однієї з версій);
+// - спрайти (ECO_SPRITE, малі рослини площинами, як у Minecraft): нормаль вершини несе координати спрайта (x — u, y — v,
+//   z — шар атласу uSprite − 127), освітлення — з нормаллю вгору (normalVS), альбедо — спрайт × колір вершини, вирізання
+//   за альфою спрайта в обох проходах (альфа × (1 + 0,25 · рівень мип-мапи) — як у Ben Golus «Anti-aliased Alpha Test»:
+//   без цього мип-мапи з'їдають тонкі стебла здалеку), вітер гойдає лише верх (× v).
 // Варіанти: ECO_MATCOL — матеріал у color.a (float-меші), інакше — у pos.w, а AO — у color.a (aoVertexColor)
 import { pc } from './app.js';
 
@@ -28,6 +32,12 @@ uniform vec4 eco_mat[${MAT_N}];
 uniform vec2 eco_thin;
 varying float vEcoMat;
 varying float vEcoThin;
+varying vec3 vEcoUV;
+// спрайт: нормаль — координати спрайта в обох проходах і вже в transformVS (типовий normalCoreVS оголошує її пізніше
+// й лише з NORMALS — у спрайтів його рядок прибрано, chunksFor), атрибут без NORMALS — material.setAttribute
+#ifdef ECO_SPRITE
+attribute vec3 vertex_normal;
+#endif
 `;
 const MAIN_END_VS = `
 #ifdef ECO_MATCOL
@@ -41,12 +51,21 @@ const MAIN_END_VS = `
   float eco_raw = floor(vertex_position.w * 65535.0 + 0.5), eco_key = floor(eco_raw / 32.0);
   vEcoMat = eco_raw - eco_key * 32.0;
   vEcoThin = eco_key > 0.5 ? mix(eco_thin.x, eco_thin.y, eco_key / 2047.0) : 1.0e6;
+  #ifdef ECO_SPRITE
+    vEcoUV = vec3(vertex_normal.xy, floor(vertex_normal.z * 127.0 + 0.5) + 127.0);
+  #endif
 #endif
 `;
 const TRANSFORM_ADD = `
 	#ifdef ECO_WIND
 		float eco_wm = mod(floor(vertex_position.w * 65535.0 + 0.5), 32.0);
-		if (eco_mat[int(eco_wm)].y > 0.5) posW.xz += eco_wind.xy * (0.55 + 0.45 * sin(eco_wind.z * 1.9 + posW.x * 0.9 + posW.z * 1.3 + posW.y * 0.7));
+		if (eco_mat[int(eco_wm)].y > 0.5) {
+			float eco_s = 0.55 + 0.45 * sin(eco_wind.z * 1.9 + posW.x * 0.9 + posW.z * 1.3 + posW.y * 0.7);
+			#ifdef ECO_SPRITE
+				eco_s *= vertex_normal.y;
+			#endif
+			posW.xz += eco_wind.xy * eco_s;
+		}
 	#endif
 	#ifdef ECO_CURVE
 		vec2 eco_dc = posW.xz - eco_target.xz;
@@ -68,6 +87,10 @@ uniform vec2 eco_cut3;
 uniform vec2 eco_xfade;
 varying float vEcoMat;
 varying float vEcoThin;
+varying vec3 vEcoUV;
+#ifdef ECO_SPRITE
+  uniform sampler2DArray uSprite;
+#endif
 vec3 eco_col;
 `;
 // Альбедо: колір вершини (лінійний — vertexColorGamma) × текстура шару «матеріал» (sRGB — вибірка лінійна; 128 = ×1:
@@ -99,6 +122,13 @@ void getAlbedo() {
   dAlbedo = eco_col * (1.0 - eco_p.x);
 }
 `;
+const DIFFUSE_SPRITE_PS = `
+void getAlbedo() {
+  vec4 eco_p = eco_mat[int(min(floor(vEcoMat + 0.5), ${MAT_N - 1}.0))];
+  eco_col = vVertexColor.rgb * texture(uSprite, vEcoUV).rgb * 4.595;
+  dAlbedo = eco_col * (1.0 - eco_p.x);
+}
+`;
 const EMISSIVE_PS = `
 void getEmission() {
   float eco_e = eco_mat[int(min(floor(vEcoMat + 0.5), ${MAT_N - 1}.0))].x;
@@ -114,6 +144,11 @@ const OPACITY_PS = `
 uniform float material_alphaDitherScale;
 void getOpacity() {
   dAlpha = 1.0;
+  #ifdef ECO_SPRITE
+    vec2 eco_st = vEcoUV.xy * 32.0;
+    float eco_lod = max(0.0, 0.5 * log2(max(dot(dFdx(eco_st), dFdx(eco_st)), dot(dFdy(eco_st), dFdy(eco_st)))));
+    if (texture(uSprite, vEcoUV).a * (1.0 + 0.25 * eco_lod) < 0.5) dAlpha = 0.0;
+  #endif
   #ifdef ECO_THIN
     if (length(vPositionW.xz - eco_target.xz) > vEcoThin) dAlpha = 0.0;
   #endif
@@ -147,6 +182,14 @@ void getOpacity() {
 }
 `;
 
+const NORMAL_VS = `
+mat3 dNormalMatrix;
+vec3 getNormal() {
+    dNormalMatrix = getNormalMatrix(dModelMatrix);
+    return normalize(dNormalMatrix * vec3(0.0, 0.0, 1.0));
+}
+`;
+
 // ---------------- WGSL: уніформи — uniform.ім'я, текстура — пара ім'я + ім'яSampler, варіації в PS — глобальні ----------------
 const DECL_VS_W = `
 uniform eco_wind: vec4f;
@@ -156,6 +199,10 @@ uniform eco_mat: array<vec4f, ${MAT_N}>;
 uniform eco_thin: vec2f;
 varying vEcoMat: f32;
 varying vEcoThin: f32;
+varying vEcoUV: vec3f;
+#ifdef ECO_SPRITE
+attribute vertex_normal: vec3f;
+#endif
 `;
 const MAIN_END_VS_W = `
 #ifdef ECO_MATCOL
@@ -170,6 +217,9 @@ const MAIN_END_VS_W = `
   let eco_key: f32 = floor(eco_raw / 32.0);
   output.vEcoMat = eco_raw - eco_key * 32.0;
   output.vEcoThin = select(1.0e6, mix(uniform.eco_thin.x, uniform.eco_thin.y, eco_key / 2047.0), eco_key > 0.5);
+  #ifdef ECO_SPRITE
+    output.vEcoUV = vec3f(vertex_normal.xy, floor(vertex_normal.z * 127.0 + 0.5) + 127.0);
+  #endif
 #endif
 `;
 const TRANSFORM_ADD_W = `
@@ -177,7 +227,10 @@ const TRANSFORM_ADD_W = `
 		let eco_wr: f32 = floor(vertex_position.w * 65535.0 + 0.5);
 		let eco_wm: f32 = eco_wr - floor(eco_wr / 32.0) * 32.0;
 		if (uniform.eco_mat[i32(eco_wm)].y > 0.5) {
-			let eco_s: f32 = 0.55 + 0.45 * sin(uniform.eco_wind.z * 1.9 + posW.x * 0.9 + posW.z * 1.3 + posW.y * 0.7);
+			var eco_s: f32 = 0.55 + 0.45 * sin(uniform.eco_wind.z * 1.9 + posW.x * 0.9 + posW.z * 1.3 + posW.y * 0.7);
+			#ifdef ECO_SPRITE
+				eco_s = eco_s * vertex_normal.y;
+			#endif
 			posW.x = posW.x + uniform.eco_wind.x * eco_s;
 			posW.z = posW.z + uniform.eco_wind.y * eco_s;
 		}
@@ -203,6 +256,11 @@ uniform eco_cut3: vec2f;
 uniform eco_xfade: vec2f;
 varying vEcoMat: f32;
 varying vEcoThin: f32;
+varying vEcoUV: vec3f;
+#ifdef ECO_SPRITE
+  var uSprite: texture_2d_array<f32>;
+  var uSpriteSampler: sampler;
+#endif
 var<private> eco_col: vec3f;
 `;
 // Похідні (dpdx) — лише в рівномірному потоці керування: координати — через select, шов (discard) — у кінці
@@ -238,6 +296,13 @@ fn getAlbedo() {
   #endif
 }
 `;
+const DIFFUSE_SPRITE_PS_W = `
+fn getAlbedo() {
+  let eco_p: vec4f = uniform.eco_mat[i32(min(floor(vEcoMat + 0.5), ${MAT_N - 1}.0))];
+  eco_col = vVertexColor.rgb * textureSample(uSprite, uSpriteSampler, vEcoUV.xy, i32(vEcoUV.z + 0.5)).rgb * 4.595;
+  dAlbedo = eco_col * (1.0 - eco_p.x);
+}
+`;
 const EMISSIVE_PS_W = `
 fn getEmission() {
   let eco_e: f32 = uniform.eco_mat[i32(min(floor(vEcoMat + 0.5), ${MAT_N - 1}.0))].x;
@@ -248,6 +313,12 @@ const OPACITY_PS_W = `
 uniform material_alphaDitherScale: f32;
 fn getOpacity() {
   dAlpha = 1.0;
+  #ifdef ECO_SPRITE
+    let eco_st: vec2f = vEcoUV.xy * 32.0;
+    let eco_lod: f32 = max(0.0, 0.5 * log2(max(dot(dpdx(eco_st), dpdx(eco_st)), dot(dpdy(eco_st), dpdy(eco_st)))));
+    let eco_sa: f32 = textureSample(uSprite, uSpriteSampler, vEcoUV.xy, i32(vEcoUV.z + 0.5)).a;
+    if (eco_sa * (1.0 + 0.25 * eco_lod) < 0.5) { dAlpha = 0.0; }
+  #endif
   #ifdef ECO_THIN
     if (length(vPositionW.xz - uniform.eco_target.xz) > vEcoThin) { dAlpha = 0.0; }
   #endif
@@ -282,19 +353,31 @@ fn getOpacity() {
 }
 `;
 
+const NORMAL_VS_W = `
+var<private> dNormalMatrix: mat3x3f;
+fn getNormal() -> vec3f {
+    dNormalMatrix = getNormalMatrix(dModelMatrix);
+    return normalize(dNormalMatrix * vec3f(0.0, 0.0, 1.0));
+}
+`;
+
 // transformVS — типовий шматок рушія з нашим кодом після рядка-якоря (обчислення світової позиції)
 const ANCHOR = {
   [pc.SHADERLANGUAGE_GLSL]: 'vec4 posW = modelMatrix * vec4(localPos, 1.0);',
   [pc.SHADERLANGUAGE_WGSL]: 'var posW: vec4f = modelMatrix * vec4f(localPos, 1.0);',
 };
 const cache = new Map();
-// Шматки для мови lang; opacity — лише для варіантів з дизерингом (розчинення, «вікно»)
-export function chunksFor(dev, lang, { opacity = false } = {}) {
+// Шматки для мови lang; opacity — лише для варіантів з дизерингом (розчинення, «вікно»); sprite — спрайти (ECO_SPRITE)
+// рядок атрибута нормалі в типовому normalCoreVS (спрайти оголошують його самі — угорі, litUserDeclarationVS)
+const NORMAL_ATTR = { [pc.SHADERLANGUAGE_GLSL]: 'attribute vec3 vertex_normal;', [pc.SHADERLANGUAGE_WGSL]: 'attribute vertex_normal: vec3f;' };
+export function chunksFor(dev, lang, { opacity = false, sprite = false } = {}) {
   let C = cache.get(lang);
   if (!C) {
     const W = lang === pc.SHADERLANGUAGE_WGSL;
     const base = pc.ShaderChunks.get(dev, lang).get('transformVS'), a = ANCHOR[lang];
     if (!base || !base.includes(a)) throw new Error('transformVS PlayCanvas змінився');
+    const nc = pc.ShaderChunks.get(dev, lang).get('normalCoreVS'), na = NORMAL_ATTR[lang];
+    if (!nc || !nc.includes(na)) throw new Error('normalCoreVS PlayCanvas змінився');
     C = {
       litUserDeclarationVS: W ? DECL_VS_W : DECL_VS,
       litUserMainEndVS: W ? MAIN_END_VS_W : MAIN_END_VS,
@@ -303,10 +386,14 @@ export function chunksFor(dev, lang, { opacity = false } = {}) {
       diffusePS: W ? DIFFUSE_PS_W : DIFFUSE_PS,
       emissivePS: W ? EMISSIVE_PS_W : EMISSIVE_PS,
       opacityPS: W ? OPACITY_PS_W : OPACITY_PS,
+      spriteDiffusePS: W ? DIFFUSE_SPRITE_PS_W : DIFFUSE_SPRITE_PS,
+      spriteNormalVS: W ? NORMAL_VS_W : NORMAL_VS,
+      spriteNormalCoreVS: nc.replace(na, ''),
     };
     cache.set(lang, C);
   }
-  if (opacity) return C;
-  const { opacityPS: _o, ...rest } = C;
+  const { opacityPS, spriteDiffusePS, spriteNormalVS, spriteNormalCoreVS, ...rest } = C;
+  if (opacity) rest.opacityPS = opacityPS;
+  if (sprite) { rest.diffusePS = spriteDiffusePS; rest.normalVS = spriteNormalVS; rest.normalCoreVS = spriteNormalCoreVS; }
   return rest;
 }

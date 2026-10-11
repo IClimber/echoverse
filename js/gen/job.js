@@ -43,7 +43,8 @@ export function colSummary(col, L) {
 // Робота q = {type: 'col' | 'sec' | 'lod' (груба секція рівня lod) | 'flora' | 'far' (плитка далечі tx, ty з кроком s), d, n, cx, cy, cz}:
 // {data, mesh?, bufs — що можна передати без копіювання}. Меші секцій і рослин — щільні вершини в кадрі регіону (pack.js):
 // секція — op (тверде, за ним ns вершин — nf далеких рослин) і liq (поверхня рідини); рослини зблизька — весь стовпець
-// окремо (потрібні лише біля камери), кадр — регіон rz найнижчого предмета. Груба секція (lod) — op: тверде (ns), далекі
+// окремо (потрібні лише біля камери): fl — великі й каміння, gr — малі спрайтами (data.sprites — їхні спрайти), кадр —
+// регіон rz найнижчого предмета. Груба секція (lod) — op: тверде (ns), далекі
 // рослини (nf), обрізи (nc, шов між рівнями); блоків не віддає
 export function runJob(L, q, cache) {
   if (q.type === 'far') {                      // плитка далечі: висотне поле поверхні з кроком q.s
@@ -55,11 +56,15 @@ export function runJob(L, q, cache) {
   if (q.type === 'flora') {
     let zmin = Infinity;
     for (const o of col.obj) if (o.k !== O_FLOAT && o.z < zmin) zmin = o.z;
-    if (zmin === Infinity) return { data: { rz: 0 }, mesh: { fl: null, n: 0, bb: null }, bufs: [] };
+    if (zmin === Infinity) return { data: { rz: 0, sprites: [] }, mesh: { fl: null, n: 0, gr: null, ng: 0, bb: null }, bufs: [] };
     const rz = Math.floor(Math.floor(zmin / SEC) / RS), [dx, dy] = frameOf(q.cx, q.cy, 0);
     shelterTop(col, L);
-    const f = packMesh(floraMesh(col, L, rz * RS * SEC).finish(), dx, dy, 0);
-    return { data: { rz }, mesh: { fl: f.n ? f.buf : null, n: f.n, bb: f.bb }, bufs: f.n ? [f.buf] : [] };
+    const { F, Fg, sprites } = floraMesh(col, L, rz * RS * SEC);
+    const f = packMesh(F.n ? F.finish() : null, dx, dy, 0), g = packMesh(Fg.n ? Fg.finish() : null, dx, dy, 0);
+    const bb = !g.n ? f.bb : !f.n ? g.bb : f.bb.map((v, i) => i < 3 ? Math.min(v, g.bb[i]) : Math.max(v, g.bb[i]));
+    // спрайти — копії (кеш воркера лишається): рушій кладе їх в атлас і замінює номер у вершинах на шар
+    return { data: { rz, sprites: sprites.map((sp) => ({ key: sp.key, data: sp.data.slice() })) },
+      mesh: { fl: f.n ? f.buf : null, n: f.n, gr: g.n ? g.buf : null, ng: g.n, bb: f.n || g.n ? bb : null }, bufs: [f.buf, g.buf].filter((b) => b.byteLength) };
   }
   if (q.type === 'lod') {                      // груба секція (рівень q.lod: крок 2 чи 4 блоки) — лише меш, без блоків
     const s = q.lod === 2 ? 4 : 2, G = genCoarse(L, col, q.cz, s), [dx, dy, dz] = frameOf(q.cx, q.cy, q.cz);

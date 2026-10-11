@@ -9,9 +9,10 @@ import { chunksFor, MAT_N } from './chunks.js';
 export function createMaterials(G) {
   const { dev, lang } = G, sc = dev.scope;
   const all = new Map();
-  let texArr = null;
+  let texArr = null, sprArr = null;
 
-  // opts: cull (типово NONE), defines ['ECO_…'], blend (прозорість: { opacity }), matcol — матеріал у color.a (без AO)
+  // opts: cull (типово NONE), defines ['ECO_…'], blend (прозорість: { opacity }), matcol — матеріал у color.a (без AO);
+  // ECO_SPRITE — спрайти з атласу (setSpriteArray), вирізання за альфою і в тіні
   function makeMaterial(name, { cull = pc.CULLFACE_NONE, defines = [], blend = null, matcol = false } = {}) {
     const m = new pc.StandardMaterial();
     m.name = name;
@@ -20,14 +21,15 @@ export function createMaterials(G) {
     if (matcol) m.setDefine('ECO_MATCOL', true);
     else { m.aoVertexColor = true; m.aoVertexColorChannel = 'a'; m.aoIntensity = 1; }
     m.cull = cull;
-    const thin = defines.includes('ECO_THIN'), dither = thin || defines.some((d) => d === 'ECO_FADE' || d === 'ECO_CUT' || d === 'ECO_CUTF' || d === 'ECO_XIN' || d === 'ECO_XOUT');
+    const sprite = defines.includes('ECO_SPRITE'), thin = sprite || defines.includes('ECO_THIN'), dither = thin || defines.some((d) => d === 'ECO_FADE' || d === 'ECO_CUT' || d === 'ECO_CUTF' || d === 'ECO_XIN' || d === 'ECO_XOUT');
     // у тіньовому проході — лише проріджування (розчинення й «вікно» — FORWARD_PASS): трава за межею не кидає тіні
     if (dither) { m.opacityDither = pc.DITHER_BAYER8; m.opacityShadowDither = thin ? pc.DITHER_BAYER8 : pc.DITHER_NONE; }
     for (const d of defines) m.setDefine(d, true);
-    m.getShaderChunks(lang).add(chunksFor(dev, lang, { opacity: dither }));
+    m.getShaderChunks(lang).add(chunksFor(dev, lang, { opacity: dither, sprite }));
     m.shaderChunksVersion = '2.23';
     if (blend) setBlend(m, blend.opacity);
     if (texArr) m.setParameter('uTexArr', texArr);
+    if (sprite) { m.ecoSprite = true; m.setAttribute('vertex_normal', pc.SEMANTIC_NORMAL); if (sprArr) m.setParameter('uSprite', sprArr); }
     m.update();
     all.set(name, m);
     return m;
@@ -61,6 +63,10 @@ export function createMaterials(G) {
     setTextureArray(tex) {
       texArr = tex;
       for (const m of all.values()) { m.setParameter('uTexArr', tex); }
+    },
+    setSpriteArray(tex) {
+      sprArr = tex;
+      for (const m of all.values()) if (m.ecoSprite) m.setParameter('uSprite', tex);
     },
     // Уніформи кадру (PlayCanvas, світові координати): wind [x, z, час, 0], curve, target, seam, time, minLight, eye,
     // fade [від, до], cut, cut2, cut3, thin [від, до], xfade [від, до] — див. chunks.js. Не передане — лишається як було
