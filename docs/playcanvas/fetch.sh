@@ -1,6 +1,10 @@
 #!/bin/sh
-# docs/playcanvas/fetch.sh — локальна копія документації й коду PlayCanvas (у git — лише цей скрипт і README.md).
-# Версії: рушій — тег ENGINE (той самий, що в import map index.html), посібник — коміт SITE репозиторію developer-site
+# docs/playcanvas/fetch.sh — PlayCanvas для гри й для читання, одна версія на все:
+# - js/lib/playcanvas/ (у git) — рушій, на якому йде гра (повна збірка build/playcanvas.mjs, не мінімізована — читабельні
+#   стеки помилок), скрипт камери для стенду ?light і LICENSE (MIT: текст ліцензії — поруч з копією); import map у
+#   index.html вказує туди — гра працює без інтернету;
+# - docs/playcanvas/ (у git — лише цей скрипт і README.md) — код рушія з JSDoc, приклади, скрипти й посібник для читання.
+# Версії: рушій — тег ENGINE, посібник — коміт SITE репозиторію developer-site
 set -eu
 ENGINE=v2.23.2
 SITE=758cc212fe089a7734f1ac4a4fb93941f1136c23
@@ -22,3 +26,12 @@ cp -r "$T/engine/examples/src/examples" "$D/engine/examples"
 cp -r "$T/engine/scripts/esm" "$D/engine/scripts"
 curl -sfL "https://cdn.jsdelivr.net/npm/playcanvas@${ENGINE#v}/build/playcanvas.d.ts" -o "$D/engine/playcanvas.d.ts"
 echo "$ENGINE $SITE $(date -u +%F)" > "$D/VERSION"
+# рушій для гри — з npm-пакета тієї самої версії
+L="$D/../../js/lib/playcanvas"
+NPM="https://cdn.jsdelivr.net/npm/playcanvas@${ENGINE#v}"
+rm -rf "$L"
+mkdir -p "$L/build" "$L/scripts/esm"
+curl -sfL "$NPM/build/playcanvas.mjs" -o "$L/build/playcanvas.mjs"
+curl -sfL "$NPM/scripts/esm/camera-controls.mjs" -o "$L/scripts/esm/camera-controls.mjs"
+curl -sfL "$NPM/LICENSE" -o "$L/LICENSE"
+echo "$ENGINE" > "$L/VERSION"

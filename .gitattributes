@@ -1,0 +1,2 @@
+# Рушій PlayCanvas — сторонній код (docs/playcanvas/fetch.sh): без порівняння змін у комітах, не в статистиці мов
+js/lib/** linguist-vendored -diff

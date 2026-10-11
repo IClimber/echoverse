@@ -3,7 +3,11 @@
 Правило користувача (10.10.2026): «Для роботи з PlayCanvas не придумуй нічого свого, використовуй документацію PlayCanvas
 і шукай best practice по написаню 3D ігор».
 
-У git — лише цей файл і `fetch.sh`; решту (~20 МБ) відновлює `sh docs/playcanvas/fetch.sh`. Версії — у `VERSION`.
+У git — лише цей файл і `fetch.sh`; решту (~25 МБ) відновлює `sh docs/playcanvas/fetch.sh`. Версії — у `VERSION`.
+
+Рушій, на якому йде гра, — не тут, а в `js/lib/playcanvas/` (у git; import map `index.html` вказує туди, гра працює
+без інтернету): повна збірка `build/playcanvas.mjs`, `scripts/esm/camera-controls.mjs` (стенд `?light`) і `LICENSE`.
+Його кладе той самий `fetch.sh` з тієї самої версії — код для читання тут і рушій гри завжди однієї версії.
 
 ## З чого почати
 `manual/llms/llms.txt` → `manual/llms/user-manual/engine/llms.txt` — офіційний покажчик PlayCanvas для ШІ-агентів
@@ -16,7 +20,8 @@
 - `engine/playcanvas.d.ts` — API;
 - `engine/examples` — офіційні приклади; `engine/scripts` — готові скрипти (`camera-controls.mjs`, `sky/procedural-sky.mjs`…).
 
-Оновити версію: змінити `ENGINE` / `SITE` у `fetch.sh` разом з import map у `index.html`, запустити скрипт.
+Оновити версію: змінити `ENGINE` / `SITE` у `fetch.sh`, запустити скрипт (оновить і `docs/playcanvas/`, і `js/lib/playcanvas/`;
+import map у `index.html` версії не містить).
 
 ## Для наших задач
 Посібник (`manual/user-manual/graphics/…`):
