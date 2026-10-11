@@ -67,7 +67,9 @@ console.log(`дальність 32 (14 / 42 / 44 % стовпців — повн
   const { step, standable, settle } = await import('../js/player.js');
   const { genChunk, bi, H, B_AIR, B_STONE, SEC } = await import('../js/gen/chunk.js');
   const { physOf } = await import('../js/universe.js');
-  let secB = 0, nB = 0, secV = 0, nV = 0, stepT = 0, steps = 0;
+  const { createCamera, camHead, camCollide, THIRD, HEAD } = await import('../js/camera.js');
+  const { underLiquid } = await import('../js/collision.js');
+  let secB = 0, nB = 0, secV = 0, nV = 0, stepT = 0, steps = 0, camT = 0, cams = 0;
   for (const n of [0, 37, 1000]) {
     const L = lawsOf(seed, 0, n), ph = physOf(L), C = new Map(), cols = new Map();
     for (let cy = 0; cy < 3; cy++) for (let cx = 0; cx < 3; cx++) { C.set(`${cx},${cy}`, genChunk(L, cx, cy)); cols.set(`${cx},${cy}`, genCol(L, cx, cy)); }
@@ -94,6 +96,14 @@ console.log(`дальність 32 (14 / 42 / 44 % стовпців — повн
       step(p, ix, iy, r() < 0.01, 1 / 120, P, ph, undefined, { sprint: i % 300 < 90 });
     }
     stepT += performance.now() - t; steps += 5000;
+    // камера: обертається навколо гравця
+    const cam = createCamera(THIRD), src = colliderOf(P), under = (a, b, c) => underLiquid(P, a, b, c), t2 = performance.now();
+    for (let i = 0; i < 2000; i++) {
+      cam.yaw = i * 0.01; cam.pitch3 = 0.3 + 0.3 * Math.sin(i * 0.003);
+      const head = [p.x, p.y, camHead(src, [p.x, p.y, p.z], HEAD)];
+      camCollide(cam, head, head, src, under);
+    }
+    camT += performance.now() - t2; cams += 2000;
   }
-  console.log(`зіткнення: секція з b ${(secB / nB).toFixed(2)} мс (${nB}), віртуальна з block() ${(secV / nV).toFixed(2)} мс (${nV}); крок гравця ${(stepT / steps * 1000).toFixed(1)} мкс`);
+  console.log(`зіткнення: секція з b ${(secB / nB).toFixed(2)} мс (${nB}), віртуальна з block() ${(secV / nV).toFixed(2)} мс (${nV}); крок гравця ${(stepT / steps * 1000).toFixed(1)} мкс; камера ${(camT / cams * 1000).toFixed(1)} мкс`);
 }

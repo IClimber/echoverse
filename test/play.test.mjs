@@ -642,3 +642,38 @@ test('прогулянка справжнім рельєфом: випадков
     assert.ok(moved > 30 && ground > 10 && jumps > 10, `${n}: пройшов ${moved}, на землі ${ground}, стрибків ${jumps}`);
   }
 });
+
+test('камера третьої особи — куля: стіна, стовбур, тіло позаду — ближче; схил — око над ним; низька стеля — ціль під нею; не виходить з-під рідини', async () => {
+  const { createCamera, camHead, camCollide, eyeDir, THIRD, HEAD, CAM_R, CAM_MIN } = await import('../js/camera.js');
+  const { colliderOf, underLiquid } = await import('../js/collision.js');
+  const cam = createCamera(THIRD);
+  cam.yaw = Math.PI; cam.pitch3 = 0; cam.dist = 7;                   // око — у бік −x
+  const at = (P, x, y, z) => { const src = colliderOf(P), head = [x, y, camHead(src, [x, y, z], HEAD)]; return { head, ...camCollide(cam, head, head, src, (a, b, c) => underLiquid(P, a, b, c)) }; };
+  // відкрито — повна відстань; стіна (стовпці x = 2, 7,5 одиниці) — до неї мінус радіус кулі
+  assert.equal(at(world(Array(9).fill('4'.repeat(16))), 8.5, 4.5, 2).dist, 7);
+  const w = at(world(Array(9).fill('44f4444444444444')), 8.5, 4.5, 2);
+  assert.ok(Math.abs(w.dist - (8.5 - 3 - CAM_R)) < 0.02, `стіна: ${w.dist}`);
+  // стовбур (r 0,18) і тіло позаду
+  const t = at(world(Array(9).fill('2'.repeat(16)).map((r, i) => i === 4 ? '222T222222222222' : r)), 8.5, 4.5, 1);
+  assert.ok(Math.abs(t.dist - (8.5 - 3.5 - 0.18 - CAM_R)) < 0.03, `стовбур: ${t.dist}`);
+  const flat = world(Array(9).fill('4'.repeat(16))), box = { x: 4.5, y: 4.5, z: 3, hx: 0.3, hy: 0.3, hz: 0.3 };
+  const b = at({ ...flat, bodies: () => [box] }, 8.5, 4.5, 2);
+  assert.ok(Math.abs(b.dist - (8.5 - 4.8 - CAM_R)) < 0.02, `тіло: ${b.dist}`);
+  // схил позаду (угору в бік −x): центр ока над поверхнею щонайменше на радіус кулі
+  const S = world(Array(9).fill('ihgfedcba9876544')), saved = cam.pitch3;
+  cam.pitch3 = 0.35;
+  const s = at(S, 13.5, 4.5, 2), e = eyeDir(cam), eye = [s.target[0] + e[0] * s.dist, s.target[1] + e[1] * s.dist, s.target[2] + e[2] * s.dist];
+  const zs = await surfAt(S, eye[0], eye[1]);
+  assert.ok(s.dist < 7 && eye[2] - zs > CAM_R - 0.02, `схил: око ${eye[2]}, поверхня ${zs}`);
+  cam.pitch3 = saved;
+  // низька стеля (хід 2 блоки: підлога 1, стеля 2): ціль — під нею
+  const cave = { liquid: { swim: true }, obj: () => null, block: (x, y, k) => k < 2 || k >= 4 ? B_STONE : B_AIR };
+  const c = at(cave, 8.5, 4.5, 1);
+  assert.ok(c.head[2] <= 2 - CAM_R + 1e-6 && c.head[2] > 1.7, `стеля: ${c.head[2]}`);
+  // ціль під водою (поверхня 2,85): око не виходить над поверхню
+  cam.pitch3 = 0.5;
+  const W = world(Array(16).fill('w'.repeat(16))), u = camCollide(cam, [8.5, 8.5, 2.2], [8.5, 8.5, 2.2], colliderOf(W), (a, b2, c2) => underLiquid(W, a, b2, c2));
+  const ue = eyeDir(cam), uz = 2.2 + ue[2] * u.dist;
+  assert.ok(u.dist >= CAM_MIN && uz < 2.85 && uz > 2.6, `під водою: око ${uz}, відстань ${u.dist}`);
+  cam.pitch3 = 0;
+});

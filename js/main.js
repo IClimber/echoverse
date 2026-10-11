@@ -4,6 +4,7 @@
 import { createScene, BODY_R, budgetFor } from './scene.js';
 import { loadSettings, saveSetting } from './settings.js';
 import { createWorld, findSpawn, keepFor } from './world.js';
+import { colliderOf, underLiquid } from './collision.js';
 import { createDevice, landing, landingChunks, CHARGE } from './device.js';
 import { step, standableB, settle, windShelter, SPRINT, GRAVITY, FOOT, PLAYER_MASS, HIT_IMPULSE } from './player.js';
 import { stepBody, windMoves, push, rayBody, collideBodies } from './engine/physics/bodies.js';
@@ -11,13 +12,13 @@ import { initInput, moveAxis, turnAxis, sprintHeld, vertAxis, takeActions, takeW
 import { listWorlds, putWorld, deleteWorld, serialize, deserialize, newId } from './save.js';
 import { hashStr } from './rng.js';
 import { GEN, SEA, physOf, physAt } from './universe.js';
-import { CS, SEC, solidB, B_LIQ, B_MAGMA } from './gen/chunk.js';
+import { CS, SEC, B_MAGMA } from './gen/chunk.js';
 import { LEVEL } from './iso.js';
 import { debugText, fmtN } from './debug.js';
 import { animate } from './anim.js';
 import { clockStr, skyState, lightsOf } from './sky.js';
 import { weatherAt, localWeather, areaClimate } from './weather.js';
-import { createCamera, rotate, wheel, smooth, moveBasis, clipDist, camDist, facing, setYaw, basis, setViewChunks, setLod, setFloraNear, ISO, THIRD, HEAD, VIEW_R } from './camera.js';
+import { createCamera, rotate, wheel, smooth, moveBasis, camHead, camCollide, camDist, facing, setYaw, basis, setViewChunks, setLod, setFloraNear, ISO, THIRD, HEAD, VIEW_R } from './camera.js';
 import { createStreamer, visibleMissing } from './stream.js';
 import { createTicker } from './engine/core/ticker.js';
 
@@ -517,16 +518,18 @@ function boot(renderer) {
     me.ix = lerp(me.px, me.visX ?? me.x); me.iy = lerp(me.py, me.visY ?? me.y); me.iv = lerp(me.pv, me.vis ?? me.z);
     // Ціль камери: гравець (у третій особі — його голова); плавно, по висоті — повільніше (стрибок не трусить камеру)
     const k = Math.min(1, dt * (camera.mode === ISO ? 8 : 14)), kz = Math.min(1, dt * 5);
-    let tz = (me.iv ?? me.z ?? 0) + (camera.mode === THIRD ? HEAD : 0), capped = false;
-    const solidAt = (x, y, z) => { const b = g.world.block(g.d, g.n, x, y, Math.floor(z / LEVEL)); return b === B_LIQ || solidB(b); };
-    if (camera.mode === THIRD && me.placed) {                 // низька стеля (печера): ціль — під нею, інакше видно крізь блоки
-      const fx = Math.floor(me.x), fy = Math.floor(me.y), base = me.iv ?? me.z;
-      for (let z = me.z + 0.6; z <= me.z + HEAD + 0.35; z += LEVEL) if (solidAt(fx, fy, z)) { tz = Math.min(tz, Math.floor(z / LEVEL) * LEVEL - me.z + base - 0.28); capped = true; break; }
-    }
-    g.cam[0] += ((me.ix ?? me.x) - g.cam[0]) * k; g.cam[1] += ((me.iy ?? me.y) - g.cam[1]) * k;
+    const foot = [me.ix ?? me.x, me.iy ?? me.y, me.iv ?? me.z ?? 0];
+    let tz = foot[2], src = null;
+    if (camera.mode === THIRD && me.placed) { src = colliderOf(g.world.probe(g.d, g.n)); tz = camHead(src, foot, HEAD); }   // низька стеля — ціль під нею
+    g.cam[0] += (foot[0] - g.cam[0]) * k; g.cam[1] += (foot[1] - g.cam[1]) * k;
     g.cam[2] += (tz - g.cam[2]) * kz;
-    if (capped && tz < g.cam[2]) g.cam[2] = tz;               // під стелю — одразу
-    g.camDist = camera.mode === THIRD ? camDist(g.camDist, clipDist(camera, g.cam, solidAt), dt) : camera.dist;
+    if (src && tz < foot[2] + HEAD - 1e-6 && tz < g.cam[2]) g.cam[2] = tz;   // під стелю — одразу
+    if (src) {
+      // камера — куля: не крізь поверхню, стовбури, каміння й тіла; не перетинає поверхню рідини відносно цілі
+      const P = g.world.probe(g.d, g.n), r = camCollide(camera, [foot[0], foot[1], tz], g.cam, src, (x, y, z) => underLiquid(P, x, y, z));
+      g.cam[0] = r.target[0]; g.cam[1] = r.target[1]; g.cam[2] = r.target[2];
+      g.camDist = camDist(g.camDist, r.dist, dt);
+    } else g.camDist = camera.dist;
     const dist = g.camDist;
     g.view = renderer.view(camera, g.cam, dist);
     g.far = streamer.update(g, camera, renderer, now).far;

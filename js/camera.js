@@ -6,6 +6,7 @@
 import { S, LEVEL } from './iso.js';
 import { CS } from './gen/chunk.js';
 import { aabbInView, aabbInside } from './engine/core/frustum.js';
+import { createList, clearList, sweepSphere } from './engine/physics/collide.js';
 
 export const ISO = 'iso', THIRD = 'third';
 const D2R = Math.PI / 180;
@@ -178,20 +179,38 @@ export function isoRadius(c, W, H, zr, targetZ) {
   return R + 4;
 }
 
-// Третя особа: відстань до ока, щоб камера не заходила в блоки й рідину за спиною. solid(x, y, z) → чи там тверде.
-// Промінь «товстий» (5 паралельних на відстані PAD — ближня площина не чіпляє стіну збоку); результат треба
-// згладжувати (camDist): скорочувати одразу, відновлювати плавно — інакше на краях блоків камера тремтить
-const PAD = 0.22;
-export function clipDist(c, target, solid) {
-  const u = eyeDir(c), { r, up } = basis(c);
-  const offs = [[0, 0], [PAD, 0], [-PAD, 0], [0, PAD], [0, -PAD]];
-  for (let t = 0.1; t <= c.dist; t += 0.1) {
-    for (const [a, b] of offs) {
-      const x = target[0] + u[0] * t + r[0] * a + up[0] * b, y = target[1] + u[1] * t + r[1] * a + up[1] * b, z = target[2] + u[2] * t + up[2] * b;
-      if (solid(Math.floor(x), Math.floor(y), z)) return Math.max(0.15, t - PAD);
-    }
+// Третя особа: камера — куля CAM_R, що не проходить крізь те, з чим зіштовхується гравець (видима поверхня, стовбури,
+// каміння, тіла; src — collision.js), як SpringArm з ProbeSize в Unreal. Крона біля камери розчиняється (scene.js)
+export const CAM_R = 0.2, CAM_MIN = 0.15;
+const CL = createList(512), CH = {};
+// Яку частку руху кулі з a на d пройти вільно (0…1)
+function camSweep(src, ax, ay, az, dx, dy, dz) {
+  if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) < 1e-9) return 1;
+  clearList(CL);
+  const m = CAM_R + 0.05;
+  src.gather(Math.min(ax, ax + dx) - m, Math.min(ay, ay + dy) - m, Math.min(az, az + dz) - m, Math.max(ax, ax + dx) + m, Math.max(ay, ay + dy) + m, Math.max(az, az + dz) + m, CL);
+  const h = sweepSphere(CL, ax, ay, az, dx, dy, dz, CAM_R, CH);
+  return h ? Math.max(0, h.t - 0.01 / Math.hypot(dx, dy, dz)) : 1;
+}
+// Голова: від грудей (ноги + 0,6) кулею вгору на висоту h — під низькою стелею нижче. Повертає висоту
+export function camHead(src, foot, h) {
+  const z0 = foot[2] + 0.6;
+  if (h <= 0.6) return foot[2] + h;
+  return z0 + (h - 0.6) * camSweep(src, foot[0], foot[1], z0, 0, 0, foot[2] + h - z0);
+}
+// Ціль і відстань до ока: від голови (head — [x, y, z]) до згладженої цілі target — куля (згладжування не тягне камеру
+// крізь стіну); від цілі вздовж eyeDir на c.dist — куля (не ближче CAM_MIN); under(x, y, z) — точка під рідиною:
+// камера не перетинає поверхню рідини відносно цілі. Повертає {target, dist}
+export function camCollide(c, head, target, src, under) {
+  const k = camSweep(src, head[0], head[1], head[2], target[0] - head[0], target[1] - head[1], target[2] - head[2]);
+  const t = [head[0] + (target[0] - head[0]) * k, head[1] + (target[1] - head[1]) * k, head[2] + (target[2] - head[2]) * k];
+  const u = eyeDir(c);
+  let dist = Math.max(CAM_MIN, c.dist * camSweep(src, t[0], t[1], t[2], u[0] * c.dist, u[1] * c.dist, u[2] * c.dist));
+  if (under) {
+    const w = under(t[0], t[1], t[2]);
+    for (let s = 0.1; s < dist; s += 0.1) if (under(t[0] + u[0] * s, t[1] + u[1] * s, t[2] + u[2] * s) !== w) { dist = Math.max(CAM_MIN, s - 0.1 + 0.05); break; }
   }
-  return c.dist;
+  return { target: t, dist };
 }
 // Згладжена відстань: ближче — одразу, далі — плавно (≈ 4 одиниці за секунду на старті)
 export function camDist(prev, want, dt) {
