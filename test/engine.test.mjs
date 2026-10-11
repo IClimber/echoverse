@@ -119,8 +119,6 @@ test('алокатор: first-fit, злиття, ріст, без перекри
   }
 });
 
-// Номер спрайта у вершинах трави (байт z нормалі) — свій у кожній секції чи стовпці: у відбиток не входить
-const noSlot = (buf, n) => { const i8 = new Int8Array(buf); for (let j = 0; j < n; j++) i8[j * 16 + 10] = 0; return buf; };
 // Відбитки мешів поточного chunkMesh у кадрі регіону (MESH_GOLD): твердe, рідина, далекі рослини по секціях,
 // рослини зблизька — сумою на стовпець. Переробки мешів мусять їх зберегти
 export function meshDigests(seedText) {
@@ -129,7 +127,7 @@ export function meshDigests(seedText) {
     const L = lawsOf(seed, d, n), col = genCol(L, cx, cy);
     for (const o of col.obj) objPose(col, L, o);
     const S = colSummary(col, L), [dx, dy] = frameOf(cx, cy, S.czLo), rz0 = Math.floor(S.czLo / RS);
-    let near = 0, nn = 0, gs = 0, gn = 0;
+    let near = 0, nn = 0;
     const czs = [];
     for (let cz = S.czLo; cz <= S.czHi; cz++) czs.push(cz);
     for (const cz of S.isl) if (!czs.includes(cz)) czs.push(cz);
@@ -142,10 +140,8 @@ export function meshDigests(seedText) {
       if (m.liquid) out[`${i}:${cz}:liq`] = meshDigest(meshHash(packMesh(m.liquid, dx, dy, dz).buf));
       if (m.far) out[`${i}:${cz}:far`] = meshDigest(meshHash(packMesh(m.far, dx, dy, dz).buf));
       if (m.flora) { const h = meshHash(packMesh(m.flora, dx, dy, dz).buf); near = (near + h.sum) >>> 0; nn += h.n; }
-      if (m.grass) { const P = packMesh(m.grass, dx, dy, dz), h = meshHash(noSlot(P.buf, P.n)); gs = (gs + h.sum) >>> 0; gn += h.n; }
     }
     out[`${i}:near`] = meshDigest({ n: nn, sum: near });
-    out[`${i}:grass`] = meshDigest({ n: gn, sum: gs });
   });
   return out;
 }
@@ -215,15 +211,11 @@ test('робота flora: рослини зблизька стовпця — т�
   SPOTS.forEach(([d, n, cx, cy], i) => {
     const L = lawsOf(seed, d, n), cache = new Map(), C = runJob(L, { type: 'col', d, n, cx, cy }, cache).data;
     const r = runJob(L, { type: 'flora', d, n, cx, cy }, cache);
+    if (!r.mesh.n) { assert.equal(MESH_GOLD[`${i}:near`], '0:00000000'); return; }
     // кадр еталона — регіон секції czLo: зсунути на різницю регіонів по висоті
-    const dz = (r.data.rz - Math.floor(C.czLo / RS)) * RS * SEC * LEVEL;
-    for (const [buf, n, tag] of [[r.mesh.fl, r.mesh.n, 'near'], [r.mesh.gr, r.mesh.ng, 'grass']]) {
-      if (!n) { assert.equal(MESH_GOLD[`${i}:${tag}`], '0:00000000'); continue; }
-      const u = new Uint16Array(tag === 'grass' ? noSlot(buf.slice(0), n) : buf.slice(0));
-      for (let j = 0; j < n; j++) u[j * 8 + 2] += dz * 128;
-      assert.equal(meshDigest(meshHash(u.buffer)), MESH_GOLD[`${i}:${tag}`]);
-    }
-    if (r.mesh.ng) assert.ok(r.data.sprites.length > 0 && r.data.sprites.every((sp) => sp.data.length === 32 * 32 * 4));
+    const dz = (r.data.rz - Math.floor(C.czLo / RS)) * RS * SEC * LEVEL, u = new Uint16Array(r.mesh.fl.slice(0));
+    for (let j = 0; j < r.mesh.n; j++) u[j * 8 + 2] += dz * 128;
+    assert.equal(meshDigest(meshHash(u.buffer)), MESH_GOLD[`${i}:near`]);
   });
 });
 

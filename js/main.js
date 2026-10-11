@@ -71,7 +71,7 @@ function boot(renderer) {
     const n = Math.min(frameN, frameT.length), a = frameT.slice(0, n).sort();
     let s = 0;
     for (let i = 0; i < n; i++) s += a[i];
-    perf.frameMs = n ? s / n : 0; perf.p99 = n ? a[Math.min(n - 1, Math.floor(n * 0.99))] : 0;
+    perf.frameMs = n ? s / n : 0; perf.p99 = n ? a[Math.min(n - 1, Math.floor(n * 0.99))] : 0; perf.max = n ? a[n - 1] : 0;
   }
   const hudCache = {};
   const setText = (id, s) => { if (hudCache[id] !== s) { hudCache[id] = s; $(id).textContent = s; } };
@@ -80,7 +80,7 @@ function boot(renderer) {
     stats() {
       frameStats();
       const st = g ? g.world.stats() : {}, R = renderer.R;
-      return { fps: perf.fps, frameMs: perf.frameMs, p99: perf.p99, upd: perf.upd, drw: perf.drw, gpuMs: R.gpuMs, draws: R.stats.draws, tris: R.stats.tris,
+      return { fps: perf.fps, frameMs: perf.frameMs, p99: perf.p99, frameMax: perf.max, upd: perf.upd, drw: perf.drw, gpuMs: R.gpuMs, draws: R.stats.draws, tris: R.stats.tris,
         gpuMB: (R.stats.gpuBytes + R.stats.arenaBytes) / 1048576, colsPerSec: st.colsPerSec, pending: st.pending, cols: st.cols, secs: st.secs, meshes: renderer.meshCount, lod: [...renderer.lodCounts], workers: st.workers, streamMs: g ? g.streamMs : 0,
         pcMs: R.cpuRenderMs, gpuPass: R.gpuPass, shTris: R.stats.shTris, shDraws: R.stats.shDraws, ...lightStats() };
     },
@@ -140,10 +140,12 @@ function boot(renderer) {
     },
     // Стенд «на око»: каркас трикутників зіткнень навколо гравця (радіус 4, зелений; тіла й предмети — жовтий) і капсула (блакитна)
     showColl(on = true) { g.showColl = !!on; return g.showColl; },
-    // Камера: режим ('first' | 'third' | 'iso') — через цикл V; напрям погляду (азимут від +x, нахил: + — униз), радіани
+    // Камера: режим ('first' | 'third' | 'iso') — через цикл V; напрям погляду (азимут від +x, нахил: + — униз), радіани;
+    // dist — відстань третьої особи
     setCam(mode) { for (let i = 0; i < 3 && camera.mode !== mode; i++) toggleCam(); return camera.mode; },
-    look(yaw, pitch) {
+    look(yaw, pitch, dist) {
       setYaw(camera, yaw + Math.PI);
+      if (dist !== undefined) camera.dist = camera.distT = dist;
       if (pitch !== undefined) { if (camera.mode === FIRST) camera.pitch1 = camera.pitch1T = pitch; else if (camera.mode === THIRD) camera.pitch3 = camera.pitch3T = pitch; else camera.pitch = camera.pitchT = pitch; }
       return [camera.yaw, camera.mode === FIRST ? camera.pitch1 : camera.pitch3];
     },

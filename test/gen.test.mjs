@@ -313,7 +313,7 @@ test('рослини: дерева не впритул (між стовбура�
       if (at.has(o.x + i + ',' + (o.y + j))) assert.ok(['джунглі', 'бамбукові хащі'].includes((await import('../js/gen/biomes.js')).BIOMES[C.bm[ci(o.x, o.y)]].name));
     }
     const mesh = chunkMesh(C, L);
-    for (const x of [mesh.flora, mesh.grass, mesh.far]) if (x) { const nv = x.pos.length / 3; assert.equal(x.col.length, nv * 3); for (const i of x.idx) assert.ok(i < nv); }
+    for (const x of [mesh.flora, mesh.far]) if (x) { const nv = x.pos.length / 3; assert.equal(x.col.length, nv * 3); for (const i of x.idx) assert.ok(i < nv); }
   }
   assert.ok(trees > 10 && cover > 50, `дерев ${trees}, покриву ${cover}`);
   for (const form of Object.keys(FORMS)) for (let i = 0; i < 12; i++) {

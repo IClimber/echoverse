@@ -8,10 +8,10 @@ const OUT = arg('out', `${tmpdir()}/echoverse-shots`); mkdirSync(OUT, { recursiv
 const COMBOS = arg('combos', 'webgl2:pcf3:16,webgl2:pcss:16,webgl2:off:16,webgpu:pcf3:16').split(',').map((s) => s.split(':'));
 // сцена: [всесвіт, x, y, фаза доби ('best' — найбільше світил), особливе]. Порядок важливий: сцени того самого всесвіту
 // й місця — підряд без телепорту; печера — остання з них (переносить гравця під землю), далі — стрибок в інший всесвіт
-// особливе: rain — дощ, iso — згори, first — перша особа, coll — каркас зіткнень (?dev showColl), cave — печера (перша особа:
+// особливе: rain — дощ, iso — згори, first — перша особа, grass / grass3 — трава впритул (перша / третя особа), coll — каркас зіткнень (?dev showColl), cave — печера (перша особа:
 // firstcave)
 const ALL = { plain: [1, -52, -45, 0.4], night: [1, -52, -45, 0.0], rain: [1, -52, -45, 0.4, 'rain'], iso: [1, -52, -45, 0.4, 'iso'],
-  first: [1, -52, -45, 0.4, 'first'], under: [1, -52, -45, 0.4, 'under'], slope: [33281, -61, -2, 0.4, 'slope'], trunk: [-60813, -478, -107, 0.4, 'trunk'], coll: [1, -52, -45, 0.4, 'coll'], cave: [1, -52, -45, 0.4, 'cave'], firstcave: [1, -52, -45, 0.4, 'firstcave'], mount: [33281, -61, -2, 0.4], forest: [-60813, -478, -107, 0.4], suns3: [784, -52, -45, 'best'] };
+  first: [1, -52, -45, 0.4, 'first'], under: [1, -52, -45, 0.4, 'under'], slope: [33281, -61, -2, 0.4, 'slope'], trunk: [-60813, -478, -107, 0.4, 'trunk'], coll: [1, -52, -45, 0.4, 'coll'], grass: [1, -52, -45, 0.4, 'grass'], grass3: [1, -52, -45, 0.4, 'grass3'], cave: [1, -52, -45, 0.4, 'cave'], firstcave: [1, -52, -45, 0.4, 'firstcave'], fgrass: [-60813, -478, -107, 0.4, 'grass'], mount: [33281, -61, -2, 0.4], forest: [-60813, -478, -107, 0.4], suns3: [784, -52, -45, 'best'] };
 const SCENES = arg('scenes', Object.keys(ALL).join(',')).split(',');
 const flags = ['--headless=new', '--use-angle=vulkan', '--enable-features=Vulkan', '--enable-unsafe-webgpu', '--ignore-gpu-blocklist', '--window-size=2560,1440'];
 rmSync(`${OUT}/profile`, { recursive: true, force: true });
@@ -57,7 +57,7 @@ for (const [gpu, sh, view] of COMBOS) {
   await waitFor('!!(eco.g && eco.g.me.placed)'); await idle();
   for (const sc of SCENES) {
     const [n, x, y, ph, sp] = ALL[sc];
-    const mode = sp === 'iso' ? 'iso' : ['first', 'firstcave', 'under'].includes(sp) ? 'first' : 'third', cave = sp === 'cave' || sp === 'firstcave';
+    const mode = sp === 'iso' ? 'iso' : ['first', 'firstcave', 'under', 'grass'].includes(sp) ? 'first' : 'third', cave = sp === 'cave' || sp === 'firstcave';
     await ev(`eco.setCam('${mode}'); eco.showColl(${sp === 'coll'}); eco.weather(${sp === 'rain' ? "'rain'" : 'null'}); 1`);
     await jumpTo(n, x, y);
     if (cave && last[3] !== 'cave') {             // печерні секції підвантажуються не одразу — кілька спроб
@@ -81,6 +81,8 @@ for (const [gpu, sh, view] of COMBOS) {
       if (!ok) { R.push({ gpu, sh, view, sc, skip: 'стовбура не знайдено' }); continue; }
       last = null; await idle(); await wait(1200);
     }
+    if (sp === 'grass') { await ev('eco.look(0.8, 0.5); 1'); await wait(800); }            // впритул до трави: униз ~30°
+    if (sp === 'grass3') { await ev('eco.look(0.8, 0.3, 2.5); 1'); await wait(800); }      // третя особа, найближче
     await ev(ph === 'best' ? 'eco.bestPhase()' : `eco.setPhase(${ph})`);
     await menu(true); await wait(1500);
     if (gpu !== 'webgpu') await shot(`${gpu}-${sh}-${view}-${sc}`);   // WebGPU у headless знімає чорне — лише помилки
