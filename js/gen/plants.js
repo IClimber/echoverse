@@ -552,8 +552,8 @@ export function footprint(T) {
 }
 
 // Шаблон T у меш M (gen/mesh.js Mesh) у точці (x, y, z): поворот rot навколо вертикалі, нахил tl, масштаб s,
-// множники кольору cj [r, g, b]
-export function place(M, T, x, y, z, rot, s, tl, cj, sky = 1) {
+// множники кольору cj [r, g, b]; sky — AO неба над основою; thin — мітка проріджування 1…THIN_N (gen/materials.js; 0 — ні)
+export function place(M, T, x, y, z, rot, s, tl, cj, sky = 1, thin = 0) {
   const c = Math.cos(rot), sn = Math.sin(rot), ct = Math.cos(tl), st = Math.sin(tl), P = T.p, N = T.n, C = T.c, base = M.n, TA = T.a;
   M.room(T.verts, T.verts);
   const MP = M.p, MN = M.nr, MC = M.c, MM = M.mt, MA = M.a, MI = M.i, ni = M.ni;
@@ -563,7 +563,7 @@ export function place(M, T, x, y, z, rot, s, tl, cj, sky = 1) {
     const nx = N[j], ny = N[j + 1] * ct - N[j + 2] * st, nz = N[j + 1] * st + N[j + 2] * ct;
     MN[o] = nx * c - ny * sn | 0; MN[o + 1] = nx * sn + ny * c | 0; MN[o + 2] = nz | 0;
     MC[o] = Math.min(255, C[j] * cj[0] | 0); MC[o + 1] = Math.min(255, C[j + 1] * cj[1] | 0); MC[o + 2] = Math.min(255, C[j + 2] * cj[2] | 0);
-    MM[base + i] = T.m[i];
+    MM[base + i] = T.m[i] | thin << 5;
     MA[base + i] = TA ? TA[i] * sky | 0 : 255 * sky | 0;
     MI[ni + i] = base + i;
   }

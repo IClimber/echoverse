@@ -7,7 +7,10 @@
 // - емісія: лава (eco_mat.x) і мінімум світла (eco_minLight) — поверх освітлення PlayCanvas;
 // - вітер і кривизна планети — у transformVS (світові координати; тіньовий прохід — той самий шматок, тож тіні теж);
 // - розчинення біля ока (ECO_FADE) і «вікно» до гравця (ECO_CUT / ECO_CUTF) — через opacityPS і дизеринг PlayCanvas
-//   (opacityDither, transparency.md).
+//   (opacityDither, transparency.md), лише в прямому проході (FORWARD_PASS, shader-pass.js): тіні лишаються;
+// - проріджування малих рослин (ECO_THIN): старші 11 біт номера матеріалу у вершині — мітка 1…2047 (0 — ні); далі від
+//   цілі, ніж mix(eco_thin.x, eco_thin.y, мітка / 2047), піксель відкидається в обох проходах (і тінь теж) — до краю кола
+//   трава рідшає поштучно, без межі (як відстань відсікання трави з плавним згасанням в ігрових рушіях).
 // Варіанти: ECO_MATCOL — матеріал у color.a (float-меші), інакше — у pos.w, а AO — у color.a (aoVertexColor)
 import { pc } from './app.js';
 
@@ -19,7 +22,9 @@ uniform vec4 eco_wind;
 uniform float eco_curve;
 uniform vec3 eco_target;
 uniform vec4 eco_mat[${MAT_N}];
+uniform vec2 eco_thin;
 varying float vEcoMat;
+varying float vEcoThin;
 `;
 const MAIN_END_VS = `
 #ifdef ECO_MATCOL
@@ -28,14 +33,17 @@ const MAIN_END_VS = `
   #else
     vEcoMat = 0.0;
   #endif
+  vEcoThin = 1.0e6;
 #else
-  vEcoMat = floor(vertex_position.w * 65535.0 + 0.5);
+  float eco_raw = floor(vertex_position.w * 65535.0 + 0.5), eco_key = floor(eco_raw / 32.0);
+  vEcoMat = eco_raw - eco_key * 32.0;
+  vEcoThin = eco_key > 0.5 ? mix(eco_thin.x, eco_thin.y, eco_key / 2047.0) : 1.0e6;
 #endif
 `;
 const TRANSFORM_ADD = `
 	#ifdef ECO_WIND
-		float eco_wm = floor(vertex_position.w * 65535.0 + 0.5);
-		if (eco_wm < ${MAT_N}.0 && eco_mat[int(eco_wm)].y > 0.5) posW.xz += eco_wind.xy * (0.55 + 0.45 * sin(eco_wind.z * 1.9 + posW.x * 0.9 + posW.z * 1.3 + posW.y * 0.7));
+		float eco_wm = mod(floor(vertex_position.w * 65535.0 + 0.5), 32.0);
+		if (eco_mat[int(eco_wm)].y > 0.5) posW.xz += eco_wind.xy * (0.55 + 0.45 * sin(eco_wind.z * 1.9 + posW.x * 0.9 + posW.z * 1.3 + posW.y * 0.7));
 	#endif
 	#ifdef ECO_CURVE
 		vec2 eco_dc = posW.xz - eco_target.xz;
@@ -55,6 +63,7 @@ uniform vec4 eco_cut;
 uniform vec4 eco_cut2;
 uniform vec2 eco_cut3;
 varying float vEcoMat;
+varying float vEcoThin;
 vec3 eco_col;
 `;
 // Альбедо: колір вершини (лінійний — vertexColorGamma) × текстура шару «матеріал» (sRGB — вибірка лінійна; 128 = ×1:
@@ -101,9 +110,13 @@ const OPACITY_PS = `
 uniform float material_alphaDitherScale;
 void getOpacity() {
   dAlpha = 1.0;
+  #ifdef ECO_THIN
+    if (length(vPositionW.xz - eco_target.xz) > vEcoThin) dAlpha = 0.0;
+  #endif
+  #ifdef FORWARD_PASS
   float eco_d = distance(vPositionW, eco_eye);
   #ifdef ECO_FADE
-    dAlpha = pow(clamp((eco_d - eco_fade.x) / (eco_fade.y - eco_fade.x), 0.0, 1.0), 2.2);
+    dAlpha *= pow(clamp((eco_d - eco_fade.x) / (eco_fade.y - eco_fade.x), 0.0, 1.0), 2.2);
   #endif
   #if defined(ECO_CUT) || defined(ECO_CUTF)
     if (eco_cut2.w > 0.5 && vPositionW.y > eco_cut3.y && eco_d < distance(eco_cut.xyz, eco_eye)) {
@@ -117,6 +130,7 @@ void getOpacity() {
       if (eco_in) dAlpha = min(dAlpha, 0.2176);
     }
   #endif
+  #endif
 }
 `;
 
@@ -126,7 +140,9 @@ uniform eco_wind: vec4f;
 uniform eco_curve: f32;
 uniform eco_target: vec3f;
 uniform eco_mat: array<vec4f, ${MAT_N}>;
+uniform eco_thin: vec2f;
 varying vEcoMat: f32;
+varying vEcoThin: f32;
 `;
 const MAIN_END_VS_W = `
 #ifdef ECO_MATCOL
@@ -135,19 +151,22 @@ const MAIN_END_VS_W = `
   #else
     output.vEcoMat = 0.0;
   #endif
+  output.vEcoThin = 1.0e6;
 #else
-  output.vEcoMat = floor(vertex_position.w * 65535.0 + 0.5);
+  let eco_raw: f32 = floor(vertex_position.w * 65535.0 + 0.5);
+  let eco_key: f32 = floor(eco_raw / 32.0);
+  output.vEcoMat = eco_raw - eco_key * 32.0;
+  output.vEcoThin = select(1.0e6, mix(uniform.eco_thin.x, uniform.eco_thin.y, eco_key / 2047.0), eco_key > 0.5);
 #endif
 `;
 const TRANSFORM_ADD_W = `
 	#ifdef ECO_WIND
-		let eco_wm: f32 = floor(vertex_position.w * 65535.0 + 0.5);
-		if (eco_wm < ${MAT_N}.0) {
-			if (uniform.eco_mat[i32(eco_wm)].y > 0.5) {
-				let eco_s: f32 = 0.55 + 0.45 * sin(uniform.eco_wind.z * 1.9 + posW.x * 0.9 + posW.z * 1.3 + posW.y * 0.7);
-				posW.x = posW.x + uniform.eco_wind.x * eco_s;
-				posW.z = posW.z + uniform.eco_wind.y * eco_s;
-			}
+		let eco_wr: f32 = floor(vertex_position.w * 65535.0 + 0.5);
+		let eco_wm: f32 = eco_wr - floor(eco_wr / 32.0) * 32.0;
+		if (uniform.eco_mat[i32(eco_wm)].y > 0.5) {
+			let eco_s: f32 = 0.55 + 0.45 * sin(uniform.eco_wind.z * 1.9 + posW.x * 0.9 + posW.z * 1.3 + posW.y * 0.7);
+			posW.x = posW.x + uniform.eco_wind.x * eco_s;
+			posW.z = posW.z + uniform.eco_wind.y * eco_s;
 		}
 	#endif
 	#ifdef ECO_CURVE
@@ -169,6 +188,7 @@ uniform eco_cut: vec4f;
 uniform eco_cut2: vec4f;
 uniform eco_cut3: vec2f;
 varying vEcoMat: f32;
+varying vEcoThin: f32;
 var<private> eco_col: vec3f;
 `;
 // Похідні (dpdx) — лише в рівномірному потоці керування: координати — через select, шов (discard) — у кінці
@@ -214,9 +234,13 @@ const OPACITY_PS_W = `
 uniform material_alphaDitherScale: f32;
 fn getOpacity() {
   dAlpha = 1.0;
+  #ifdef ECO_THIN
+    if (length(vPositionW.xz - uniform.eco_target.xz) > vEcoThin) { dAlpha = 0.0; }
+  #endif
+  #ifdef FORWARD_PASS
   let eco_d: f32 = distance(vPositionW, uniform.eco_eye);
   #ifdef ECO_FADE
-    dAlpha = pow(clamp((eco_d - uniform.eco_fade.x) / (uniform.eco_fade.y - uniform.eco_fade.x), 0.0, 1.0), 2.2);
+    dAlpha = dAlpha * pow(clamp((eco_d - uniform.eco_fade.x) / (uniform.eco_fade.y - uniform.eco_fade.x), 0.0, 1.0), 2.2);
   #endif
   #if defined(ECO_CUT) || defined(ECO_CUTF)
     if (uniform.eco_cut2.w > 0.5 && vPositionW.y > uniform.eco_cut3.y && eco_d < distance(uniform.eco_cut.xyz, uniform.eco_eye)) {
@@ -230,6 +254,7 @@ fn getOpacity() {
       else { eco_in = length(cross(vPositionW - uniform.eco_cut.xyz, uniform.eco_cut2.xyz)) < eco_k; }
       if (eco_in) { dAlpha = min(dAlpha, 0.2176); }
     }
+  #endif
   #endif
 }
 `;

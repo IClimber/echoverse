@@ -7,7 +7,8 @@ import { L_LAVA, SEA, gravityAt } from '../universe.js';
 import { LEVEL } from '../iso.js';
 import { template, place, footprint } from './plants.js';
 import { groundTint } from './flora.js';
-import { M_FLAT, M_ROCK, M_CLIFF, M_WATER, M_LAVA, M_ICE, M_SAND, M_LUSH, M_DRY, M_DESERT, M_SNOW, M_BED, M_MUD, M_SOIL, M_SANDSIDE, M_LIP } from './materials.js';
+import { M_FLAT, M_ROCK, M_CLIFF, M_WATER, M_LAVA, M_ICE, M_SAND, M_LUSH, M_DRY, M_DESERT, M_SNOW, M_BED, M_MUD, M_SOIL, M_SANDSIDE, M_LIP, THIN_N } from './materials.js';
+import { hash3 } from '../rng.js';
 
 export const shade = (c, k) => [Math.min(255, c[0] * k | 0), Math.min(255, c[1] * k | 0), Math.min(255, c[2] * k | 0)];
 const mixc = (a, b, k) => [a[0] + (b[0] - a[0]) * k | 0, a[1] + (b[1] - a[1]) * k | 0, a[2] + (b[2] - a[2]) * k | 0];
@@ -16,7 +17,7 @@ const mixc = (a, b, k) => [a[0] + (b[0] - a[0]) * k | 0, a[1] + (b[1] - a[1]) * 
 // (float32, int8, uint8 із загортанням)
 export class Mesh {
   constructor(cap = 256) {
-    this.p = new Float32Array(cap * 3); this.nr = new Int8Array(cap * 3); this.c = new Uint8Array(cap * 3); this.mt = new Uint8Array(cap); this.a = new Uint8Array(cap);
+    this.p = new Float32Array(cap * 3); this.nr = new Int8Array(cap * 3); this.c = new Uint8Array(cap * 3); this.mt = new Uint16Array(cap); this.a = new Uint8Array(cap);
     this.i = new Uint32Array(cap * 2); this.n = 0; this.ni = 0;
   }
   // Місце ще на nv вершин і nidx індексів
@@ -406,7 +407,7 @@ function objMeshes(C, L, K0, NK, near, far, dz = 0) {
       const tl = ((v >> 2 & 7) / 7) * 0.1;
       if (near) place(F, template(g, v % 3, 0), cx, cy, z, rot, s, tl, cj, sk);
       if (far) place(Ff, template(g, v % 3, 1), cx, cy, z, rot, s, tl, cj, sk);   // той самий варіант, спрощений
-    } else if (o.k === O_COVER) { if (near) place(F, template(g, v & 1, 0), cx, cy, z, rot, s, 0, cj, sk); }
+    } else if (o.k === O_COVER) { if (near) place(F, template(g, v & 1, 0), cx, cy, z, rot, s, 0, cj, sk, 1 + hash3(0x7f1a, o.x + C.cx * CS, o.y + C.cy * CS) % THIN_N); }
     else { const T = template(o.st ? stoneGenome(L, g, o.st) : g, v & 3, 0, styleOf(g, v)); if (near) place(F, T, cx, cy, z, rot, s, 0, cj, sk); if (far) place(Ff, T, cx, cy, z, rot, s, 0, cj, sk); }
   }
   return { F, Ff };

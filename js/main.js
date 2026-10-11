@@ -17,7 +17,7 @@ import { debugText, fmtN } from './debug.js';
 import { animate } from './anim.js';
 import { clockStr, skyState, lightsOf } from './sky.js';
 import { weatherAt, localWeather, areaClimate } from './weather.js';
-import { createCamera, rotate, wheel, smooth, moveBasis, clipDist, camDist, facing, setYaw, basis, setViewChunks, setLod, ISO, THIRD, HEAD, VIEW_R } from './camera.js';
+import { createCamera, rotate, wheel, smooth, moveBasis, clipDist, camDist, facing, setYaw, basis, setViewChunks, setLod, setFloraNear, ISO, THIRD, HEAD, VIEW_R } from './camera.js';
 import { createStreamer, visibleMissing } from './stream.js';
 import { createTicker } from './engine/core/ticker.js';
 
@@ -126,6 +126,7 @@ function boot(renderer) {
     shadows(m) { return renderer.setShadows(m); },
     // Рівні деталізації далекої землі: false — усе повне (порівняння)
     setLod(on) { setLod(on); streamer.force(); },
+    setFloraNear(r) { setFloraNear(r); streamer.force(); },
     // Відсікання задніх граней землі: false — усе з обох боків (порівняння)
     setCull(on) { renderer.R.setCull(on); },
     // Видимого ще бракує (стовпців без зведення й секцій не в GPU) — заміри часу після стрибка

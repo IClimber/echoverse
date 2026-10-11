@@ -1,5 +1,5 @@
 // gen/pack.js — щільна вершина регіону (16 Б), без індексів: вершина на кожен кут трикутника.
-// Позиція — u16 ×4 (x, y, z, матеріал): (локальна від кута регіону + PO) × PQ, четвертий u16 — номер матеріалу; нормаль —
+// Позиція — u16 ×4 (x, y, z, матеріал): (локальна від кута регіону + PO) × PQ, четвертий u16 — номер матеріалу (з міткою проріджування, gen/materials.js MAT_BITS); нормаль —
 // i8 ×4 (x, y, z, 0); колір — u8 ×4 (r, g, b, AO: 255 — відкрито, 0 — темно). Кожен елемент — по 4 Б (PlayCanvas, WebGPU). Регіон — RS×RS стовпців × RS секцій (128 × 128 клітинок × 64 од.). Діапазон локальних: x, y ∈ [−192, 320),
 // z ∈ [−64, 448) — запас на крони й велетнів, що виходять за регіон; точність 1/128. Лише вигляд (Math.round можна).
 import { CS, SEC } from './chunk.js';
@@ -54,13 +54,13 @@ export function concat(a, b) {
 // Назад у масиви (тести): позиції — локальні регіону
 export function unpack(buf) {
   const n = buf.byteLength / VB, u16 = new Uint16Array(buf), i8 = new Int8Array(buf), u8 = new Uint8Array(buf);
-  const pos = new Float32Array(n * 3), nor = new Int8Array(n * 3), col = new Uint8Array(n * 3), mat = new Uint8Array(n), ao = new Uint8Array(n);
+  const pos = new Float32Array(n * 3), nor = new Int8Array(n * 3), col = new Uint8Array(n * 3), mat = new Uint8Array(n), ao = new Uint8Array(n), thin = new Uint16Array(n);
   for (let j = 0; j < n; j++) {
     for (let a = 0; a < 3; a++) { pos[j * 3 + a] = u16[j * 8 + a] / PQ - PO[a]; nor[j * 3 + a] = i8[j * 16 + 8 + a]; col[j * 3 + a] = u8[j * 16 + 12 + a]; }
-    mat[j] = u16[j * 8 + 3];
+    mat[j] = u16[j * 8 + 3] & 31; thin[j] = u16[j * 8 + 3] >> 5;
     ao[j] = u8[j * 16 + 15];
   }
-  return { pos, nor, col, mat, ao, n };
+  return { pos, nor, col, mat, ao, thin, n };
 }
 
 // Відбиток меша, що не залежить від порядку трикутників і циклічного повороту вершин: сума (mod 2^32) FNV-1a кожного

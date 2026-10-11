@@ -11,12 +11,11 @@ import { LEVEL } from './iso.js';
 import { FT } from './gen/far.js';
 import { ck, sk } from './world.js';
 import { landingChunks } from './device.js';
-import { ISO, VIEW_R, FAR_R, SEAM, boxInView, LOD_ON, lodOf, colDist } from './camera.js';
+import { ISO, VIEW_R, FAR_R, SEAM, boxInView, LOD_ON, lodOf, colDist, FLORA_NEAR } from './camera.js';
 
 const ZR = [-200, 2100];                 // висоти (од.) для піраміди видимості ще не згенерованого стовпця
 const ZR_FAR = [-200, 2050];             // те саме для плитки далечі
 const UNDER_R = 64;                      // під землею: радіус (клітинок), у якому вантажимо секції біля висоти гравця (зали)
-const FLORA_R = 60;                      // рослини зблизька замовляємо для стовпців ближче (рендер малює ближче NEAR 44)
 const TURN = 0.14;                       // поворот камери (рад), після якого перерахунок
 
 // Стовпці з центром ближче R + 12 від t: [[cx, cy, відстань]]
@@ -108,8 +107,8 @@ export function createStreamer() {
           if (inView && !near && !boxInView(m, ax, ay, z0, z0 + SEC * LEVEL + 12)) continue;
           sec(d, n, C.cx, C.cy, cz, pri + Math.abs(cz - czMe) * 2, lod);
         }
-        // рослини зблизька — окрема робота стовпця, лише біля цілі камери
-        if (C.obj.length && Math.hypot(ax + 8, ay + 8) < FLORA_R && !renderer.hasFlora(d, n, ck(C.cx, C.cy))) keys.add(W.wantFlora(d, n, C.cx, C.cy, pri));
+        // рослини зблизька — окрема робота стовпця, лише біля цілі камери (рендер малює ближче FLORA_NEAR; +16 — наперед)
+        if (C.obj.length && colDist(C.cx, C.cy, t) < FLORA_NEAR + 16 && !renderer.hasFlora(d, n, ck(C.cx, C.cy))) keys.add(W.wantFlora(d, n, C.cx, C.cy, pri));
       };
       const nearMe = (cx, cy) => Math.abs(cx * CS + 8 - me.x) < 24 && Math.abs(cy * CS + 8 - me.y) < 24;
 
