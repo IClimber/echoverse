@@ -6,6 +6,9 @@
 // uSunCol[3] (колір, яскравість), uMoon[3], uMoonCol[3] (rgb, 0), uNSun, uNMoon, uDay, uStars (яскравість, відтінок),
 // uCel (обертання зоряного неба), uRing (r0, r1, непрозорість, смуг), uRingCol, uPole, uCloud (хмарність, зсув x, y,
 // темність), uCloudCol, uFlash, uAur (напрям на полюс x, y, сила, час), uAurCol, eco_bakeK.
+// Шум хмар і сяйва — value noise з хешем без синуса (Hoskins) за клітинкою mod 256, fBm з множником рівно 2: період 256,
+// тож зсуви часу й вітру CPU загортає за ним (js/scene.js) — у шейдер не йдуть великі числа. Був хеш fract(sin(·)·43758):
+// на аргументах у тисячі sin на GPU втрачає точність — сяйво й хмари розпадались на прямокутні панелі (11.10.2026)
 // GLSL: уніформи — по одній на рядок
 
 export const SKY_GLSL = `
@@ -32,12 +35,13 @@ uniform vec4 uAur;
 uniform vec3 uAurCol;
 uniform float eco_bakeK;
 float ecoHash(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 45.164))) * 43758.5453); }
+float ecoHashN(vec2 p) { vec3 q = fract(mod(p, 256.0).xyx * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
 float ecoNoise(vec2 p) {
   vec2 i = floor(p), f = fract(p), u = f * f * (3.0 - 2.0 * f);
-  float a = ecoHash(vec3(i, 1.0)), b = ecoHash(vec3(i + vec2(1, 0), 1.0)), c = ecoHash(vec3(i + vec2(0, 1), 1.0)), d = ecoHash(vec3(i + vec2(1, 1), 1.0));
+  float a = ecoHashN(i), b = ecoHashN(i + vec2(1, 0)), c = ecoHashN(i + vec2(0, 1)), d = ecoHashN(i + vec2(1, 1));
   return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
-float ecoFbm(vec2 p) { float v = 0.0, a = 0.5; for (int i = 0; i < 5; i++) { v += a * ecoNoise(p); p = p * 2.03 + 17.1; a *= 0.5; } return v; }
+float ecoFbm(vec2 p) { float v = 0.0, a = 0.5; for (int i = 0; i < 5; i++) { v += a * ecoNoise(p); p = p * 2.0 + 17.0; a *= 0.5; } return v; }
 vec3 ecoSky(vec3 d) {
   float up = d.z, above = smoothstep(-0.02, 0.01, up);
   vec3 c = up < 0.0 ? uHor * (1.0 + up * 0.35) : mix(uHor, uZen, smoothstep(0.0, 0.55, up));
@@ -153,21 +157,27 @@ uniform uAur: vec4f;
 uniform uAurCol: vec3f;
 uniform eco_bakeK: f32;
 fn ecoHash(p: vec3f) -> f32 { return fract(sin(dot(p, vec3f(12.9898, 78.233, 45.164))) * 43758.5453); }
+fn ecoHashN(p: vec2f) -> f32 {
+  let m = p - floor(p / 256.0) * 256.0;
+  var q = fract(m.xyx * 0.1031);
+  q += dot(q, q.yzx + 33.33);
+  return fract((q.x + q.y) * q.z);
+}
 fn ecoNoise(p: vec2f) -> f32 {
   let i = floor(p);
   let f = fract(p);
   let u = f * f * (3.0 - 2.0 * f);
-  let a = ecoHash(vec3f(i, 1.0));
-  let b = ecoHash(vec3f(i + vec2f(1.0, 0.0), 1.0));
-  let c = ecoHash(vec3f(i + vec2f(0.0, 1.0), 1.0));
-  let d = ecoHash(vec3f(i + vec2f(1.0, 1.0), 1.0));
+  let a = ecoHashN(i);
+  let b = ecoHashN(i + vec2f(1.0, 0.0));
+  let c = ecoHashN(i + vec2f(0.0, 1.0));
+  let d = ecoHashN(i + vec2f(1.0, 1.0));
   return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 fn ecoFbm(p0: vec2f) -> f32 {
   var p = p0;
   var v = 0.0;
   var a = 0.5;
-  for (var i = 0; i < 5; i++) { v += a * ecoNoise(p); p = p * 2.03 + 17.1; a *= 0.5; }
+  for (var i = 0; i < 5; i++) { v += a * ecoNoise(p); p = p * 2.0 + 17.0; a *= 0.5; }
   return v;
 }
 fn ecoSs(e0: f32, e1: f32, x: f32) -> f32 { let t = clamp((x - e0) / (e1 - e0), 0.0, 1.0); return t * t * (3.0 - 2.0 * t); }

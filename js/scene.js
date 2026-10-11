@@ -405,6 +405,7 @@ export async function createScene(canvas, settings = {}) {
 
   // ---- небо: уніформи (sky-shader.js) через dev.scope ----
   const sc = dev.scope, U = (k) => sc.resolve(k);
+  const wrapN = (v) => ((v % 256) + 256) % 256;      // період шуму неба (sky-shader.js): зсув хмар — без великих чисел
   const SU = Object.fromEntries(['uZen', 'uHor', 'uMain', 'uDusk', 'uSun[0]', 'uSunCol[0]', 'uMoon[0]', 'uMoonCol[0]', 'uNSun', 'uNMoon', 'uDay', 'uStars', 'uCel', 'uRing', 'uRingCol', 'uPole', 'uCloud', 'uCloudCol', 'uFlash', 'uAur', 'uAurCol', 'eco_bakeK'].map((k) => [k, U(k)]));
   const sun4 = new Float32Array(12), sunC = new Float32Array(12), moon4 = new Float32Array(12), moonC = new Float32Array(12), cel = new Float32Array(9);
   const c3 = (v) => [v[0] / 255, v[1] / 255, v[2] / 255];
@@ -422,9 +423,9 @@ export async function createScene(canvas, settings = {}) {
     SU.uRing.setValue([rg ? rg.r0 : 0, rg ? rg.r0 + rg.w : 0, rg ? rg.alpha : 0, rg ? rg.bands : 0]);
     SU.uRingCol.setValue(rg ? c3(rg.col) : [0, 0, 0]); SU.uPole.setValue([...st.pole]);
     const cl = st.cloud || { k: 0, off: [0, 0], dark: 0, col: [255, 255, 255] };
-    SU.uCloud.setValue([cl.k, cl.off[0], cl.off[1], cl.dark]); SU.uCloudCol.setValue(c3(cl.col)); SU.uFlash.setValue(st.flash || 0);
+    SU.uCloud.setValue([cl.k, wrapN(cl.off[0]), wrapN(cl.off[1]), cl.dark]); SU.uCloudCol.setValue(c3(cl.col)); SU.uFlash.setValue(st.flash || 0);
     const au = st.aurora || { dir: [0, 1], k: 0, t: 0, col: [0, 0, 0] };
-    SU.uAur.setValue([au.dir[0], au.dir[1], au.k, au.t % 10000]); SU.uAurCol.setValue(c3(au.col));
+    SU.uAur.setValue([au.dir[0], au.dir[1], au.k, au.t % 25600]); SU.uAurCol.setValue(c3(au.col));   // час: ×0,01 / 0,02 / 0,05 — кратні періоду шуму 256
     SU.eco_bakeK.setValue(bakeK);
   }
   const lin = (c) => (c / 255) ** 2.2, lum = (c) => 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]);
