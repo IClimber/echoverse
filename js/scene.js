@@ -667,11 +667,11 @@ export async function createScene(canvas, settings = {}) {
       } else figMI.visible = false;
 
       // Опади й пил: частинки PlayCanvas, лише поточний тип; під дахом — не падають (карта укриттів)
-      const loc = wt && wt.loc;
-      for (const k in vols) vols[k].enabled = false;
-      if (loc && loc.type && st.rain && PART[loc.type]) {
-        const Qp = PART[loc.type], v = volume(loc.type), lk = 0.3 + 0.7 * Math.min(1, sk.lightK[1]);
-        v.enabled = true;
+      const loc = wt && wt.loc, want = loc && loc.type && st.rain && PART[loc.type] ? loc.type : null;
+      // вмикати лише при зміні: вимкнення знімає сітку частинок із шарів, увімкнення — додає назад
+      for (const k in vols) if (vols[k].enabled !== (k === want)) vols[k].enabled = k === want;
+      if (want) {
+        const Qp = PART[want], v = volume(want), lk = 0.3 + 0.7 * Math.min(1, sk.lightK[1]);
         v.setPosition([t[0], t[1], t[2] + Qp.box[1] * 0.15]);
         const dr = loc.type === 'dust' ? 1 : 0.6;
         v.setVelocity(wt.W.wind[0] * dr, wt.W.wind[1] * dr, -Qp.fall);

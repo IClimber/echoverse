@@ -13,7 +13,10 @@ const ALL = { plain: [1, -52, -45, 0.4], night: [1, -52, -45, 0.0], rain: [1, -5
 const SCENES = arg('scenes', Object.keys(ALL).join(',')).split(',');
 const flags = ['--headless=new', '--use-angle=vulkan', '--enable-features=Vulkan', '--enable-unsafe-webgpu', '--ignore-gpu-blocklist', '--window-size=2560,1440'];
 rmSync(`${OUT}/profile`, { recursive: true, force: true });
-const ch = spawn('google-chrome', [`--remote-debugging-port=${port}`, ...flags, `--user-data-dir=${OUT}/profile`, 'about:blank'], { stdio: 'ignore' });
+const ch = spawn('google-chrome', [`--remote-debugging-port=${port}`, ...flags, `--user-data-dir=${OUT}/profile`, 'about:blank'], { stdio: 'ignore', detached: true });
+// google-chrome — скрипт-обгортка: ch.kill() вбив би лише її, а браузер лишився б на порту (наступний запуск підключився б
+// до нього — зі старими модулями в HTTP-кеші й чужим навантаженням GPU). Тому — уся група процесів
+const quit = () => { try { process.kill(-ch.pid, 'SIGTERM'); } catch { /* уже завершився */ } };
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 await wait(2000);
 const page = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find((t) => t.type === 'page');
@@ -69,4 +72,4 @@ await shot('light');
 writeFileSync(`${OUT}/results.json`, JSON.stringify({ R, errs }, null, 1));
 for (const r of R) console.log([r.gpu, r.sh, r.view, r.sc, r.skip || `пристрій ${r.device}`].join(' '));
 console.log(`помилок: ${errs.length}`); for (const e of errs) console.log(e);
-ch.kill(); process.exit(errs.length ? 1 : 0);
+quit(); process.exit(errs.length ? 1 : 0);

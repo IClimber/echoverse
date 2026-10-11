@@ -2,7 +2,7 @@
 // (graphics/particles.md, приклад graphics/particles-snow) з wrap — частинки прив'язані до світу й загортаються в коробку
 // навколо цілі. Укриття: частинки під дахом (карта 64×64 — висота верху стовпця, світ PlayCanvas y) не малюються.
 // Шейдер частинок бере лише глобальні шматки (getShaderVariant емітера матеріальних не передає), тож particle_initVS
-// (глобальна область) і particle_wrapVS (тіло main, лише з wrap) — типові + наше, для обох мов
+// (глобальна область) і particle_wrapVS (тіло main, лише з wrap) — типові + наше, для обох мов; particle_stretchVS — обхід помилки
 const SH = 64;
 const ADD_INIT_GLSL = `
 uniform sampler2D eco_shelter;
@@ -34,6 +34,11 @@ function patch(G) {
     const C = pc.ShaderChunks.get(dev, lang);
     C.set('particle_initVS', C.get('particle_initVS') + init);
     C.set('particle_wrapVS', C.get('particle_wrapVS') + wrap);
+    // Обхід помилки 2.23.2: з wrap розтяг (stretch) ще раз додає зсув загортання до попередньої позиції
+    // (posPrev = загорнута − швидкість·stretch + (загорнута − справжня)) — риска тяглась до справжньої позиції частинки,
+    // за десятки одиниць (дощ — кілька довгих ліній через увесь екран замість тисяч коротких рисок). particlePos тут уже
+    // загорнута, тож попередня — просто particlePos − moveDir
+    C.set('particle_stretchVS', C.get('particle_stretchVS').replace(/\n\s*posPrev (\+= particlePosMoved|= posPrev \+ particlePosMoved);/, ''));
   }
   patched = dev;
 }
