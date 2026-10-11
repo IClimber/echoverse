@@ -11,21 +11,29 @@ export function createMaterials(G) {
   const all = new Map();
   let texArr = null, sprArr = null;
 
-  // opts: cull (типово NONE), defines ['ECO_…'], blend (прозорість: { opacity }), matcol — матеріал у color.a (без AO);
+  // opts: cull (типово NONE), defines ['ECO_…'], blend (прозорість: { opacity }), matcol — матеріал у color.a (AO — число на об'єкт: eco_ao);
   // ECO_SPRITE — спрайти з атласу (setSpriteArray), вирізання за альфою і в тіні
   function makeMaterial(name, { cull = pc.CULLFACE_NONE, defines = [], blend = null, matcol = false } = {}) {
     const m = new pc.StandardMaterial();
     m.name = name;
     m.diffuseVertexColor = true; m.vertexColorGamma = true;
     m.specular = new pc.Color(0, 0, 0); m.useMetalness = false;
-    if (matcol) m.setDefine('ECO_MATCOL', true);
-    else { m.aoVertexColor = true; m.aoVertexColorChannel = 'a'; m.aoIntensity = 1; }
+    // AO гасить лише розсіяне світло (occludeDiffuse PlayCanvas): у землі — з color.a; у float-мешів — число на об'єкт
+    // (eco_ao, екземпляри — instance_line1.w; chunks.js): aoVertexColor лише вмикає AO, aoPS — свій
+    m.aoVertexColor = true; m.aoVertexColorChannel = 'a'; m.aoIntensity = 1;
+    if (matcol) {
+      m.setDefine('ECO_MATCOL', true); m.setParameter('eco_ao', 1);
+      // свій transformInstancingVS: атрибути екземпляра PlayCanvas прив'язує сам лише для типового (lit-shader.js) —
+      // ті самі семантики, що в нього (як setAttribute у прикладі instancing-custom)
+      m.setAttribute('instance_line1', pc.SEMANTIC_ATTR11); m.setAttribute('instance_line2', pc.SEMANTIC_ATTR12);
+      m.setAttribute('instance_line3', pc.SEMANTIC_ATTR14); m.setAttribute('instance_line4', pc.SEMANTIC_ATTR15);
+    }
     m.cull = cull;
     const sprite = defines.includes('ECO_SPRITE'), thin = sprite || defines.includes('ECO_THIN'), dither = thin || defines.some((d) => d === 'ECO_FADE' || d === 'ECO_CUT' || d === 'ECO_CUTF' || d === 'ECO_XIN' || d === 'ECO_XOUT');
     // у тіньовому проході — лише проріджування (розчинення й «вікно» — FORWARD_PASS): трава за межею не кидає тіні
     if (dither) { m.opacityDither = pc.DITHER_BAYER8; m.opacityShadowDither = thin ? pc.DITHER_BAYER8 : pc.DITHER_NONE; }
     for (const d of defines) m.setDefine(d, true);
-    m.getShaderChunks(lang).add(chunksFor(dev, lang, { opacity: dither, sprite }));
+    m.getShaderChunks(lang).add(chunksFor(dev, lang, { opacity: dither, sprite, matcol }));
     m.shaderChunksVersion = '2.23';
     if (blend) setBlend(m, blend.opacity);
     if (texArr) m.setParameter('uTexArr', texArr);

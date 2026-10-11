@@ -622,10 +622,11 @@ function boot(renderer) {
       b.ix = b.ps === undefined ? b.x : b.px + (b.x - b.px) * k; b.iy = b.ps === undefined ? b.y : b.py + (b.y - b.py) * k; b.iz = b.ps === undefined ? b.z : b.pz + (b.z - b.pz) * k;
     }
     const lines = g.showColl && me.placed ? collLines(me) : null;
+    const fx = me.ix ?? me.x, fy = me.iy ?? me.y, fz = me.iv ?? me.vis ?? me.z;
     const sk = renderer.draw({
-      lines, under: g.under ? L.liquid : null,
+      lines, under: g.under ? L.liquid : null, skyOpen: (x, y, z) => g.world.skyOpen(g.d, g.n, x, y, z),
       camera, target: g.cam, view: g.view, laws: L, far: g.far, clock: g.clock, bodies, weather: { W: loc.W, loc }, rain: me.placed && loc.type ? rainMap(now) : null,
-      me: me.placed ? { x: me.ix ?? me.x, y: me.iy ?? me.y, z: me.iv ?? me.vis ?? me.z, yaw: me.yaw, swim: me.swim, fly: me.fly, anim } : null,
+      me: me.placed ? { x: fx, y: fy, z: fz, yaw: me.yaw, swim: me.swim, fly: me.fly, anim, ao: g.world.skyOpen(g.d, g.n, fx, fy, fz + 0.5) } : null,
     });
     setText('addr', `Глибина ${g.d} · всесвіт ${fmtN(g.n)} · ${clockStr(sk.phase)}${L.sky.lock ? ' (вічно)' : ''}`);
     const an = g.ph && g.ph.anom ? ` · аномалія ×${g.ph.anom.toFixed(1).replace('.', ',')}` : '';

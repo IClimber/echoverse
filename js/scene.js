@@ -21,7 +21,7 @@ import { liquidVis } from './collision.js';
 import { figureParts } from './gen/mesh.js';
 import { poseMatrices, viewArms } from './anim.js';
 import { skyState, applyWeather, lightsOf, pcIntensity } from './sky.js';
-import { ISO, FIRST, fovOf, VIEW_R, FAR_R, SEAM, viewProj, isoRadius, project, basis, aabbInView, aabbInside, LOD_R, LOD_CAP, LOD_ON, lodOf, keepLod, colDist, FLORA_NEAR, FLORA_FADE, FLORA_THIN } from './camera.js';
+import { ISO, FIRST, CAM_R, fovOf, VIEW_R, FAR_R, SEAM, viewProj, isoRadius, project, basis, aabbInView, aabbInside, LOD_R, LOD_CAP, LOD_ON, lodOf, keepLod, colDist, FLORA_NEAR, FLORA_FADE, FLORA_THIN } from './camera.js';
 import { regionOf, RS, RW, RH, PO, PQ } from './gen/pack.js';
 import { ck } from './world.js';
 import { texturesOf, TEX } from './textures.js';
@@ -491,7 +491,8 @@ export async function createScene(canvas, settings = {}) {
       return { ...v, rad, fog: iso ? null : [0.3 * FAR_R, 0.97 * FAR_R] };
     },
 
-    // st: {camera, target, view, laws, clock, weather ({W, loc}), rain ({x0, y0}), far, bodies, me {x, y, z, yaw, swim, anim}}.
+    // st: {camera, target, view, laws, clock, weather ({W, loc}), rain ({x0, y0}), far, bodies, skyOpen(x, y, z) — AO неба тіл,
+    // me {x, y, z, yaw, swim, anim, ao — AO неба фігури}}.
     // Повертає стан неба (sky.js) — для HUD
     draw(st) {
       frame++;
@@ -538,7 +539,10 @@ export async function createScene(canvas, settings = {}) {
         cam.orthoHeight = G.height / (2 * S * st.camera.zoom); cam.nearClip = 1; cam.farClip = 800;
       } else {
         if (cam.projection !== pc.PROJECTION_PERSPECTIVE) cam.projection = pc.PROJECTION_PERSPECTIVE;
-        cam.fov = fovOf(st.camera) / Math.PI * 180; cam.nearClip = first ? 0.05 : 0.1; cam.farClip = FAR_R * 1.6;
+        // ближня площина: кут її прямокутника (fov — по вертикалі) ближче до ока, ніж поверхня (CAM_R − 0,01, camera.js), —
+        // інакше в тісноті площина зрізає стіну й у кадрі видно, що за нею; на дуже широкому екрані — ближче
+        const th = Math.tan(fovOf(st.camera) / 2), kc = Math.sqrt(1 + th * th * (1 + (G.width / G.height) ** 2));
+        cam.fov = fovOf(st.camera) / Math.PI * 180; cam.nearClip = Math.min(first ? 0.05 : 0.1, 0.9 * (CAM_R - 0.01) / kc); cam.farClip = FAR_R * 1.6;
       }
 
       // Світло: сонця й місяці — напрямлені (лінійні сили з законів, lightsOf); розсіяне — з неба (envAtlas), каліброване
@@ -702,6 +706,7 @@ export async function createScene(canvas, settings = {}) {
         const c = Math.cos(bo.yaw), s = Math.sin(bo.yaw), ct = Math.cos(bo.tilt), stl = Math.sin(bo.tilt), k = bo.s;
         m16.set([c * k, s * k, 0, 0, -s * ct * k, c * ct * k, stl * k, 0, s * stl * k, -c * stl * k, ct * k, 0, bo.ix ?? bo.x, bo.iy ?? bo.y, (bo.iz ?? bo.z) - bo.hz, 1]);
         G.matToPC(m16, g.buf, g.n * 16);
+        g.buf[g.n * 16 + 3] = st.skyOpen ? st.skyOpen(bo.ix ?? bo.x, bo.iy ?? bo.y, bo.iz ?? bo.z) : 1;   // AO неба тіла (у матриці там 0; chunks.js)
         g.n++;
       }
       for (const g of tmpl.values()) { g.inst.update(g.buf, g.n); tris += g.n * g.mesh.primitive[0].count / 3; }
@@ -709,6 +714,9 @@ export async function createScene(canvas, settings = {}) {
       // Фігура (у першій особі й з камерою впритул — лише тінь, інакше око в голові); пристрій не світиться (рішення 10.10.2026).
       // Руки першої особи — у шарі «Руки» (поверх світу, глибина очищена)
       if (me) fig.pose(poseMatrices(me.anim, me.x - G.O[0], me.y - G.O[1], me.z, me.yaw));
+      // AO неба фігури й рук — одне число (у float-мешах AO вершин немає): у печері й під навісом розсіяне світло неба гасне,
+      // як на землі поруч
+      if (me) { const ao = me.ao ?? 1; figMI.setParameter('eco_ao', ao); armsMI.setParameter('eco_ao', ao); }
       figSh.visible = !!me;
       figMI.visible = !!me && !first && (view.ortho || camD > 0.7);
       armsMI.visible = !!me && first;

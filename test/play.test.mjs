@@ -644,7 +644,7 @@ test('прогулянка справжнім рельєфом: випадков
 });
 
 test('камера третьої особи — куля: стіна, стовбур, тіло позаду — ближче; схил — око над ним; низька стеля — ціль під нею; не виходить з-під рідини', async () => {
-  const { createCamera, camHead, camCollide, eyeDir, THIRD, HEAD, CAM_R, CAM_MIN } = await import('../js/camera.js');
+  const { createCamera, camHead, camCollide, eyeDir, THIRD, HEAD, CAM_R } = await import('../js/camera.js');
   const { colliderOf, underLiquid } = await import('../js/collision.js');
   const cam = createCamera(THIRD);
   cam.yaw = Math.PI; cam.pitch3 = 0; cam.dist = 7;                   // око — у бік −x
@@ -674,7 +674,7 @@ test('камера третьої особи — куля: стіна, стов�
   cam.pitch3 = 0.5;
   const W = world(Array(16).fill('w'.repeat(16))), u = camCollide(cam, [8.5, 8.5, 2.2], [8.5, 8.5, 2.2], colliderOf(W), (a, b2, c2) => underLiquid(W, a, b2, c2));
   const ue = eyeDir(cam), uz = 2.2 + ue[2] * u.dist;
-  assert.ok(u.dist >= CAM_MIN && uz < 2.85 && uz > 2.6, `під водою: око ${uz}, відстань ${u.dist}`);
+  assert.ok(u.dist >= 0 && uz < 2.85 && uz > 2.6, `під водою: око ${uz}, відстань ${u.dist}`);
   cam.pitch3 = 0;
 });
 
@@ -744,4 +744,22 @@ test('під рідиною: око нижче поверхні стовпця �
   assert.equal(underLiquid(P, 1.5, 1.5, 0.9), false);                   // у дні — не рідина
   const vis = [0.72, 0.82, 0.55, 1].map(liquidVis);                     // вода, кислота, метан, лава
   assert.ok(Math.abs(vis[0] - 15.56) < 0.01 && Math.abs(vis[1] - 8.78) < 0.01 && Math.abs(vis[2] - 32.73) < 0.01 && vis[3] === 0.8, `${vis}`);
+});
+
+test('відкритість неба фігури й тіл: як AO неба вершин землі (skyK), білінійно між клітинками; немає даних — відкрито', async () => {
+  const { skyOpenAt } = await import('../js/world.js');
+  const { skyK } = await import('../js/gen/mesh.js');
+  const { LEVEL } = await import('../js/iso.js');
+  // клітинки x < 0 — під стелею на висоті 10 (печера), x ≥ 0 — відкрито (верх укриття — земля на 0)
+  const top = (x) => x < 0 ? 10 : 0;
+  assert.equal(skyOpenAt(top, 5.5, 0.5, 0.5), 1);
+  assert.equal(skyOpenAt(top, -5.5, 0.5, 0.5), 0);
+  // та сама величина, що й у вершини землі на тій самій висоті під укриттям
+  const mid = (x) => x < 0 ? 0.5 + 5 * LEVEL : 0;
+  assert.ok(Math.abs(skyOpenAt(mid, -5.5, 0.5, 0.5) - skyK(5)) < 1e-12);
+  // на межі — посередині, без стрибка; уздовж кроку — монотонно
+  assert.ok(Math.abs(skyOpenAt(top, 0, 0.5, 0.5) - 0.5) < 1e-12);
+  let prev = -1;
+  for (let x = -1; x <= 1; x += 0.05) { const k = skyOpenAt(top, x, 0.5, 0.5); assert.ok(k >= prev - 1e-12); prev = k; }
+  assert.equal(skyOpenAt(() => null, 3.2, 7.9, -50), 1);
 });

@@ -18,7 +18,10 @@
 //   z — шар атласу uSprite − 127), освітлення — з нормаллю вгору (normalVS), альбедо — спрайт × колір вершини, вирізання
 //   за альфою спрайта в обох проходах (альфа × (1 + 0,25 · рівень мип-мапи) — як у Ben Golus «Anti-aliased Alpha Test»:
 //   без цього мип-мапи з'їдають тонкі стебла здалеку), вітер гойдає лише верх (× v).
-// Варіанти: ECO_MATCOL — матеріал у color.a (float-меші), інакше — у pos.w, а AO — у color.a (aoVertexColor)
+// Варіанти: ECO_MATCOL — матеріал у color.a (float-меші), інакше — у pos.w, а AO — у color.a (aoVertexColor).
+// AO float-мешів (фігура, руки, тіла — у вершинах його немає): одне число на об'єкт — уніформа eco_ao (MeshInstance.setParameter),
+// в екземплярів — instance_line1.w (у матриці там 0; transformInstancingVS — типовий шматок з w = 0); aoPS бере його замість
+// кольору вершини (матеріал вмикає AO через aoVertexColor — так PlayCanvas гасить ним лише розсіяне світло)
 import { pc } from './app.js';
 
 export const MAT_N = 32;
@@ -33,6 +36,10 @@ uniform vec2 eco_thin;
 varying float vEcoMat;
 varying float vEcoThin;
 varying vec3 vEcoUV;
+#ifdef ECO_MATCOL
+uniform float eco_ao;
+varying float vEcoAo;
+#endif
 // спрайт: нормаль — координати спрайта в обох проходах і вже в transformVS (типовий normalCoreVS оголошує її пізніше
 // й лише з NORMALS — у спрайтів його рядок прибрано, chunksFor), атрибут без NORMALS — material.setAttribute
 #ifdef ECO_SPRITE
@@ -47,6 +54,11 @@ const MAIN_END_VS = `
     vEcoMat = 0.0;
   #endif
   vEcoThin = 1.0e6;
+  #ifdef INSTANCING
+    vEcoAo = instance_line1.w;
+  #else
+    vEcoAo = eco_ao;
+  #endif
 #else
   float eco_raw = floor(vertex_position.w * 65535.0 + 0.5), eco_key = floor(eco_raw / 32.0);
   vEcoMat = eco_raw - eco_key * 32.0;
@@ -90,6 +102,9 @@ varying float vEcoThin;
 varying vec3 vEcoUV;
 #ifdef ECO_SPRITE
   uniform sampler2DArray uSprite;
+#endif
+#ifdef ECO_MATCOL
+varying float vEcoAo;
 #endif
 vec3 eco_col;
 `;
@@ -181,6 +196,21 @@ void getOpacity() {
   #endif
 }
 `;
+const AO_PS = `
+void getAO() {
+  dAo = vEcoAo;
+}
+`;
+const INSTANCING_VS = `
+attribute vec4 instance_line1;
+attribute vec4 instance_line2;
+attribute vec4 instance_line3;
+attribute vec4 instance_line4;
+
+mat4 getModelMatrix() {
+    return matrix_model * mat4(vec4(instance_line1.xyz, 0.0), instance_line2, instance_line3, instance_line4);
+}
+`;
 
 const NORMAL_VS = `
 mat3 dNormalMatrix;
@@ -200,6 +230,10 @@ uniform eco_thin: vec2f;
 varying vEcoMat: f32;
 varying vEcoThin: f32;
 varying vEcoUV: vec3f;
+#ifdef ECO_MATCOL
+uniform eco_ao: f32;
+varying vEcoAo: f32;
+#endif
 #ifdef ECO_SPRITE
 attribute vertex_normal: vec3f;
 #endif
@@ -212,6 +246,11 @@ const MAIN_END_VS_W = `
     output.vEcoMat = 0.0;
   #endif
   output.vEcoThin = 1.0e6;
+  #ifdef INSTANCING
+    output.vEcoAo = instance_line1.w;
+  #else
+    output.vEcoAo = uniform.eco_ao;
+  #endif
 #else
   let eco_raw: f32 = floor(vertex_position.w * 65535.0 + 0.5);
   let eco_key: f32 = floor(eco_raw / 32.0);
@@ -260,6 +299,9 @@ varying vEcoUV: vec3f;
 #ifdef ECO_SPRITE
   var uSprite: texture_2d_array<f32>;
   var uSpriteSampler: sampler;
+#endif
+#ifdef ECO_MATCOL
+varying vEcoAo: f32;
 #endif
 var<private> eco_col: vec3f;
 `;
@@ -352,6 +394,21 @@ fn getOpacity() {
   #endif
 }
 `;
+const AO_PS_W = `
+fn getAO() {
+  dAo = vEcoAo;
+}
+`;
+const INSTANCING_VS_W = `
+attribute instance_line1: vec4f;
+attribute instance_line2: vec4f;
+attribute instance_line3: vec4f;
+attribute instance_line4: vec4f;
+
+fn getModelMatrix() -> mat4x4f {
+    return uniform.matrix_model * mat4x4f(vec4f(instance_line1.xyz, 0.0), instance_line2, instance_line3, instance_line4);
+}
+`;
 
 const NORMAL_VS_W = `
 var<private> dNormalMatrix: mat3x3f;
@@ -367,10 +424,11 @@ const ANCHOR = {
   [pc.SHADERLANGUAGE_WGSL]: 'var posW: vec4f = modelMatrix * vec4f(localPos, 1.0);',
 };
 const cache = new Map();
-// Шматки для мови lang; opacity — лише для варіантів з дизерингом (розчинення, «вікно»); sprite — спрайти (ECO_SPRITE)
+// Шматки для мови lang; opacity — лише для варіантів з дизерингом (розчинення, «вікно»); sprite — спрайти (ECO_SPRITE);
+// matcol — float-меші (ECO_MATCOL): AO об'єкта
 // рядок атрибута нормалі в типовому normalCoreVS (спрайти оголошують його самі — угорі, litUserDeclarationVS)
 const NORMAL_ATTR = { [pc.SHADERLANGUAGE_GLSL]: 'attribute vec3 vertex_normal;', [pc.SHADERLANGUAGE_WGSL]: 'attribute vertex_normal: vec3f;' };
-export function chunksFor(dev, lang, { opacity = false, sprite = false } = {}) {
+export function chunksFor(dev, lang, { opacity = false, sprite = false, matcol = false } = {}) {
   let C = cache.get(lang);
   if (!C) {
     const W = lang === pc.SHADERLANGUAGE_WGSL;
@@ -389,11 +447,14 @@ export function chunksFor(dev, lang, { opacity = false, sprite = false } = {}) {
       spriteDiffusePS: W ? DIFFUSE_SPRITE_PS_W : DIFFUSE_SPRITE_PS,
       spriteNormalVS: W ? NORMAL_VS_W : NORMAL_VS,
       spriteNormalCoreVS: nc.replace(na, ''),
+      matcolAoPS: W ? AO_PS_W : AO_PS,
+      matcolInstancingVS: W ? INSTANCING_VS_W : INSTANCING_VS,
     };
     cache.set(lang, C);
   }
-  const { opacityPS, spriteDiffusePS, spriteNormalVS, spriteNormalCoreVS, ...rest } = C;
+  const { opacityPS, spriteDiffusePS, spriteNormalVS, spriteNormalCoreVS, matcolAoPS, matcolInstancingVS, ...rest } = C;
   if (opacity) rest.opacityPS = opacityPS;
+  if (matcol) { rest.aoPS = matcolAoPS; rest.transformInstancingVS = matcolInstancingVS; }
   if (sprite) { rest.diffusePS = spriteDiffusePS; rest.normalVS = spriteNormalVS; rest.normalCoreVS = spriteNormalCoreVS; }
   return rest;
 }

@@ -189,8 +189,10 @@ export function isoRadius(c, W, H, zr, targetZ) {
 }
 
 // Третя особа: камера — куля CAM_R, що не проходить крізь те, з чим зіштовхується гравець (видима поверхня, стовбури,
-// каміння, тіла; src — collision.js), як SpringArm з ProbeSize в Unreal. Крона біля камери розчиняється (scene.js)
-export const CAM_R = 0.2, CAM_MIN = 0.15;
+// каміння, тіла; src — collision.js), як SpringArm з ProbeSize в Unreal. Крона біля камери розчиняється (scene.js).
+// Око — не ближче CAM_R − 0,01 до поверхні (у тісноті — аж до цілі, фігуру тоді не видно), тож кути ближньої площини
+// (scene.js: nearClip — щоб кут був ближче за CAM_R) не зрізають стіну: крізь неї не видно, що за нею
+export const CAM_R = 0.2;
 const CL = createList(512), CH = {};
 // Яку частку руху кулі з a на d пройти вільно (0…1)
 function camSweep(src, ax, ay, az, dx, dy, dz) {
@@ -208,16 +210,16 @@ export function camHead(src, foot, h) {
   return z0 + (h - 0.6) * camSweep(src, foot[0], foot[1], z0, 0, 0, foot[2] + h - z0);
 }
 // Ціль і відстань до ока: від голови (head — [x, y, z]) до згладженої цілі target — куля (згладжування не тягне камеру
-// крізь стіну); від цілі вздовж eyeDir на c.dist — куля (не ближче CAM_MIN); under(x, y, z) — точка під рідиною:
+// крізь стіну); від цілі вздовж eyeDir на c.dist — куля; under(x, y, z) — точка під рідиною:
 // камера не перетинає поверхню рідини відносно цілі. Повертає {target, dist}
 export function camCollide(c, head, target, src, under) {
   const k = camSweep(src, head[0], head[1], head[2], target[0] - head[0], target[1] - head[1], target[2] - head[2]);
   const t = [head[0] + (target[0] - head[0]) * k, head[1] + (target[1] - head[1]) * k, head[2] + (target[2] - head[2]) * k];
   const u = eyeDir(c);
-  let dist = Math.max(CAM_MIN, c.dist * camSweep(src, t[0], t[1], t[2], u[0] * c.dist, u[1] * c.dist, u[2] * c.dist));
+  let dist = c.dist * camSweep(src, t[0], t[1], t[2], u[0] * c.dist, u[1] * c.dist, u[2] * c.dist);
   if (under) {
     const w = under(t[0], t[1], t[2]);
-    for (let s = 0.1; s < dist; s += 0.1) if (under(t[0] + u[0] * s, t[1] + u[1] * s, t[2] + u[2] * s) !== w) { dist = Math.max(CAM_MIN, s - 0.1 + 0.05); break; }
+    for (let s = 0.1; s < dist; s += 0.1) if (under(t[0] + u[0] * s, t[1] + u[1] * s, t[2] + u[2] * s) !== w) { dist = Math.max(0, s - 0.1 + 0.05); break; }
   }
   return { target: t, dist };
 }

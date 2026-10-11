@@ -100,7 +100,7 @@ export class Mesh {
 const DIRS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
 // AO вершини: кут (твердих блоків у кубі 2×2×2 навколо вершини) і відкритість неба (верх укриття вище вершини на d блоків)
 const AOB = [255, 255, 255, 255, 255, 227, 199, 168, 140];
-const skyK = (d) => d <= 1 ? 1 : d >= 9 ? 0 : 1 - (d - 1) / 8;
+export const skyK = (d) => d <= 1 ? 1 : d >= 9 ? 0 : 1 - (d - 1) / 8;
 
 export function chunkMesh(C, L, { near = true, far = true } = {}) {
   const M = new Mesh(), W = new Mesh(), Mc = new Mesh(), P = L.pal, B = C.b;

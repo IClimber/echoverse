@@ -8,13 +8,23 @@ import { CS, ci, bv, solidB, blocks, genColumn, B_AIR, B_STONE, O_FLOAT, SEC } f
 import { LEVEL } from './iso.js';
 import { createGen } from './gen/client.js';
 import { standableB, GRAVITY, PLAYER_MASS, PLAYER_AREA } from './player.js';
-import { floatPose } from './gen/mesh.js';
+import { floatPose, skyK } from './gen/mesh.js';
 import { footprint } from './gen/plants.js';
 import { makeBody, configureBodies, settle } from './engine/physics/bodies.js';
 import { createEntities } from './engine/world/entities.js';
 
 // тіла рушія — зі сталими гри (блок, тверде, тяжіння, еталон маси й площі — гравець)
 configureBodies({ level: LEVEL, solid: solidB, gravity: GRAVITY, refMass: PLAYER_MASS, refArea: PLAYER_AREA });
+
+// Відкритість неба в точці (x, y, z) — як AO неба вершин землі (skyK у gen/mesh.js: верх укриття ≤ 1 блок над точкою —
+// 1, ≥ 9 — 0), білінійно між центрами чотирьох клітинок (без стрибків при ході); topAt(x, y) — верх укриття клітинки
+// (одиниці; немає даних — null → 1). Для об'єктів без AO у вершинах (фігура, руки, тіла): розсіяне світло неба в печері
+// й під навісом гасне так само, як на землі поруч
+export function skyOpenAt(topAt, x, y, z) {
+  const fx = x - 0.5, fy = y - 0.5, i = Math.floor(fx), j = Math.floor(fy), u = fx - i, v = fy - j;
+  const k = (tx, ty) => { const t = topAt(tx, ty); return t === null ? 1 : skyK((t - z) / LEVEL); };
+  return (k(i, j) * (1 - u) + k(i + 1, j) * u) * (1 - v) + (k(i, j + 1) * (1 - u) + k(i + 1, j + 1) * u) * v;
+}
 
 // Числові ключі: стовпець (|cx|, |cy| < 2^20 — точно, < 2^42) і секція (cz ∈ −512…511, < 2^52)
 export const ck = (cx, cy) => (cx + 0x100000) * 0x200000 + (cy + 0x100000);
@@ -186,6 +196,8 @@ export function createWorld(seed, onMesh) {
       const C = colOf(d, n, x, y);
       return C ? C.top[ci(x - C.cx * CS, y - C.cy * CS)] * LEVEL : null;
     },
+    // Відкритість неба в точці (x, y, z) — skyOpenAt
+    skyOpen(d, n, x, y, z) { return skyOpenAt((tx, ty) => W.topAt(d, n, tx, ty), x, y, z); },
     // Поверхня клітинки (для F3): {h, t, v, bm} або null
     column(d, n, x, y) {
       const C = colOf(d, n, x, y);
