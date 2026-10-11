@@ -339,24 +339,46 @@ fn getModelMatrix() -> mat4x4f {
 }
 `;
 
+// Обрис (OutlineRenderer): у його проході компілюються лише вершинні шматки — вітер і кривизна, як у рослин, тож обрис
+// гойдається разом з ними; номер матеріалу — у pos.w (як у щільних вершинах)
+const OUT_DECL_VS = `
+uniform vec4 eco_wind;
+uniform float eco_curve;
+uniform vec3 eco_target;
+uniform vec4 eco_mat[${MAT_N}];
+`;
+const OUT_DECL_VS_W = `
+uniform eco_wind: vec4f;
+uniform eco_curve: f32;
+uniform eco_target: vec3f;
+uniform eco_mat: array<vec4f, ${MAT_N}>;
+`;
+
 // transformVS — типовий шматок рушія з нашим кодом після рядка-якоря (обчислення світової позиції)
 const ANCHOR = {
   [pc.SHADERLANGUAGE_GLSL]: 'vec4 posW = modelMatrix * vec4(localPos, 1.0);',
   [pc.SHADERLANGUAGE_WGSL]: 'var posW: vec4f = modelMatrix * vec4f(localPos, 1.0);',
 };
 const cache = new Map();
+const transformOf = (dev, lang) => {
+  const base = pc.ShaderChunks.get(dev, lang).get('transformVS'), a = ANCHOR[lang];
+  if (!base || !base.includes(a)) throw new Error('transformVS PlayCanvas змінився');
+  return base.replace(a, a + (lang === pc.SHADERLANGUAGE_WGSL ? TRANSFORM_ADD_W : TRANSFORM_ADD));
+};
+// Шматки матеріалу обрису (лише вершинні: вітер ECO_WIND і кривизна ECO_CURVE)
+export function outlineChunks(dev, lang) {
+  return { litUserDeclarationVS: lang === pc.SHADERLANGUAGE_WGSL ? OUT_DECL_VS_W : OUT_DECL_VS, transformVS: transformOf(dev, lang) };
+}
 // Шматки для мови lang; opacity — лише для варіантів з дизерингом (розчинення, «вікно»); matcol — float-меші (ECO_MATCOL):
 // AO об'єкта
 export function chunksFor(dev, lang, { opacity = false, matcol = false } = {}) {
   let C = cache.get(lang);
   if (!C) {
     const W = lang === pc.SHADERLANGUAGE_WGSL;
-    const base = pc.ShaderChunks.get(dev, lang).get('transformVS'), a = ANCHOR[lang];
-    if (!base || !base.includes(a)) throw new Error('transformVS PlayCanvas змінився');
     C = {
       litUserDeclarationVS: W ? DECL_VS_W : DECL_VS,
       litUserMainEndVS: W ? MAIN_END_VS_W : MAIN_END_VS,
-      transformVS: base.replace(a, a + (W ? TRANSFORM_ADD_W : TRANSFORM_ADD)),
+      transformVS: transformOf(dev, lang),
       litUserDeclarationPS: W ? DECL_PS_W : DECL_PS,
       diffusePS: W ? DIFFUSE_PS_W : DIFFUSE_PS,
       emissivePS: W ? EMISSIVE_PS_W : EMISSIVE_PS,

@@ -5,6 +5,7 @@
 // debug.js. Камера — camera.js гри (третя особа чи ізометрія)
 import { createApp, pc } from './engine/graphics/app.js';
 import { createMaterials } from './engine/graphics/materials.js';
+import { outlineChunks } from './engine/graphics/chunks.js';
 import { createRegions } from './engine/graphics/regions.js';
 import { createSky } from './engine/graphics/sky.js';
 import { createLights, SHADOW_D } from './engine/graphics/lights.js';
@@ -154,7 +155,10 @@ export async function createScene(canvas, settings = {}) {
   G.root.addChild(outE);
   const OUT_COL = new pc.Color(0.95, 0.95, 0.85);
   // проста StandardMaterial: прохід обрису бере з матеріалу лише непрозорість (наші шматки в ньому не компілюються)
-  const outMat = new pc.StandardMaterial(); outMat.cull = pc.CULLFACE_NONE; outMat.update();
+  // з вершинними шматками вітру й кривизни (chunks.js outlineChunks) — обрис гойдається разом з рослиною
+  const outMat = new pc.StandardMaterial(); outMat.cull = pc.CULLFACE_NONE;
+  outMat.getShaderChunks(G.lang).add(outlineChunks(dev, G.lang)); outMat.shaderChunksVersion = '2.23';
+  outMat.setDefine('ECO_WIND', true); outMat.setDefine('ECO_CURVE', true); outMat.update();
   const wire = new pc.WireRenderer(app);            // каркас блоку-цілі (extras/renderers/wire-renderer.js)
   wire.color = new pc.Color(0.05, 0.05, 0.05, 0.7); wire.layer = G.layers.world; wire.depthTest = true;   // World: шар «Руки» очищає глибину до Immediate — каркас лягав би поверх фігури
   const objMeshes = new Map();                      // повна будова предметів-цілей: key → pc.Mesh (кілька останніх)
@@ -491,7 +495,7 @@ export async function createScene(canvas, settings = {}) {
       if (!mesh || !mesh.pos.length) return;
       // кеш тримає своє посилання: MeshInstance.destroy() (заміна обрису) знищує меш, на який більше ніхто не посилається
       if (objMeshes.size >= 8) { const [k0, m0] = objMeshes.entries().next().value; if (k0 !== outKey) { m0.decRefCount(); if (m0.refCount < 1) m0.destroy(); objMeshes.delete(k0); } }
-      const m = floatMesh(G, mesh);
+      const m = floatMesh(G, mesh, { matW: true });
       m.incRefCount();
       objMeshes.set(key, m);
     },
