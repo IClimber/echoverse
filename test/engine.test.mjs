@@ -536,3 +536,49 @@ test('settle: тіло в повітрі лягає на ґрунт, левіт�
   assert.ok(settleBody(f, P));
   assert.equal(f.z, 12.25); assert.equal(f.ax, 3.5);
 });
+
+// ================= Піраміда з кривизною =================
+import { aabbInView as inView_, aabbInside as inside_ } from '../js/engine/core/frustum.js';
+import { FIRST as FIRST_ } from '../js/camera.js';
+
+test('піраміда з кривизною: вигнута коробка — у кадрі, якщо в кадрі хоч одна її точка після вигину; уся всередині — лише якщо всі', () => {
+  // кривизна шейдера: точка (x, y, z) відносно цілі малюється на z − c·(x² + y²)
+  const c = 0.5 / 1548;                               // мала планета (planetR 1548 м)
+  const clip = (m, x, y, z) => {
+    z -= c * (x * x + y * y);
+    const X = m[0] * x + m[4] * y + m[8] * z + m[12], Y = m[1] * x + m[5] * y + m[9] * z + m[13], W = m[3] * x + m[7] * y + m[11] * z + m[15];
+    return W > 0 && X >= -W && X <= W && Y >= -W && Y <= W;
+  };
+  // перша особа, погляд униз на 20° уздовж −x: коробка далеко над верхньою площиною піраміди (без вигину відсічена),
+  // яку вигин опускає в кадр
+  const cam = createCamera(FIRST_); cam.pitch1 = cam.pitch1T = 20 * Math.PI / 180;
+  const { m } = viewProj(cam, 1600, 900);
+  let lifted = 0;
+  for (let i = 0; i < 60; i++) {
+    const x = -(600 + 25 * i), z0 = c * x * x + 2, z1 = z0 + 16;
+    if (!clip(m, x - 8, 0, z0 + 8)) continue;
+    assert.ok(inView_(m, x - 16, -8, z0, x, 8, z1, c));
+    if (!inView_(m, x - 16, -8, z0, x, 8, z1)) lifted++;
+  }
+  assert.ok(lifted > 10, `без вигину відсічено ${lifted}`);
+  // випадкові коробки й точки: точка після вигину в кадрі → коробка в кадрі (з c); уся всередині → кожна точка в кадрі
+  const R = rngT(7);
+  let seen = 0, all = 0;
+  for (const pitch of [-60, -20, 0, 25]) {
+    cam.pitch1 = cam.pitch1T = pitch * Math.PI / 180; cam.yaw = cam.yawT = R() * 6.28;
+    const { m: mm } = viewProj(cam, 1600, 900);
+    for (let i = 0; i < 1500; i++) {
+      const x0 = (R() - 0.5) * 2400, y0 = (R() - 0.5) * 2400, z0 = (R() - 0.6) * 200 + 1.5 * c * (x0 * x0 + y0 * y0) * R();
+      const x1 = x0 + 1 + R() * 64, y1 = y0 + 1 + R() * 64, z1 = z0 + 1 + R() * 64;
+      const vis = inView_(mm, x0, y0, z0, x1, y1, z1, c), ins = inside_(mm, x0, y0, z0, x1, y1, z1, c);
+      if (ins) assert.ok(vis);
+      for (let k = 0; k < 24; k++) {
+        const x = x0 + (x1 - x0) * R(), y = y0 + (y1 - y0) * R(), z = z0 + (z1 - z0) * R(), p = clip(mm, x, y, z);
+        if (p) { seen++; assert.ok(vis, `точка в кадрі, коробка відсічена: ${[x0, y0, z0, x1, y1, z1].map((v) => v.toFixed(1))}`); }
+        if (ins) { all++; assert.ok(p, 'коробка «уся всередині», а точка — поза кадром'); }
+      }
+    }
+  }
+  assert.ok(seen > 1000 && all > 100, `${seen} ${all}`);
+});
+function rngT(s) { return () => ((s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 4294967296); }

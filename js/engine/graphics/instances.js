@@ -15,8 +15,9 @@ export function createInstances(G, mesh, material, { layer = G.layers.world, cas
   const ma = mesh.aabb, r0 = ma.center.length() + ma.halfExtents.length(), bb = new pc.BoundingBox(), lo = new pc.Vec3(), hi = new pc.Vec3();
   return {
     mi,
-    // matrices: Float32Array (16 на екземпляр), n — скільки
-    update(matrices, n) {
+    // matrices: Float32Array (16 на екземпляр), n — скільки; sag — найбільше опускання екземплярів вершинним шейдером
+    // (кривизна): низ AABB нижче на стільки
+    update(matrices, n, sag = 0) {
       if (!n) { mi.visible = false; return; }
       if (n > cap) {
         cap = Math.max(16, cap * 2); while (cap < n) cap *= 2;
@@ -33,7 +34,7 @@ export function createInstances(G, mesh, material, { layer = G.layers.world, cas
         if (x - k < x0) x0 = x - k; if (y - k < y0) y0 = y - k; if (z - k < z0) z0 = z - k;
         if (x + k > x1) x1 = x + k; if (y + k > y1) y1 = y + k; if (z + k > z1) z1 = z + k;
       }
-      bb.setMinMax(lo.set(x0, y0, z0), hi.set(x1, y1, z1));
+      bb.setMinMax(lo.set(x0, y0 - sag, z0), hi.set(x1, y1, z1));
       mi.setCustomAabb(bb);
       vb.setData(buf);
       mi.instancingCount = n;

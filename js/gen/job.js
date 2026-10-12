@@ -6,6 +6,7 @@ import { chunkMesh, floraMesh, farFlora, objPose, objMesh } from './mesh.js';
 import { packMesh, concat, frameOf, RS } from './pack.js';
 import { farMesh, FT } from './far.js';
 import { standCol, standSection, standFar } from './stand.js';
+import { secOccluders } from './vis.js';
 import { L_DRY, SEA } from '../universe.js';
 import { LEVEL } from '../iso.js';
 
@@ -91,10 +92,12 @@ export function runJob(L, q, cache) {
   const m = chunkMesh({ cx: q.cx, cy: q.cy, h: col.h, bm: col.bm, v: col.v, top: shelterTop(col, L), sky: col.sky, b: sec.b, k0: sec.k0, nk: sec.nk, obj: col.obj, sp: col.sp }, L, { near: false });
   const [dx, dy, dz] = frameOf(q.cx, q.cy, q.cz), s = packMesh(m.solid, dx, dy, dz), f = packMesh(m.far, dx, dy, dz);
   const op = f.n ? concat(s, f) : s, lq = m.liquid ? packMesh(m.liquid, dx, dy, dz) : null;
-  const bufs = [sec.b.buffer, op.buf];
+  const o = secOccluders(sec.b, sec.nk), bufs = [sec.b.buffer, op.buf];
+  if (o) bufs.push(o.f.buffer, o.s.buffer);
   if (lq) bufs.push(lq.buf);
   return {
-    data: { b: sec.b, k0: sec.k0, nk: sec.nk },
+    // occ, occS — заслони й бічні маски (відсікання закритого, gen/vis.js)
+    data: { b: sec.b, k0: sec.k0, nk: sec.nk, occ: o && o.f, occS: o && o.s },
     mesh: { op: op.buf, ns: s.n, nf: f.n, nc: 0, bb: op.n ? op.bb : null, liq: lq ? lq.buf : null, nl: lq ? lq.n : 0, lbb: lq ? lq.bb : null },
     bufs,
   };

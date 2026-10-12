@@ -7,7 +7,8 @@
 // 2 — кам'яний, 3 — крижаний), uMoon2[4] (другий колір візерунка, затемнення 0…1), uNSun, uNMoon, uDay, uStars (яскравість, відтінок),
 // uCel (обертання зоряного неба), uRing (r0, r1, непрозорість, смуг), uRingCol, uPole, uCloud (хмарність, зсув x, y,
 // темність), uCloudCol, uFlash, uAur (напрям на овал x, y, сила, час), uAurCol, uAurE (висота середини сяйва), uCloudC
-// (зсув камери від центру карти хмар x, y, розмір карти, висота шару хмар над камерою; м), uCloudMap (хмарність 64×64),
+// (зсув камери від центру карти хмар x, y, стиснення карти A, висота шару хмар над камерою; м), uCloudMap (хмарність
+// 64×64; точка шару хмар p — у клітинці q = p / (|p| + A): біля зеніту дрібно, до обрію — грубіше, край карти — обрій),
 // uMet[4] / uMetB[4] (метеор: початок і поступ, кінець і яскравість), uNMet, eco_bakeK.
 // Шум хмар і сяйва — value noise з хешем без синуса (Hoskins) за клітинкою mod 256, fBm з множником рівно 2: період 256,
 // тож зсуви часу й вітру CPU загортає за ним (js/scene.js) — у шейдер не йдуть великі числа. Був хеш fract(sin(·)·43758):
@@ -110,10 +111,9 @@ vec3 ecoSky(vec3 d) {
 #endif
   float cover = 0.0;
   if (uCloud.x > 0.01 && up > 0.0) {
-    // хмарність — з карти погоди в точці шару хмар (uCloudC.w над камерою), за картою — середня
-    float cov = uCloud.x;
-    vec2 cm = (uCloudC.xy + d.xy * (uCloudC.w / max(up, 0.03))) / uCloudC.z + 0.5;
-    if (cm.x > 0.0 && cm.y > 0.0 && cm.x < 1.0 && cm.y < 1.0) cov = texture2D(uCloudMap, cm).r;
+    // хмарність — з карти погоди в точці шару хмар (uCloudC.w над камерою); карта стиснена з відстанню й сягає обрію
+    vec2 p = uCloudC.xy + d.xy * (uCloudC.w / max(up, 0.03));
+    float cov = texture2D(uCloudMap, p / (length(p) + uCloudC.z) * 0.5 + 0.5).r;
     vec2 uv = d.xy / (up + 0.08) * 0.9 + uCloud.yz;
     float f = ecoFbm(uv);
     cover = cov > 0.01 ? smoothstep(1.02 - cov * 0.75, 1.25 - cov * 0.7, f + 0.25) * smoothstep(0.0, 0.12, up) : 0.0;
@@ -286,10 +286,8 @@ fn ecoSky(d: vec3f) -> vec3f {
 #endif
   var cover = 0.0;
   if (uniform.uCloud.x > 0.01 && up > 0.0) {
-    var cov = uniform.uCloud.x;
-    let cm = (uniform.uCloudC.xy + d.xy * (uniform.uCloudC.w / max(up, 0.03))) / uniform.uCloudC.z + 0.5;
-    let cs = textureSampleLevel(uCloudMap, uCloudMapSampler, clamp(cm, vec2f(0.0), vec2f(1.0)), 0.0).r;
-    if (cm.x > 0.0 && cm.y > 0.0 && cm.x < 1.0 && cm.y < 1.0) { cov = cs; }
+    let cp = uniform.uCloudC.xy + d.xy * (uniform.uCloudC.w / max(up, 0.03));
+    let cov = textureSampleLevel(uCloudMap, uCloudMapSampler, cp / (length(cp) + uniform.uCloudC.z) * 0.5 + 0.5, 0.0).r;
     let cuv = d.xy / (up + 0.08) * 0.9 + uniform.uCloud.yz;
     let f = ecoFbm(cuv);
     cover = select(0.0, ecoSs(1.02 - cov * 0.75, 1.25 - cov * 0.7, f + 0.25) * ecoSs(0.0, 0.12, up), cov > 0.01);

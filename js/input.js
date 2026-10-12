@@ -26,6 +26,8 @@ function keyDown(code, shift, repeat) {
 export function initInput(target = window) {
   target.addEventListener('keydown', (e) => {
     if (e.target instanceof HTMLInputElement) return;
+    // Ctrl+Shift+C — скопіювати панель F3 текстом (main.js)
+    if (e.code === 'KeyC' && e.shiftKey && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (!e.repeat) pressed.push('copyDebug'); return; }
     const a = keyDown(e.code, e.shiftKey, e.repeat);
     if (a || /^(Key[WASD]|Arrow)/.test(e.code) || ((e.ctrlKey || e.metaKey) && GAME_KEY.test(e.code))) e.preventDefault();
   });

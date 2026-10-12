@@ -84,6 +84,18 @@ export async function createApp(canvas, { device = 'webgl2', maxPixelRatio = 2, 
   app.on('update', () => { measure(); const f = next; next = null; if (f) f(app._time); });
   app.start();
 
+  // Нестача пам'яті GPU — подія 'oom' (why): браузер не каже, скільки пам'яті у відеокарти, лише що виділити не вдалося.
+  // WebGPU — помилка GPUOutOfMemoryError у 'uncapturederror' пристрою (PlayCanvas лише пише її в журнал налагодження;
+  // після відновлення пристрою — знову на новий); WebGL2 — Chrome на нестачу пам'яті втрачає контекст ('devicelost'
+  // PlayCanvas, ресурси він відновлює сам)
+  const watchOom = () => {
+    if (!dev.isWebGPU || !dev.wgpu) return;
+    dev.wgpu.addEventListener('uncapturederror', (e) => { if (typeof GPUOutOfMemoryError !== 'undefined' && e.error instanceof GPUOutOfMemoryError) ev.fire('oom', 'out-of-memory: ' + e.error.message); });
+  };
+  watchOom();
+  dev.on('devicerestored', watchOom);
+  dev.on('devicelost', () => ev.fire('oom', 'devicelost'));
+
   const floatRT = !!dev.textureFloatRenderable, floatFilter = !!dev.textureFloatFilterable;
   return {
     pc, dev, app, scene: app.scene, lang, layers, camE, cam: camE.camera, root, O, R,

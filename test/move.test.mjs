@@ -135,7 +135,7 @@ test('лазіння по стіні: лише стрибком у стіну; W
   assert.ok(c.ground && !c.climb && top > 1.5 && top < 21 && c.z < 1.4, `3 g: найвище ${top}, тепер ${c.z}, витривалість ${c.stam}`);
 });
 
-test('лазіння: лід — сповзаєш; мокра стіна — повільніше; Ctrl — відпустити; стовбур обходиш по колу', () => {
+test('лазіння: лід — сповзаєш; мокра стіна — повільніше; Ctrl — відпустити; круглу скелю обходиш по колу; по дереву — ні', () => {
   const d = climbGo(man(9.7, 0.5, 1), wallW(8, B_ICE), 30, 0, -1, {}, PH1, 0);
   const z0 = d.z;
   climbGo(d, wallW(8, B_ICE), 240, 0, -1);
@@ -150,10 +150,15 @@ test('лазіння: лід — сповзаєш; мокра стіна — п�
   climbGo(e, wallW(8), 120, 0, 0);
   const ref = climbGo(man(9.7, 0.5, 1), wallW(8), 60, 0, 0);
   assert.ok(e.ground && e.z < ref.z + 0.15, `упав: ${e.z} (стоячи біля стіни — ${ref.z})`);
-  // стовбур r 0,3 у клітинці (10, 0): A — по колу, відстань від осі ~ R + r
-  const T = box((x, y, k) => k < 2 ? B_STONE : B_AIR, undefined, (x, y) => x === 10 && y === 0 ? { cx: 10.5, cy: 0.5, z0: 1, z1: 12, r: 0.3 } : null);
+  // кругла скеля (призма r 0,3, не дерево) у клітинці (10, 0): A — по колу, відстань від осі ~ R + r
+  const col = (tree) => box((x, y, k) => k < 2 ? B_STONE : B_AIR, undefined, (x, y) => x === 10 && y === 0 ? { cx: 10.5, cy: 0.5, z0: 1, z1: 12, r: 0.3, tree } : null);
+  const T = col(false);
   const f = climbGo(man(9.92, 0.5, 1), T, 30, 0, -1, {}, PH1, 0);
-  assert.ok(f.climb, 'стовбур: зачепився');
+  assert.ok(f.climb, 'скеля: зачепився');
+  // дерево — не чіпляєшся (12.10.2026, рішення користувача: лазіння по деревах прибрано)
+  const tr = climbGo(man(9.92, 0.5, 1), col(true), 30, 0, -1, {}, PH1, 0);
+  climbGo(tr, col(true), 120, 0, -1);
+  assert.ok(!tr.climb && tr.z < 1.05, `дерево: ${tr.climb ? 'зачепився' : ''} z ${tr.z}`);
   let a = Math.atan2(f.y - 0.5, f.x - 10.5), turn = 0, dmin = 9, dmax = 0;
   for (let i = 0; i < 360; i++) {
     climbGo(f, T, 1, -1, 0);
@@ -161,7 +166,7 @@ test('лазіння: лід — сповзаєш; мокра стіна — п�
     dmin = Math.min(dmin, dd); dmax = Math.max(dmax, dd);
     turn += Math.abs(((b - a + 3 * Math.PI) % (2 * Math.PI)) - Math.PI); a = b;
   }
-  assert.ok(f.climb && turn > Math.PI / 2 && dmin > FOOT + 0.25 && dmax < FOOT + 0.36, `стовбур: поворот ${turn}, відстань ${dmin}…${dmax}`);
+  assert.ok(f.climb && turn > Math.PI / 2 && dmin > FOOT + 0.25 && dmax < FOOT + 0.36, `скеля: поворот ${turn}, відстань ${dmin}…${dmax}`);
 });
 
 test('драбина й ліана: чіпляєшся, зайшовши; швидше за стіну, без витривалості; угорі вилазиш; не тверді, але в зіткненнях', async () => {

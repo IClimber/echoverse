@@ -23,6 +23,7 @@ import { liquidVis } from './collision.js';
 import { figureParts } from './gen/mesh.js';
 import { poseMatrices, viewArms } from './anim.js';
 import { skyState, applyWeather, lightsOf, lightSlots, pcIntensity } from './sky.js';
+import { far2, near2 } from './engine/core/frustum.js';
 import { ISO, FIRST, CAM_R, fovOf, VIEW_R, FAR_R, SEAM, viewProj, isoRadius, project, basis, aabbInView, aabbInside, LOD_R, LOD_CAP, LOD_ON, lodOf, keepLod, colDist, FLORA_NEAR, FLORA_FADE, FLORA_THIN } from './camera.js';
 import { regionOf, RS, RW, RH, PO, PQ } from './gen/pack.js';
 import { ck } from './world.js';
@@ -36,7 +37,6 @@ const UP_BYTES = 4 << 20, UP_ITEMS = 64;       // завантажень у GPU 
 const BODY_R = 200;                            // тіла ближче — малюються (main.js)
 export { BODY_R };
 // Бюджет пам'яті GPU за замовчуванням — від дальності (секцій у колі × 2,2 непорожніх × ~110 КБ)
-export const budgetFor = (viewR) => Math.min(1.5e9, Math.max(256e6, Math.ceil(Math.PI * (viewR / 16 + 1) ** 2) * 2.2 * 110e3));
 // Опади за типом: коробка (півширина, висота), падіння (од/с), довжина риски, розмір, частка частинок, колір, текстура
 const PART = {
   rain: { box: [13, 11], fall: 15, len: 0.6, size: 0.018, dens: 1, col: [0.8, 0.85, 0.94, 0.5], tex: 'streak' },
@@ -91,7 +91,7 @@ export async function createScene(canvas, settings = {}) {
   if (FMT.size !== 16 || FMT.elements[1].offset !== 8 || FMT.elements[2].offset !== 12) throw new Error('розкладка вершини PlayCanvas ≠ gen/pack.js');
   const kinds = {};
   for (const k in KINDS) kinds[k] = { arena: KINDS[k][0], material: mats[KINDS[k][1]] };
-  const stats = { draws: 0, tris: 0, shTris: 0, shDraws: 0, up: 0, upBytes: 0, gpuBytes: 0, arenaBytes: 0, arenaUsed: 0, over: false };
+  const stats = { draws: 0, tris: 0, shTris: 0, shDraws: 0, up: 0, upBytes: 0, gpuBytes: 0, arenaBytes: 0, arenaUsed: 0, full: 0 };
   const RG = createRegions(G, { size: [RW, RW, RH], PO, PQ, format: FMT, kinds, casters: [{ arena: 'op', material: mats.obj }, null, { arena: 'fl', material: mats.fl }], arena0: ARENA0, arenaMax: ARENA_MAX, stats });
 
   // ---- небо, світла, частинки ----
@@ -188,7 +188,7 @@ export async function createScene(canvas, settings = {}) {
       const idx = T.verts > 65535 ? new Uint32Array(T.verts) : new Uint16Array(T.verts);
       for (let i = 0; i < T.verts; i++) idx[i] = i;
       const mesh = floatMesh(G, { pos: T.p, nor: T.n, col: T.c, mat: T.m, idx });
-      g = { mesh, inst: createInstances(G, mesh, mats.body), n: 0, buf: new Float32Array(16 * 16), bytes: T.verts * 32 };
+      g = { mesh, inst: createInstances(G, mesh, mats.body), n: 0, d: 0, buf: new Float32Array(16 * 16), bytes: T.verts * 32 };
       stats.gpuBytes += g.bytes;
       tmpl.set(T, g);
     }
@@ -202,7 +202,6 @@ export async function createScene(canvas, settings = {}) {
   // E = {cx, cy, cz, L: [slot рівня 0, 1, 2 | null], n}; slot = {off, ns, nf, nc, loff, nl, bb, lbb}
   const unis = new Map(), fars = new Map();
   let frame = 0, texFor = null, tex = null;
-  let budget = budgetFor(VIEW_R), over = false;
   const upQ = [], pend = new Set(), nL = [0, 0, 0], trim = [];
   let upHead = 0;
   const pkey = (kind, d, n, k) => `${kind}${d}:${n}:${k}`;
@@ -314,22 +313,22 @@ export async function createScene(canvas, settings = {}) {
       Gr.shDirty = true;
     }
   };
-  function maintain(U, t, rad, laws) {
-    if (U) {
-      for (const Gr of [...U.regions.values()]) if (horiz(Gr, t) > rad + 256) dropRegion(U, Gr);
-      for (const [k2, Gr] of U.flora) if (Gr) { const f = Gr.fls.get(k2); if (colDist(f.cx, f.cy, t) > FLORA_NEAR + 96) removeFlora(U, k2); }
+  // Вивантаження: поточний всесвіт — регіони далі кола (+256) і рослини зблизька за межею; сусідні (n ± 1) — усе, крім
+  // регіонів біля гравця (там коло приземлення — стрибок без чекання; до 12.10.2026 сусід, з якого пішли, тримав усе своє
+  // коло — пам'ять після стрибка 1,6 → 2,4 ГБ), а всесвіт, куди заряджаємось (to), — як поточний; решта — за 600 кадрів
+  function maintain(U, t, rad, laws, to) {
+    const trimU = (V, r) => {
+      for (const Gr of [...V.regions.values()]) if (horiz(Gr, t) > r) dropRegion(V, Gr);
+      for (const [k2, Gr] of V.flora) if (Gr) { const f = Gr.fls.get(k2); if (colDist(f.cx, f.cy, t) > FLORA_NEAR + 96) removeFlora(V, k2); }
+    };
+    if (U) trimU(U, rad + 256);
+    for (const V of [...unis.values()]) {
+      if (V === U) continue;
+      if (to && V.d === to[0] && V.n === to[1]) trimU(V, rad + 256);
+      else if (V.d === laws.d && Math.abs(V.n - laws.n) <= 1) trimU(V, CS);
+      else if (frame - Math.max(V.drawn, V.added) > 600) dropUni(V);
     }
-    for (const V of [...unis.values()]) if (V !== U && !(V.d === laws.d && Math.abs(V.n - laws.n) <= 1) && frame - Math.max(V.drawn, V.added) > 600) dropUni(V);
-    let b = used();
-    if (b > budget) {
-      const now = performance.now();
-      for (const V of [...unis.values()].filter((V) => V !== U && now - V.at > 2000).sort((a, c) => a.at - c.at)) { if (b <= budget) break; dropUni(V); b = used(); }
-      if (b > budget && U) for (const Gr of [...U.regions.values()].filter((Gr) => frame - (Gr.drawn || 0) >= 240).sort((a, c) => horiz(c, t) - horiz(a, t))) {
-        if (b <= budget) break;
-        dropRegion(U, Gr); b = used();
-      }
-    }
-    over = stats.over = b > budget;
+    used();
     for (const V of unis.values()) for (const Gr of V.regions.values()) compact(Gr);
   }
 
@@ -345,7 +344,8 @@ export async function createScene(canvas, settings = {}) {
   // найдальша від цілі точка стовпця (ax, ay — кут стовпця від цілі)
   const colFar = (ax, ay) => Math.hypot(Math.max(Math.abs(ax), Math.abs(ax + CS)), Math.max(Math.abs(ay), Math.abs(ay + CS)));
   // Секція біля «вікна» (на екрані — у колі навколо гравця, ближче за нього) — матеріал з вирізом
-  const cutHit = (m, cut, x0, y0, z0, x1, y1, z1) => {
+  const cutHit = (m, cut, x0, y0, z0, x1, y1, z1, cv) => {
+    if (cv > 0) { z0 -= cv * far2(x0, y0, x1, y1); z1 -= cv * near2(x0, y0, x1, y1); }
     let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity, dz = Infinity;
     for (let k = 0; k < 8; k++) {
       const p = project(m, [k & 1 ? x1 : x0, k & 2 ? y1 : y0, k & 4 ? z1 : z0], G.width, G.height);
@@ -431,10 +431,14 @@ export async function createScene(canvas, settings = {}) {
   const farEntry = (mesh) => {
     const Mf = floatMesh(G, mesh), node = new pc.GraphNode(), mi = new pc.MeshInstance(Mf, mats.far, node);
     mi.castShadow = false; mi.visible = false;
+    mi.cull = false;                                // видимість — наша перевірка з кривизною (AABB меша — без неї)
     G.root.addChild(node); G.layers.world.addMeshInstances([mi]);
     const bytes = mesh.pos.length * 4 + mesh.pos.length * 4 + mesh.pos.length / 3 * 4 + mesh.idx.byteLength;
     stats.gpuBytes += bytes;
-    return { mi, node, bytes };
+    // коробка плитки (відносно її кута x0, y0; z — світу): відсікання закритого
+    const P = mesh.pos, bb = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < P.length; i += 3) for (let a = 0; a < 3; a++) { const v = P[i + a]; if (v < bb[a]) bb[a] = v; if (v > bb[a + 3]) bb[a + 3] = v; }
+    return { mi, node, bytes, bb };
   };
   const dropFar = (e) => { G.layers.world.removeMeshInstances([e.mi]); e.mi.destroy(); G.root.removeChild(e.node); stats.gpuBytes -= e.bytes; };
   let farShown = [];
@@ -485,9 +489,16 @@ export async function createScene(canvas, settings = {}) {
     ta4[0] = A.ks; ta4[1] = A.kf;
     taO[0] = tmAt.x0 - G.O[0]; taO[1] = tmAt.y0 - G.O[1];
   }
-  // Карта хмар неба (М8): хмарність погоди 64×64 клітинки на ±6 км навколо камери, оновлюється частинами (2 рядки за
-  // кадр) не частіше разу на секунду чи після зсуву > 200 м; новий всесвіт — одразу вся
-  const CM = 64, CMS = 12000, CMH = 800, cmBuf = new Uint8Array(CM * CM);
+  // Карта хмар неба (М8): хмарність погоди 64×64 клітинки навколо камери до обрію — клітинка q ∈ (−1, 1)² — точка шару
+  // хмар p = q·A / (1 − |q|) (шейдер: q = p / (|p| + A)); біля зеніту клітинка ~190 м, на 6 км ~0,8 км, далі ширшає
+  // (до 12.10.2026 — квадрат ±6 км, за ним — хмарність у точці гравця: хмари обривались прямою лінією на 7,6° над
+  // обрієм). Оновлюється частинами (2 рядки за кадр) не частіше разу на секунду чи після зсуву > 200 м; новий всесвіт —
+  // одразу вся
+  const CM = 64, CMA = 3000, CMH = 800, cmBuf = new Uint8Array(CM * CM), cmP = new Float32Array(CM * CM * 2);
+  for (let j = 0; j < CM; j++) for (let i = 0; i < CM; i++) {
+    const qx = (i + 0.5) / CM * 2 - 1, qy = (j + 0.5) / CM * 2 - 1, q = Math.hypot(qx, qy), k = CMA / (1 - Math.min(q, 0.995));
+    cmP[(j * CM + i) * 2] = qx * k; cmP[(j * CM + i) * 2 + 1] = qy * k;
+  }
   const cmTex = new pc.Texture(dev, { width: CM, height: CM, format: pc.PIXELFORMAT_R8, mipmaps: false, minFilter: pc.FILTER_LINEAR, magFilter: pc.FILTER_LINEAR, addressU: pc.ADDRESS_CLAMP_TO_EDGE, addressV: pc.ADDRESS_CLAMP_TO_EDGE });
   SU.uCloudMap.setValue(cmTex);
   let cmJob = null, cmRow = CM, cmAt = { L: null, x: 0, y: 0, t: -1e9 };
@@ -496,10 +507,10 @@ export async function createScene(canvas, settings = {}) {
     if (cmRow < CM) {
       const J = cmJob, last = J.L !== cmAt.L ? CM : Math.min(CM, cmRow + 2);
       for (; cmRow < last; cmRow++) for (let i = 0; i < CM; i++)
-        cmBuf[cmRow * CM + i] = Math.round(255 * cloudsAt(J.L, J.clock, J.x + ((i + 0.5) / CM - 0.5) * CMS, J.y + ((cmRow + 0.5) / CM - 0.5) * CMS));
+        cmBuf[cmRow * CM + i] = Math.round(255 * cloudsAt(J.L, J.clock, J.x + cmP[(cmRow * CM + i) * 2], J.y + cmP[(cmRow * CM + i) * 2 + 1]));
       if (cmRow >= CM) { const a = cmTex.lock(); a.set(cmBuf); cmTex.unlock(); cmAt = J; }
     }
-    SU.uCloudC.setValue([x - cmAt.x, y - cmAt.y, CMS, CMH]);
+    SU.uCloudC.setValue([x - cmAt.x, y - cmAt.y, CMA, CMH]);
   }
   // Метеори (до 4) і розряд блискавки з його світлом (точкове без тіні)
   const met4 = new Float32Array(16), metB = new Float32Array(16), bolts = createBolts(G);
@@ -525,7 +536,7 @@ export async function createScene(canvas, settings = {}) {
   let linesPC = new Float32Array(0);
   const underBg = new pc.Color(), BLACK = new pc.Color(0, 0, 0);
   const dirsBuf = [], cutF = new Float32Array(4), cut2 = new Float32Array(4), cut3 = new Float32Array(2), eyePC = new Float32Array(3), tgtPC = new Float32Array(3), wind4 = new Float32Array(4), fade2 = new Float32Array(2), thin2 = new Float32Array(2), xfade2 = new Float32Array(2);
-  const viewC = { m: null, eye: null, ud: null, t: null };
+  const viewC = { m: null, eye: null, ud: null, t: null, c: 0 };
   let next = null;
   G.onFrame(function loop(ts) { const f = next; next = null; if (f) f(ts); G.onFrame(loop); });
 
@@ -564,8 +575,9 @@ export async function createScene(canvas, settings = {}) {
       }
       if (upHead === upQ.length) { upQ.length = 0; upHead = 0; } else if (upHead > 4096) { upQ.splice(0, upHead); upHead = 0; }
     },
-    setBudget(bytes) { budget = bytes; },
-    get overBudget() { return over; },
+    // Нестача пам'яті GPU (подія 'oom' застосунку): звільнити все, крім всесвіту на екрані
+    releaseOthers() { for (const V of [...unis.values()]) if (V !== shownU) dropUni(V); },
+    onOutOfMemory(f) { G.on('oom', f); },
     addFar(key, data, mesh) {
       const e = fars.get(key);
       if (e) dropFar(e);
@@ -624,6 +636,7 @@ export async function createScene(canvas, settings = {}) {
       stats.shTris = shTris; stats.shDraws = shDraws;
 
       const { target: t, view, laws } = st, sk = skyState(laws, st.clock || 0), wt = st.weather;
+      const curve = laws.phys ? 0.5 / laws.phys.planetR : 0;   // кривизна (шейдер опускає світ на curve·d², d — від цілі)
       if (wt) applyWeather(sk, laws, wt.W, st.clock || 0);
       const vk = sk.visK ?? 1, iso = st.camera.mode === ISO, first = st.camera.mode === FIRST, lodOn = LOD_ON && !iso;
       const me = st.me, m = view.m, b = basis(st.camera);
@@ -719,7 +732,7 @@ export async function createScene(canvas, settings = {}) {
       }
       // зони, де fl відкидає пікселі (bigSafe): усе — відносно цілі, у наших осях
       fz.ex = e[0]; fz.ey = e[1]; fz.ez = e[2]; fz.far = xfade2[0] - FZ_M;
-      fz.drop = (laws.phys ? 0.5 / laws.phys.planetR : 0) * FLORA_NEAR * FLORA_NEAR;
+      fz.drop = curve * FLORA_NEAR * FLORA_NEAR;
       fz.fade = fade2[1] > 0 ? fade2[1] + FZ_M : 0;
       fz.cut = cut2[3] > 0.5;
       if (fz.cut) {
@@ -731,10 +744,17 @@ export async function createScene(canvas, settings = {}) {
         else fz.ang = Math.acos(cut3[0]) + 0.02;
       }
       tanomMap(laws, t[0], t[1]);
-      M.setFrame({ tanom: ta4, tanomO: taO, wind: wind4, curve: laws.phys ? 0.5 / laws.phys.planetR : 0, target: tgtPC, seam: SEAM, time: lt, minLight: Lt.min, eye: eyePC, fade: fade2, cut: cutF, cut2, cut3, thin: thin2, xfade: xfade2 });
+      M.setFrame({ tanom: ta4, tanomO: taO, wind: wind4, curve, target: tgtPC, seam: SEAM, time: lt, minLight: Lt.min, eye: eyePC, fade: fade2, cut: cutF, cut2, cut3, thin: thin2, xfade: xfade2 });
 
       // Видимі регіони й діапазони в них
       const farOn = !!(st.far && st.far.length), rad = view.rad, Un = uni(laws.d, laws.n);
+      // відсікання закритого (js/occlusion.js): регіони, секції, рідина, рослини й плитки далечі, закриті заслонами з
+      // секцій, що малюються, — не малюємо; тіні — як були (тінь закритого може впасти на видиме)
+      const occ = st.occ, occOn = !!occ && occ.begin([t[0] + e[0], t[1] + e[1], t[2] + e[2]], laws.d, laws.n, iso, m, t, curve, G.width / G.height);
+      const seen = (ox, oy, oz, c) => !occOn || occ.box(t[0] + ox + c[0], t[1] + oy + c[1], t[2] + oz + c[2], t[0] + ox + c[3], t[1] + oy + c[4], t[2] + oz + c[5]);
+      // коробка c (від кута ox, oy, oz відносно цілі) у полі зору й не закрита; перевірка відсікання закритого — і піраміда
+      // видимості (з тими самими кутами), тож окремої не треба
+      const vis = (inside, ox, oy, oz, c) => occOn ? seen(ox, oy, oz, c) : inside || aabbInView(m, ox + c[0], oy + c[1], oz + c[2], ox + c[3], oy + c[4], oz + c[5], curve);
       LN.fill(0); visRegs.length = 0;
       if (Un !== shownU) {
         if (shownU && !shownU.dead) for (const Gr of shownU.regions.values()) RG.hide(Gr.R);
@@ -752,12 +772,35 @@ export async function createScene(canvas, settings = {}) {
           Gr.vis = false;
           if (Math.hypot(nx, ny) > rad + 4) continue;
           const bb = Gr.bb;
-          if (!(bb[0] <= bb[3]) || !aabbInView(m, ox + bb[0], oy + bb[1], oz + bb[2], ox + bb[3], oy + bb[4], oz + bb[5])) continue;
-          Gr.inside = aabbInside(m, ox + bb[0], oy + bb[1], oz + bb[2], ox + bb[3], oy + bb[4], oz + bb[5]);
+          if (!(bb[0] <= bb[3]) || !aabbInView(m, ox + bb[0], oy + bb[1], oz + bb[2], ox + bb[3], oy + bb[4], oz + bb[5], curve)) continue;
+          Gr.inside = aabbInside(m, ox + bb[0], oy + bb[1], oz + bb[2], ox + bb[3], oy + bb[4], oz + bb[5], curve);
           Gr.dist = Math.hypot(nx, ny); Gr.ox = ox; Gr.oy = oy; Gr.oz = oz;
-          visRegs.push(Gr); Gr.drawn = frame; Gr.vis = true;
+          visRegs.push(Gr);
         }
         visRegs.sort((a, c) => a.dist - c.dist);
+        // заслони — із секцій, чий меш у відеокарті й малюється на цій відстані (повна секція, до шва далечі)
+        if (occOn) {
+          const ex = e[0], ey = e[1], oR2 = occ.params.radius ** 2;
+          for (const Gr of visRegs) {
+            // регіон далі радіуса заслонів від ока — пропустити цілим
+            const rx = Gr.ox - ex, ry = Gr.oy - ey, hx = rx > 0 ? rx : rx + RW < 0 ? -(rx + RW) : 0, hy = ry > 0 ? ry : ry + RW < 0 ? -(ry + RW) : 0;
+            if (hx * hx + hy * hy > oR2) continue;
+            for (const E of Gr.secs.values()) {
+              const sl = E.L[0];
+              if (!sl || sl.off < 0 || !sl.ns) continue;
+              const sx = E.cx * CS - t[0] - ex, sy = E.cy * CS - t[1] - ey, qx = sx > 0 ? sx : sx + CS < 0 ? -(sx + CS) : 0, qy = sy > 0 ? sy : sy + CS < 0 ? -(sy + CS) : 0;
+              if (qx * qx + qy * qy > oR2) continue;
+              const dn = colDist(E.cx, E.cy, t);
+              if (dn > rad || (farOn && dn > SEAM)) continue;
+              occ.add(E.cx, E.cy, E.cz);
+            }
+          }
+          occ.end();
+          let w = 0;
+          for (const Gr of visRegs) if (seen(Gr.ox, Gr.oy, Gr.oz, Gr.bb)) visRegs[w++] = Gr;
+          visRegs.length = w;
+        }
+        for (const Gr of visRegs) { Gr.drawn = frame; Gr.vis = true; }
         for (const Gr of visRegs) {
           const { ox, oy, oz, inside } = Gr, seg = Gr.seg;
           for (let j = 0; j < NL; j++) seg[j * 2] = LN[j];
@@ -772,7 +815,7 @@ export async function createScene(canvas, settings = {}) {
             const ring = farOn && Math.hypot(Math.max(-ax, ax + CS), Math.max(-ay, ay + CS)) > SEAM;
             if (sl.off >= 0 && sl.bb) {
               const c = sl.bb;
-              if (inside || aabbInView(m, ox + c[0], oy + c[1], oz + c[2], ox + c[3], oy + c[4], oz + c[5])) {
+              if (vis(inside, ox, oy, oz, c)) {
                 // є повні рослини: стовпець увесь до смуги переходу — спрощених не малюємо, у смузі — проступають (objF)
                 const fx = lod === 0 && dn < FLORA_NEAR && Un.flora.has(ck(E.cx, E.cy));
                 const nf = fx && colFar(ax, ay) < FLORA_NEAR - FLORA_FADE ? 0 : sl.nf;
@@ -780,7 +823,7 @@ export async function createScene(canvas, settings = {}) {
                 // «вікно»: рослини — завжди; земля — лише згори (у третій особі камера з землею зіштовхується — лінія до
                 // гравця вільна, а вікно в землі лише прорізало б стіни біля камери в тісній печері)
                 const j = ring ? L_RING : L_PLAIN;
-                const jc = !ring && cut && (iso || dn <= camD + 8) && cutHit(m, cut, ox + c[0], oy + c[1], oz + c[2], ox + c[3], oy + c[4], oz + c[5]) ? L_CUT : j;
+                const jc = !ring && cut && (iso || dn <= camD + 8) && cutHit(m, cut, ox + c[0], oy + c[1], oz + c[2], ox + c[3], oy + c[4], oz + c[5], curve) ? L_CUT : j;
                 const js = iso ? jc : j;
                 if (sl.ns) pushR(js, seg[js * 2], sl.off, sl.ns);
                 if (nc) pushR(js, seg[js * 2], sl.off + sl.ns + sl.nf, nc);
@@ -789,14 +832,14 @@ export async function createScene(canvas, settings = {}) {
             }
             if (sl.loff >= 0 && sl.lbb) {
               const c = sl.lbb;
-              if (inside || aabbInView(m, ox + c[0], oy + c[1], oz + c[2], ox + c[3], oy + c[4], oz + c[5])) pushR(ring ? L_LIQR : L_LIQ, seg[(ring ? L_LIQR : L_LIQ) * 2], sl.loff, sl.nl);
+              if (vis(inside, ox, oy, oz, c)) pushR(ring ? L_LIQR : L_LIQ, seg[(ring ? L_LIQR : L_LIQ) * 2], sl.loff, sl.nl);
             }
           }
           for (const f of Gr.fls.values()) {
             if (f.off < 0 || !f.n) continue;
             if (colDist(f.cx, f.cy, t) >= FLORA_NEAR) continue;
             const c = f.bb;
-            if (!inside && !aabbInView(m, ox + c[0], oy + c[1], oz + c[2], ox + c[3], oy + c[4], oz + c[5])) continue;
+            if (!vis(inside, ox, oy, oz, c)) continue;
             if (!flSplit || !f.nb) { pushR(L_FL, seg[L_FL * 2], f.off, f.n); continue; }
             // великі: увесь стовпець поза зонами — одним діапазоном, інакше — кожен предмет за своєю коробкою
             if (bigSafe(ox + c[0], oy + c[1], oz + c[2], ox + c[3], oy + c[4], oz + c[5])) pushR(L_FLB, seg[L_FLB * 2], f.off, f.nb);
@@ -823,7 +866,7 @@ export async function createScene(canvas, settings = {}) {
         }
       }
       // кидачі на кадр — лише ті, чия тінь може впасти в поле зору (regions.cullCasters)
-      viewC.m = m; viewC.eye = e; viewC.ud = b.u; viewC.t = t;
+      viewC.m = m; viewC.eye = e; viewC.ud = b.u; viewC.t = t; viewC.c = curve;
       engRegs.length = 0;
       if (Un) for (const Gr of Un.regions.values()) engRegs.push(Gr.R);
       RG.cullCasters(engRegs, viewC, LG.dirs(dirsBuf), LG.locals());
@@ -834,21 +877,27 @@ export async function createScene(canvas, settings = {}) {
       if (farOn) for (const f of st.far) {
         const fe = fars.get(f.key);
         if (!fe) continue;
-        fe.used = frame; fe.node.setLocalPosition(f.x0 - G.O[0], f.y0 - G.O[1], 0); fe.mi.visible = true;
+        fe.used = frame;
+        if (occOn ? !occ.box(f.x0 + fe.bb[0], f.y0 + fe.bb[1], fe.bb[2], f.x0 + fe.bb[3], f.y0 + fe.bb[4], fe.bb[5])
+          : !aabbInView(m, f.x0 - t[0] + fe.bb[0], f.y0 - t[1] + fe.bb[1], fe.bb[2] - t[2], f.x0 - t[0] + fe.bb[3], f.y0 - t[1] + fe.bb[4], fe.bb[5] - t[2], curve)) continue;
+        fe.node.setLocalPosition(f.x0 - G.O[0], f.y0 - G.O[1], 0); fe.mi.visible = true;
         farShown.push({ key: f.key, e: fe, x0: f.x0, y0: f.y0 });
         tris += fe.mi.mesh.primitive[0].count / 3;
       }
+      if (occOn) occ.finish();
       // рівні, які вже не потрібні (є потрібний, за гістерезисом), — звільнити
       if (Un) for (let i = 0; i < trim.length; i += 2) removeSlot(Un, trim[i], trim[i + 1]);
       trim.length = 0;
-      if (frame % 60 === 0) maintain(Un, t, rad, laws);
+      if (frame % 60 === 0) maintain(Un, t, rad, laws, st.charge);
 
       // Тіла (ширяюче каміння): групи екземплярів за шаблоном; низ коробки — основа шаблону
-      for (const g of tmpl.values()) g.n = 0;
+      for (const g of tmpl.values()) { g.n = 0; g.d = 0; }
       if (st.bodies) for (const bo of st.bodies) {
         const r = Math.max(bo.hx, bo.hy, bo.hz) * 2, x = (bo.ix ?? bo.x) - t[0], y = (bo.iy ?? bo.y) - t[1], z = (bo.iz ?? bo.z) - t[2];
-        if (!aabbInView(m, x - r, y - r, z - r, x + r, y + r, z + r)) continue;
+        if (!aabbInView(m, x - r, y - r, z - r, x + r, y + r, z + r, curve)) continue;
         const g = group(bo.T);
+        const d = Math.hypot(x, y) + r;
+        if (d > g.d) g.d = d;
         if (g.buf.length < (g.n + 1) * 16) { const a = new Float32Array(g.buf.length * 2); a.set(g.buf); g.buf = a; }
         // rotZ(yaw) · rotX(tilt) · масштаб, як у старому шейдері екземплярів
         const c = Math.cos(bo.yaw), s = Math.sin(bo.yaw), ct = Math.cos(bo.tilt), stl = Math.sin(bo.tilt), k = bo.s;
@@ -857,7 +906,7 @@ export async function createScene(canvas, settings = {}) {
         g.buf[g.n * 16 + 3] = st.skyOpen ? st.skyOpen(bo.ix ?? bo.x, bo.iy ?? bo.y, bo.iz ?? bo.z) : 1;   // AO неба тіла (у матриці там 0; chunks.js)
         g.n++;
       }
-      for (const g of tmpl.values()) { g.inst.update(g.buf, g.n); tris += g.n * g.mesh.primitive[0].count / 3; }
+      for (const g of tmpl.values()) { g.inst.update(g.buf, g.n, curve * g.d * g.d); tris += g.n * g.mesh.primitive[0].count / 3; }
 
       // Фігура (у першій особі й з камерою впритул — лише тінь, інакше око в голові); пристрій не світиться (рішення 10.10.2026).
       // Руки першої особи — у шарі «Руки» (поверх світу, глибина очищена)

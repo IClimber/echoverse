@@ -2,7 +2,7 @@
 // ?strip — замість гри стенд «смуга всесвітів» (js/strip.js), ?flora — галерея видів рослин (js/flora-stand.js),
 // ?light — світло й тіні рушія (js/light-stand.js), ?move — стенд руху (js/gen/stand.js: полігон замість світу, без
 // збереження; &g= — гравітація, &fr= — тертя, &rain — дощ).
-import { createScene, BODY_R, budgetFor } from './scene.js';
+import { createScene, BODY_R } from './scene.js';
 import { loadSettings, saveSetting } from './settings.js';
 import { createWorld, findSpawn, keepFor } from './world.js';
 import { colliderOf, underLiquid } from './collision.js';
@@ -29,6 +29,7 @@ import { canLift, weightOf, throwBody, holdBody, LIFT_W } from './carry.js';
 import { STAND_SPOTS, standBodies, standBlock } from './gen/stand.js';
 import { makeBody } from './engine/physics/bodies.js';
 import { createTicker } from './engine/core/ticker.js';
+import { createOcclusion } from './occlusion.js';
 
 const $ = (id) => document.getElementById(id);
 const SAVE_MS = 10000;                     // автозбереження
@@ -56,20 +57,35 @@ function boot(renderer) {
   initInput();
 
   let g = null;                              // поточна гра
+  let occOff = QS.get('occ') === '0';        // ?occ=0 — без відсікання закритого (порівняння)
   const camera = createCamera([ISO, FIRST].includes(load(CAM_KEY)) ? load(CAM_KEY) : THIRD);
   const streamer = createStreamer();
   const physT = createTicker(PHYS_DT), aiT = createTicker(AI_DT, 4);
-  // Дальність (8–32 чанки): камера, ліміти пам'яті світу, бюджет GPU, стрімінг
+  // Дальність (8–32 чанки): камера, ліміти пам'яті світу, стрімінг. Пам'ять GPU — скільки потребує коло дальності (без
+  // бюджету: до 12.10.2026 бюджет вивантажував секції в колі, а стрімінг замовляв їх знову — петля завантаження)
   const setView = (c) => {
     c = setViewChunks(c);
     $('view').value = c;
     $('viewLabel').textContent = `${c} чанків (${c * CS} клітинок)`;
     if (g) g.world.setKeep(keepFor(VIEW_R));
-    renderer.setBudget(budgetFor(VIEW_R));
     streamer.force();
     return c;
   };
   setView(+(load(VIEW_KEY) || 16));
+  // Відеокарті забракло пам'яті (WebGPU — out-of-memory, WebGL2 — втрата контексту): звільнити інші всесвіти й зменшити
+  // дальність на 4 чанки (запам'ятовується, як вибір у налаштуваннях); не частіше разу на 5 с — одна нестача дає кілька подій
+  let oomAt = -1e9;
+  const onOom = (why) => {
+    const now = performance.now();
+    console.warn('GPU: бракує пам\'яті —', why);
+    if (now - oomAt < 5000) return;
+    oomAt = now;
+    renderer.releaseOthers();
+    const c = Math.round(VIEW_R / CS);
+    if (c > 8) { store(VIEW_KEY, setView(c - 4)); toast(`Відеокарті бракує пам'яті — дальність ${c - 4} чанків`); }
+    else toast('Відеокарті бракує пам\'яті');
+  };
+  renderer.onOutOfMemory(onOom);
   $('view').addEventListener('input', () => store(VIEW_KEY, setView(+$('view').value)));
   let showDebug = false, showHelp = true, toastUntil = 0;
   const perf = { fps: 60, cpu: 0, upd: 0, drw: 0, frameMs: 0, p99: 0 };
@@ -88,10 +104,12 @@ function boot(renderer) {
     stats() {
       frameStats();
       const st = g ? g.world.stats() : {}, R = renderer.R;
-      return { fps: perf.fps, frameMs: perf.frameMs, p99: perf.p99, frameMax: perf.max, upd: perf.upd, drw: perf.drw, gpuMs: R.gpuMs, draws: R.stats.draws, tris: R.stats.tris, flTris: R.stats.flTris, flbTris: R.stats.flbTris,
+      return { fps: perf.fps, frameMs: perf.frameMs, p99: perf.p99, frameMax: perf.max, upd: perf.upd, drw: perf.drw, gpuMs: R.gpuMs, draws: R.stats.draws, tris: R.stats.tris, full: R.stats.full, flTris: R.stats.flTris, flbTris: R.stats.flbTris,
         gpuMB: (R.stats.gpuBytes + R.stats.arenaBytes) / 1048576, colsPerSec: st.colsPerSec, pending: st.pending, cols: st.cols, secs: st.secs, meshes: renderer.meshCount, lod: [...renderer.lodCounts], workers: st.workers, streamMs: g ? g.streamMs : 0,
-        pcMs: R.cpuRenderMs, gpuPass: R.gpuPass, shTris: R.stats.shTris, shDraws: R.stats.shDraws, ...lightStats() };
+        pcMs: R.cpuRenderMs, gpuPass: R.gpuPass, shTris: R.stats.shTris, shDraws: R.stats.shDraws, occ: g && g.occ ? { ...g.occ.stats } : null, ...lightStats() };
     },
+    // Відсікання закритого: увімкнути / вимкнути (заміри й знімки «з / без»; тримається й після нового світу)
+    occ(on, opts) { occOff = !on; if (g) { g.occ.enabled = !!on; if (opts) g.occ.set(opts); } return !occOff; },
     // Годинник на фазу доби ph (0 — північ, 0,5 — полудень) поточного всесвіту; вічний день — ні (false)
     setPhase(ph) { const c = clockFor(ph); if (c === null) return false; g.clock = c; return true; },
     // Фаза 0…0,99 з найбільшою кількістю напрямлених світел (за рівності — найсильніших), ставить її
@@ -217,6 +235,15 @@ function boot(renderer) {
     setCull(on) { renderer.R.setCull(on); },
     // Великі рослини зблизька матеріалом без дизерингу там, де він нічого не відкидає: false — усе з дизерингом (порівняння)
     flSplit(on) { renderer.R.setFlSplit(on); return !!on; },
+    // Нестача пам'яті GPU (перевірка реакції): event — подією пристрою WebGPU, як від браузера; інакше — одразу обробник
+    gpuOom(event = false) {
+      const d = renderer.G.dev;
+      if (event && d.isWebGPU) d.wgpu.dispatchEvent(new GPUUncapturedErrorEvent('uncapturederror', { error: new GPUOutOfMemoryError('?dev') }));
+      else onOom('?dev');
+      return Math.round(VIEW_R / CS);
+    },
+    // Текст F3 у буфер обміну (як Ctrl+Shift+C); повертає текст
+    copyDebug() { return copyDebug(); },
     // Зупинити світ (годинник, рух, камера) без меню — знімки одного й того самого кадру
     freeze(on) { g.frozen = !!on; return g.frozen; },
     // Стенд руху: гравець — на місце name (STAND_SPOTS), обличчям за поглядом місця
@@ -432,6 +459,8 @@ function boot(renderer) {
       stamp: 0, ai: [], aiAt: 0,                 // крок фізики (інтерполяція тіл); системи світу (моби, NPC) — (dt, g)
       envHere: () => envHere(),                  // середовище тут (F3)
     };
+    g.occ = createOcclusion(g.world);               // відсікання закритого (заслони з блоків, js/occlusion.js)
+    if (occOff) g.occ.enabled = false;
     // сутності: зона симуляції 5×5 чанків навколо гравця (поточний всесвіт; інші сплять і дорахуються при поверненні)
     g.ai.push((dt, G) => G.world.ents(G.d, G.n).update(Math.floor(G.me.x / CS), Math.floor(G.me.y / CS), G.clock * 1000));
     g.world.setCurrent(g.d, g.n);
@@ -709,6 +738,7 @@ function boot(renderer) {
       }
       else if (menuOpen || !g.me.placed) continue;
       else if (a === 'debug') { showDebug = !showDebug; $('debug').hidden = !showDebug; }
+      else if (a === 'copyDebug') copyDebug();
       else if (a === 'help') { showHelp = !showHelp; $('help').hidden = !showHelp; }
       else if (a === 'jump') {
         if (now - spaceAt < 300) {
@@ -902,7 +932,7 @@ function boot(renderer) {
     const fx = me.ix ?? me.x, fy = me.iy ?? me.y, fz = me.iv ?? me.vis ?? me.z;
     const sk = renderer.draw({
       lines, under: g.under ? L.liquid : null, skyOpen: (x, y, z) => g.world.skyOpen(g.d, g.n, x, y, z),
-      camera, target: g.cam, view: g.view, laws: L, far: g.far, clock: g.clock, bodies, aim: g.aimFx === false ? null : g.aim, weather: { W: loc.W, loc }, bolt: g.bolt, rain: me.placed && loc.type ? rainMap(now) : null,
+      camera, target: g.cam, view: g.view, laws: L, far: g.far, occ: g.occ, charge: g.dev.charge ? g.dev.charge.to : null, clock: g.clock, bodies, aim: g.aimFx === false ? null : g.aim, weather: { W: loc.W, loc }, bolt: g.bolt, rain: me.placed && loc.type ? rainMap(now) : null,
       // вигляд гравця: положення — інтерпольоване, стан — усе, що читають руки першої особи (VIEW_KEYS у anim.js)
       me: me.placed ? { ...Object.fromEntries(VIEW_KEYS.map((k) => [k, me[k]])), x: fx, y: fy, z: fz, anim, ao: g.world.skyOpen(g.d, g.n, fx, fy, fz + 0.5) } : null,
     });
@@ -933,6 +963,16 @@ function boot(renderer) {
     if (showDebug && now - (hudCache.dbgT || 0) > 250) { hudCache.dbgT = now; frameStats(); $('debug').textContent = debugText(g, perf, renderer.meshCount, camera, renderer.R, renderer.lodCounts); }
   }
 
+  // Ctrl+Shift+C — увесь текст панелі F3 у буфер обміну (той самий, що на екрані, свіжий), щоб ділитися текстом, а не знімком
+  function copyDebug() {
+    if (!g) return;
+    frameStats();
+    const s = debugText(g, perf, renderer.meshCount, camera, renderer.R, renderer.lodCounts);
+    const ok = () => toast('F3 скопійовано'), fail = () => toast('Не вдалося скопіювати F3');
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(s).then(ok, fail);
+    else fail();
+    return s;
+  }
   function toast(s) { $('toast').textContent = s; $('toast').hidden = false; toastUntil = performance.now() + 2800; }
 
   // ================= Цикл =================

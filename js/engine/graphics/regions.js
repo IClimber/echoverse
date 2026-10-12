@@ -5,6 +5,7 @@
 // Облік (що в якому діапазоні, які діапазони видимі) — справа гри; тут — лише об'єкти PlayCanvas.
 // Координати регіону — наші (z угору), кут регіону (rx·RW, ry·RW, rz·RH); вершини — u16 нормовано: (локальна + PO) / S16
 import { createArena } from './arena.js';
+import { far2, near2 } from '../core/frustum.js';
 
 // layout: { size: [RW, RW, RH], PO, PQ, format (pc.VertexFormat), kinds: {вид: {arena, material}},
 //   casters: [{arena, material} | null] (вид кидача — індекс), arena0, arenaMax, stats }
@@ -18,11 +19,12 @@ export function createRegions(G, layout) {
   const md = (m, cam, n) => { const c = m.setMultiDraw(cam, n); if (c.impl && 'indexSizeBytes' in c.impl) c.impl.indexSizeBytes = 1; return c; };
   const place = (R) => R.node.setLocalPosition(R.rx * RW - PO[0] - O[0], R.ry * RW - PO[1] - O[1], R.rz * RH - PO[2]);
   G.on('origin', () => { for (const R of all) place(R); });
-  const box = (b) => {
-    const bb = new pc.BoundingBox();
-    bb.setMinMax(new pc.Vec3((b[0] + PO[0]) / S16, (b[1] + PO[1]) / S16, (b[2] + PO[2]) / S16), new pc.Vec3((b[3] + PO[0]) / S16, (b[4] + PO[1]) / S16, (b[5] + PO[2]) / S16));
+  const lo3 = new pc.Vec3(), hi3 = new pc.Vec3();
+  const box = (b, bb = new pc.BoundingBox()) => {
+    bb.setMinMax(lo3.set((b[0] + PO[0]) / S16, (b[1] + PO[1]) / S16, (b[2] + PO[2]) / S16), hi3.set((b[3] + PO[0]) / S16, (b[4] + PO[1]) / S16, (b[5] + PO[2]) / S16));
     return bb;
   };
+  const bbTmp = new pc.BoundingBox();                // setCustomAabb копіює
 
   function create(rx, ry, rz) {
     const R = { rx, ry, rz, node: new pc.GraphNode(), ar: {}, mi: {}, sh: new Map(), bb: [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity] };
@@ -36,7 +38,7 @@ export function createRegions(G, layout) {
     if (!A) { let c = A0; while (c < n) c *= 2; A = R.ar[name] = createArena(G, format, c, stats); if (R.bb[0] <= R.bb[3]) A.mesh.aabb = box(R.bb); }
     let off = A.a.alloc(n);
     while (off < 0 && A.a.cap < AMAX) { A.grow(Math.min(AMAX, A.a.cap * 2)); off = A.a.alloc(n); }
-    if (off < 0) return -1;
+    if (off < 0) { stats.full = (stats.full || 0) + 1; return -1; }
     A.put(off, buf instanceof Uint8Array ? buf.subarray(0, n * format.size) : new Uint8Array(buf, 0, n * format.size));
     return off;
   }
@@ -64,6 +66,7 @@ export function createRegions(G, layout) {
       if (b <= a || !R.ar[K.arena]) return 0;
       m = R.mi[kind] = new pc.MeshInstance(R.ar[K.arena].mesh, K.material, R.node);
       m.castShadow = false; m.visible = false;
+      m.cull = false;                                 // видимі діапазони відсікає гра (з кривизною, якої AABB меша не знає)
       m.cam = md(m, camC, 64); m.camCap = 64;
       layers.world.addMeshInstances([m]);
     }
@@ -88,7 +91,7 @@ export function createRegions(G, layout) {
         layers.shadow.addMeshInstances([m]);
         R.sh.set(B.key, m);
       }
-      m.setCustomAabb(box(B.bb));
+      m.setCustomAabb(box(B.bb)); m.lo = m.hi = 0;
       m.b.set(B.bb);
       m.shV = fill(m, 'sh', B.F, B.C, 0, B.nr);
       m.visible = false;                              // вмикає cullCasters щокадру
@@ -104,13 +107,14 @@ export function createRegions(G, layout) {
   //   Cyberpunk 2077»); плюс межа відстані від ока (як Shadow Distance у шейдерпаках Minecraft): кидачі далі не малюються;
   // - коробка перетинає сферу (позиція, range) точкового джерела чи прожектора з тінями.
   // Без цього каскад PlayCanvas бере все в нескінченному стовпці вздовж світла.
-  // v: { m — матриця камери відносно цілі t, eye — око відносно t, ud — напрям погляду, t }; dirs: [{dir — до світила, shD}];
-  // locals: [{pos, range}] (наші координати)
-  const shOn = [], PL = new Float64Array(3 * 6 * 4), NP = new Int32Array(3), CAP = new Float64Array(3);
+  // v: { m — матриця камери відносно цілі t, eye — око відносно t, ud — напрям погляду, t, c — кривизна (вершинний шейдер
+  // опускає точку на c·d², d — від цілі по горизонталі: коробки кидачів опускаємо так само, і AABB кидача, за якою каскад
+  // PlayCanvas відсікає його сам) }; dirs: [{dir — до світила, shD}]; locals: [{pos, range}] (наші координати)
+  const shOn = [], PL = new Float64Array(3 * 6 * 4), NP = new Int32Array(3), CAP = new Float64Array(3), bbT = new Float64Array(6);
   function cullCasters(regs, v, dirs, locals = []) {
     for (const s of shOn) s.visible = false;
     shOn.length = 0;
-    const nd = Math.min(3, dirs.length), { m, eye, ud, t } = v;
+    const nd = Math.min(3, dirs.length), { m, eye, ud, t } = v, cv = v.c || 0;
     if (!nd && !locals.length) return 0;
     for (let k = 0; k < nd; k++) {
       const L0 = -dirs[k].dir[0], L1 = -dirs[k].dir[1], L2 = -dirs[k].dir[2], shD = dirs[k].shD;
@@ -146,10 +150,16 @@ export function createRegions(G, layout) {
     for (const R of regs) {
       if (!R.sh.size) continue;
       const ox = R.rx * RW - t[0], oy = R.ry * RW - t[1], oz = R.rz * RH - t[2], g = R.bb;
-      if (!(g[0] <= g[3]) || !need(ox + g[0], oy + g[1], oz + g[2], ox + g[3], oy + g[4], oz + g[5])) continue;
+      if (!(g[0] <= g[3])) continue;
+      let lo = 0, hi = 0;
+      if (cv > 0) { lo = cv * far2(ox + g[0], oy + g[1], ox + g[3], oy + g[4]); hi = cv * near2(ox + g[0], oy + g[1], ox + g[3], oy + g[4]); }
+      if (!need(ox + g[0], oy + g[1], oz + g[2] - lo, ox + g[3], oy + g[4], oz + g[5] - hi)) continue;
       for (const s of R.sh.values()) {
         const b = s.b;
-        if (!s.shV || !need(ox + b[0], oy + b[1], oz + b[2], ox + b[3], oy + b[4], oz + b[5])) continue;
+        if (!s.shV) continue;
+        if (cv > 0) { lo = cv * far2(ox + b[0], oy + b[1], ox + b[3], oy + b[4]); hi = cv * near2(ox + b[0], oy + b[1], ox + b[3], oy + b[4]); }
+        if (!need(ox + b[0], oy + b[1], oz + b[2] - lo, ox + b[3], oy + b[4], oz + b[5] - hi)) continue;
+        if (lo !== s.lo || hi !== s.hi) { s.lo = lo; s.hi = hi; bbT[0] = b[0]; bbT[1] = b[1]; bbT[2] = b[2] - lo; bbT[3] = b[3]; bbT[4] = b[4]; bbT[5] = b[5] - hi; s.setCustomAabb(box(bbT, bbTmp)); }
         s.visible = true; shOn.push(s);
       }
     }

@@ -8,6 +8,9 @@ import { createList, clearList, sweepSphere, overlapSphere, nearest, rayCast } f
 
 export const SKIN = 0.002;           // відступ від дотику після руху
 const EPS = 1e-4;
+// лобом у стіну: кут між рухом і нормаллю < 30° — стоп, без ковзання вбік; стіна — від 12° униз до 30° угору від
+// вертикалі (−0,2 < nz < 0,5): скіс стелі чи краю лазу над головою (Surface Nets) не стіна — уздовж нього ковзаєш, як було
+const HEAD_ON = Math.cos(Math.PI / 6), WALL_NZ = [-0.2, 0.5];
 
 // Капсула: n куль радіуса R на осі, від ніг до висоти H
 export function capsule(R, H, n = 4) {
@@ -168,10 +171,13 @@ export function moveAir(src, sh, s, dx, dy, dz, standZ, walkZ = null) {
 }
 
 // Хода землею на (dx, dy). o = {step — висота кроку на уступ, walkZ — межа схилу, на який заходиш (cos), standZ — на якому
-// стоїш, floorN — нормаль підлоги ([x, y, z]) чи null, round(ref) — перешкода кругла (стовбур, камінь: лобом у неї —
-// обходиш збоку)}. Повертає {walls, stepped (на скільки піднявся кроком), ex, ey (зсув кроком понад рух — для вигляду)}
+// стоїш, floorN — нормаль підлоги ([x, y, z]) чи null}. Лобом у стіну (WALL_NZ; кут між рухом і нормаллю < 30°:
+// у стовбур — ближче половини суми радіусів від осі) — стоп, без ковзання вбік (12.10.2026, рішення користувача: «коли я
+// йду в дерево і впираюсь в дерево, то не треба мене зміщувати в бік»; було — ковзання з частиною швидкості й обхід
+// круглої перешкоди дотичною); навскіс — уздовж поверхні, як було. Повертає {walls, stepped (на скільки піднявся
+// кроком), ex, ey (зсув кроком понад рух — для вигляду), head — уперся лобом}
 export function moveH(src, sh, s, dx, dy, o) {
-  const res = { walls: [], stepped: 0, ex: 0, ey: 0 };
+  const res = { walls: [], stepped: 0, ex: 0, ey: 0, head: false };
   const x0 = s.x, y0 = s.y, want = Math.hypot(dx, dy);
   let last = null;
   let fn = o.floorN && o.floorN[2] >= o.walkZ ? o.floorN : null;
@@ -191,6 +197,7 @@ export function moveH(src, sh, s, dx, dy, o) {
     if (l < 1e-6) { fn = null; continue; }                                  // стеля над схилом — далі по горизонталі
     const nx = h.nx / l, ny = h.ny / l, d = rx * nx + ry * ny;
     res.walls.push([nx, ny]);
+    if (h.nz > WALL_NZ[0] && h.nz < WALL_NZ[1] && -(dx * nx + dy * ny) > HEAD_ON * want) { res.head = true; rx = ry = 0; break; }
     const prev = last;
     last = { nx, ny, ref: h.ref };
     if (d < 0) { rx -= d * nx; ry -= d * ny; } else fn = null;
@@ -199,15 +206,9 @@ export function moveH(src, sh, s, dx, dy, o) {
     if (prev && rx * prev.nx + ry * prev.ny < -1e-12) { rx = ry = 0; break; }
     if (rx * dx + ry * dy <= 0) { rx = ry = 0; break; }                     // проти початкового напрямку — стоп (Quake)
   }
-  // уперся й майже не зрушив: лобом у круглу перешкоду — уздовж дотичної (обходиш збоку; точно в центр — ліворуч),
-  // інакше — запасний хід по осях, як у блоковому світі (у кут — ні)
-  if (want > 1e-9 && Math.hypot(s.x - x0, s.y - y0) < want * 0.05 && !res.stepped) {
-    const tries = [[dx, 0], [0, dy]];
-    if (last && last.ref && o.round && o.round(last.ref)) {
-      const sg = -last.ny * dx + last.nx * dy >= -1e-9 ? 1 : -1;
-      tries.unshift([-last.ny * sg * want, last.nx * sg * want]);
-    }
-    for (const [ax, ay] of tries) {
+  // уперся навскіс і майже не зрушив (кут, зубець) — запасний хід по осях, як у блоковому світі (у кут — ні); лобом — ні
+  if (want > 1e-9 && Math.hypot(s.x - x0, s.y - y0) < want * 0.05 && !res.stepped && !res.head) {
+    for (const [ax, ay] of [[dx, 0], [0, dy]]) {
       if (!ax && !ay) continue;
       const h = sweep(src, sh, s.x, s.y, s.z, ax, ay, 0);
       const len = Math.hypot(ax, ay), adv = h ? Math.max(0, h.t - SKIN / len) : 1;

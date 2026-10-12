@@ -4,7 +4,7 @@
 // ключ секції — sk, рослин — ck, плитки далечі — рядок. Груба секція (робота lod, рівень q.lod) — теж 'sec', без блоків:
 // у світі не зберігається.
 import { lawsOf, physOf, KMIN, KMAX } from './universe.js';
-import { CS, ci, bv, solidB, blocks, genColumn, B_AIR, B_STONE, O_FLOAT, SEC } from './gen/chunk.js';
+import { CS, ci, bv, solidB, blocks, genColumn, B_AIR, B_STONE, O_FLOAT, O_TREE, SEC } from './gen/chunk.js';
 import { LEVEL } from './iso.js';
 import { createGen } from './gen/client.js';
 import { standableB, GRAVITY, PLAYER_MASS, PLAYER_AREA } from './player.js';
@@ -92,7 +92,8 @@ export function createWorld(seed, onMesh, opts = {}) {
   let stamp = 0;
   const touch = (map, k) => { const o = map.get(k); if (o) o.used = ++stamp; return o; };
 
-  // Стовпець прийшов: перешкоди-предмети за клітинкою (світові координати; розмір — o.r, o.top), тіла (ширяюче каміння)
+  // Стовпець прийшов: перешкоди-предмети за клітинкою (світові координати; розмір — o.r, o.top; tree — велика рослина:
+  // за неї не чіпляєшся), тіла (ширяюче каміння)
   function addCol(c) {
     c.obst = new Array(CS * CS).fill(null);
     // предмет клітинки (прицілювання): номер у c.obj чи −1; ширяюче каміння — тіла
@@ -100,7 +101,7 @@ export function createWorld(seed, onMesh, opts = {}) {
     c.obj.forEach((o, i) => { if (o.k !== O_FLOAT) c.objAt[o.y * CS + o.x] = i; });
     for (const o of c.obj) if (o.r > 0) {
       const z0 = o.z * LEVEL;
-      c.obst[o.y * CS + o.x] = { cx: c.cx * CS + o.cx, cy: c.cy * CS + o.cy, z0, z1: z0 + o.top, r: o.r };
+      c.obst[o.y * CS + o.x] = { cx: c.cx * CS + o.cx, cy: c.cy * CS + o.cy, z0, z1: z0 + o.top, r: o.r, tree: o.k === O_TREE };
       if (o.r > objR) objR = o.r;
     }
     const bodies = [];

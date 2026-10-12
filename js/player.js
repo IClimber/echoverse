@@ -58,7 +58,8 @@ export const SWIM_V = 2.0;           // під рідиною: угору / ун
 const walkZ = (ph) => WALK_Z[ph.up >= 2 ? 1 : 0];
 // посилання трикутника зіткнень (collision.js): тіло (bodies.js) чи предмет (стовбур, камінь — круглі призми)
 const isBody = (r) => !!r && r.hz !== undefined;
-const round = (r) => !isBody(r);
+// за що не чіпляєшся: тіло й дерево (12.10.2026, рішення користувача: лазіння по деревах прибрано; камінь — можна)
+const noGrip = (r) => isBody(r) || (!!r && !!r.tree);
 const R2 = Math.SQRT1_2;
 const MB45 = [[R2, -R2], [R2, R2]];  // базис руху ізометрії з азимутом 45°: праворуч, униз екрана
 const EPS = 1e-4;
@@ -364,7 +365,7 @@ export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
     if ((p.ground || surf !== null) && !swimFast) {
       // з рідини на берег — не пірнувши (з глибини — ні: інакше «крок» з дна на кілька одиниць угору)
       const up = surf !== null && !p.dive ? Math.max(STEP, surf + 0.15 + CLIMB_OUT * LEVEL - p.z) : STEP;
-      const o = { step: up, walkZ: walkZ(ph), standZ: STAND_Z, floorN: p.ground ? p.floorN : null, round };
+      const o = { step: up, walkZ: walkZ(ph), standZ: STAND_Z, floorN: p.ground ? p.floorN : null };
       const r = groundMove(p, C, dx, dy, o, low && p.ground ? slideZ(mu, ph) : 0);
       sh = shapeOf(p);
       walls = r.walls;
@@ -461,11 +462,11 @@ function groundMove(p, C, dx, dy, o, guard) {
 }
 
 // Чіплятися за стіну в стрибку: рух форми на 0,12 у напрямку введення влучає в поверхню, крутішу за межу ходи (не тіло,
-// не стелю), і введення — до неї (кут < 60°); витривалість є, тіла в руках немає
+// не дерево, не стелю), і введення — до неї (кут < 60°); витривалість є, тіла в руках немає
 function grab(p, C, sh, dirX, dirY, ph, ctl) {
   if (ctl.carry || p.pose !== 'stand' || p.noGrab > 0 || p.tired || p.stam < GRAB_MIN) return false;
   const h = sweep(C, sh, p.x, p.y, p.z, dirX * 0.12, dirY * 0.12, 0);
-  if (!h || isBody(h.ref) || h.nz < -0.2 || h.nz >= walkZ(ph)) return false;
+  if (!h || noGrip(h.ref) || h.nz < -0.2 || h.nz >= walkZ(ph)) return false;
   const l = Math.hypot(h.nx, h.ny);
   if (l < 0.3) return false;
   const nx = h.nx / l, ny = h.ny / l;
@@ -480,7 +481,7 @@ function grab(p, C, sh, dirX, dirY, ph, ctl) {
 const SKIN_C = 0.002;
 
 // Лазіння: W / S — угору / униз, A / D — праворуч / ліворуч (гравець дивиться в стіну), пробіл — ривок (стіна) чи
-// зістрибнути (драбина), Ctrl — відпустити. Щокроку — знову до стіни (нормаль нова: стовбур обходиш по колу); стіни
+// зістрибнути (драбина), Ctrl — відпустити. Щокроку — знову до стіни (нормаль нова: скелю обходиш по вигину); стіни
 // не стало — угорі вилазиш, інакше зриваєшся. true — крок зроблено (ще на стіні чи виліз), false — відпустив
 function climbStep(p, ix, iy, jump, dt, P, C, ph, ctl) {
   const cl = p.climb, wall = cl.kind === 'wall', sh = shapeOf(p), g = ph.g;
@@ -533,7 +534,7 @@ function climbStep(p, ix, iy, jump, dt, P, C, ph, ctl) {
   if (wall) {
     const h = sweep(C, sh, p.x, p.y, p.z, -cl.nx * 0.15, -cl.ny * 0.15, 0);
     const l = h ? Math.hypot(h.nx, h.ny) : 0;
-    if (h && !isBody(h.ref) && h.nz >= -0.2 && h.nz < wz && l > 0.3) {
+    if (h && !noGrip(h.ref) && h.nz >= -0.2 && h.nz < wz && l > 0.3) {
       const adv = Math.max(0, h.t - SKIN_C / 0.15);
       p.x -= cl.nx * 0.15 * adv; p.y -= cl.ny * 0.15 * adv;
       n = [h.nx / l, h.ny / l];
