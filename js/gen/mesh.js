@@ -518,18 +518,35 @@ export function chunkMesh(C, L, { near = true, far = true } = {}) {
 // нахилом і розкидом кольору; висота — від K0. F — зблизька (повна будова, трава й квіти), Ff — здалеку (спрощені
 // великі рослини й каміння); near / far — що рахувати
 function objMeshes(C, L, K0, NK, near, far, dz = 0) {
-  const F = new Mesh(), Ff = new Mesh();
-  for (const o of C.obj) {
+  const F = new Mesh(), Ff = new Mesh(), cover = [];
+  F.nb = 0; F.objs = [];
+  // зблизька — спершу великі (дерева, каміння), за ними малі (покрив): F.nb — індексів великих, F.objs — по 8 чисел на
+  // великий предмет: перший індекс, індексів, коробка x0, y0, z0, x1, y1, z1 (scene.js малює великі поза зонами
+  // розчинення, «вікна» й переходу матеріалом без дизерингу)
+  for (let pass = 0; pass < 2; pass++) for (const o of pass ? cover : C.obj) {
+    if (!pass && o.k === O_COVER) { if (near) cover.push(o); continue; }
     if (o.z < K0 || o.z >= K0 + NK) continue;                 // предмет — у секції своєї основи
     const z = (o.z - K0) * LEVEL + dz, v = o.v, g = C.sp[o.s], q = objPose(C, L, o);
     if (o.k === O_FLOAT) continue;                            // ширяюче каміння — тіла (bodies.js), малюються окремо
     const { cx, cy, rot, s, cj } = q, sk = C.top ? skyK(C.top[ci(o.x, o.y)] - o.z) : 1;   // AO неба над основою
+    const v0 = F.n, i0 = F.ni;
     if (o.k === O_TREE) {
       const tl = ((v >> 2 & 7) / 7) * 0.1;
       if (near) place(F, template(g, v % 3, 0), cx, cy, z, rot, s, tl, cj, sk);
       if (far) place(Ff, template(g, v % 3, 1), cx, cy, z, rot, s, tl, cj, sk);   // той самий варіант, спрощений
     } else if (o.k === O_COVER) { if (near) place(F, template(g, v & 1, 0), cx, cy, z, rot, s, 0, cj, sk, 1 + hash3(0x7f1a, o.x + C.cx * CS, o.y + C.cy * CS) % THIN_N); }
     else { const T = template(o.st ? stoneGenome(L, g, o.st) : g, v & 3, 0, styleOf(g, v)); if (near) place(F, T, cx, cy, z, rot, s, 0, cj, sk); if (far) place(Ff, T, cx, cy, z, rot, s, 0, cj, sk); }
+    if (!pass) {
+      F.nb = F.ni;
+      if (near && F.ni > i0) {
+        let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+        for (let j = v0 * 3; j < F.n * 3; j += 3) {
+          const a = F.p[j], b = F.p[j + 1], c = F.p[j + 2];
+          if (a < x0) x0 = a; if (a > x1) x1 = a; if (b < y0) y0 = b; if (b > y1) y1 = b; if (c < z0) z0 = c; if (c > z1) z1 = c;
+        }
+        F.objs.push(i0, F.ni - i0, x0, y0, z0, x1, y1, z1);
+      }
+    }
   }
   return { F, Ff };
 }

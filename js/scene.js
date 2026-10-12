@@ -48,14 +48,15 @@ const PARTICLES = 6000;
 const rkey = (rx, ry, rz) => ((rx + 0x20000) * 0x40000 + (ry + 0x20000)) * 256 + (rz + 128);
 // Списки діапазонів на кадр: 0 — тверде біля «вікна», 1 — тверде, 2 — тверде на шві далечі (0–2 — з відсіканням задніх
 // граней), 3 — рідина, 4 — рідина на шві, 5 — рослини зблизька, 6–8 — далекі рослини й каміння секцій (пара до 0–2, без
-// відсікання: листя видно з обох боків), 9 — далекі рослини секцій у смузі переходу (проступають, де зникають повні)
-const L_CUT = 0, L_PLAIN = 1, L_RING = 2, L_LIQ = 3, L_LIQR = 4, L_FL = 5, L_OBJ = 6, L_OBJF = 9, NL = 10;
+// відсікання: листя видно з обох боків), 9 — далекі рослини секцій у смузі переходу (проступають, де зникають повні),
+// 10 — великі рослини зблизька там, де розчинення, «вікно» й перехід нічого не відкидають (матеріал без дизерингу)
+const L_CUT = 0, L_PLAIN = 1, L_RING = 2, L_LIQ = 3, L_LIQR = 4, L_FL = 5, L_OBJ = 6, L_OBJF = 9, L_FLB = 10, NL = 11;
 const FALLBACK = [[1, 2], [0, 2], [1, 0]];     // рівень деталізації, коли потрібного ще немає: спершу тонший
 // Сітки камери регіону: вид → арена, матеріал, список кадру
 const KINDS = {
   solidC: ['op', 'solidC', L_CUT], solid: ['op', 'solid', L_PLAIN], solidR: ['op', 'solidR', L_RING],
   objC: ['op', 'objC', L_OBJ + L_CUT], obj: ['op', 'obj', L_OBJ + L_PLAIN], objR: ['op', 'objR', L_OBJ + L_RING], objF: ['op', 'objF', L_OBJF],
-  liq: ['liq', 'liq', L_LIQ], liqR: ['liq', 'liqR', L_LIQR], fl: ['fl', 'fl', L_FL],
+  liq: ['liq', 'liq', L_LIQ], liqR: ['liq', 'liqR', L_LIQR], fl: ['fl', 'fl', L_FL], flB: ['fl', 'obj', L_FLB],
 };
 // Кидачі тіней — по блоку BS×BS стовпців регіону (regions.js): 0 — тверде з далекими рослинами й камінням секції (в арені
 // поруч — один діапазон; матеріал без відсікання граней), 2 — рослини зблизька
@@ -280,7 +281,7 @@ export async function createScene(canvas, settings = {}) {
     if (!mesh.n) { U.flora.set(k, null); return; }
     const [rx, ry] = regionOf(q.cx, q.cy, 0), Gr = region(U, rx, ry, data.rz);
     const off = RG.put(Gr.R, 'fl', mesh.fl, mesh.n);
-    Gr.fls.set(k, { cx: q.cx, cy: q.cy, off, n: off < 0 ? 0 : mesh.n, bb: mesh.bb });
+    Gr.fls.set(k, { cx: q.cx, cy: q.cy, off, n: off < 0 ? 0 : mesh.n, nb: off < 0 ? 0 : mesh.nb, ob: mesh.ob, bb: mesh.bb });
     grow(Gr.bb, mesh.bb); RG.setBounds(Gr.R, Gr.bb);
     U.flora.set(k, Gr);
     dirtyCol(U, rx, ry);
@@ -354,6 +355,38 @@ export async function createScene(canvas, settings = {}) {
     if (dz >= cut.depth) return false;
     const qx = Math.max(a, Math.min(cut.x, c)), qy = Math.max(b, Math.min(cut.y, d));
     return Math.hypot(qx - cut.x, qy - cut.y) < cut.r;
+  };
+
+  // Рослини зблизька без дизерингу (ліс, 12.10.2026): шейдер, що може відкинути піксель, вимикає ранню перевірку глибини —
+  // кожен шар крон затінюється повністю. Матеріал fl відкидає лише в смузі переходу, біля ока (розчинення), у конусі
+  // «вікна» вище колін і траву (проріджування); великі рослини (дерева, каміння), чия коробка (із запасом на вітер і
+  // кривизну) не зачіпає жодної з цих зон, малюються матеріалом obj (той самий, лише без дизерингу) — пікселі ті самі.
+  // Спершу — увесь стовпець, інакше — кожен предмет (коробки з роботи flora). fz: ex…ez — око, far — початок смуги
+  // переходу, drop — найбільше опускання кривизною, fade — до якої відстані розчинення (0 — вимкнено), cut — «вікно»
+  // (px…pz — гравець, dP — до нього від ока, ang — півкут конуса; згори — iso, u — напрям погляду, k — радіус), knee — коліна
+  const fz = { ex: 0, ey: 0, ez: 0, far: 0, drop: 0, fade: 0, cut: false, iso: false, px: 0, py: 0, pz: 0, dP: 0, k: 0, ang: 0, ux: 0, uy: 0, uz: 0, knee: 0 };
+  const FZ_M = 0.5;
+  let flSplit = true;
+  const bigSafe = (x0, y0, z0, x1, y1, z1) => {
+    x0 -= FZ_M; y0 -= FZ_M; x1 += FZ_M; y1 += FZ_M; z1 += FZ_M; z0 -= FZ_M + fz.drop;
+    if (Math.hypot(Math.max(-x0, x1), Math.max(-y0, y1)) >= fz.far) return false;            // смуга переходу
+    const dx = Math.max(x0 - fz.ex, 0, fz.ex - x1), dy = Math.max(y0 - fz.ey, 0, fz.ey - y1), dz = Math.max(z0 - fz.ez, 0, fz.ez - z1);
+    const dmin = Math.hypot(dx, dy, dz);
+    if (fz.fade && dmin < fz.fade) return false;                                                // розчинення біля ока
+    if (!fz.cut || z1 <= fz.knee || dmin >= fz.dP) return true;                                  // «вікно»: вище колін, ближче гравця
+    // вирізає лише ближче за гравця: коробка ∩ куб навколо ока з півстороною dP, далі — куля навколо неї проти конуса
+    x0 = Math.max(x0, fz.ex - fz.dP); y0 = Math.max(y0, fz.ey - fz.dP); z0 = Math.max(z0, fz.ez - fz.dP, fz.knee);
+    x1 = Math.min(x1, fz.ex + fz.dP); y1 = Math.min(y1, fz.ey + fz.dP); z1 = Math.min(z1, fz.ez + fz.dP);
+    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, cz = (z0 + z1) / 2, rb = Math.hypot(x1 - x0, y1 - y0, z1 - z0) / 2;
+    if (fz.iso) {
+      const vx = cx - fz.px, vy = cy - fz.py, vz = cz - fz.pz;
+      return Math.hypot(vy * fz.uz - vz * fz.uy, vz * fz.ux - vx * fz.uz, vx * fz.uy - vy * fz.ux) - rb > fz.k;
+    }
+    const vx = cx - fz.ex, vy = cy - fz.ey, vz = cz - fz.ez, lv = Math.hypot(vx, vy, vz);
+    if (lv <= rb) return false;
+    const qx = fz.px - fz.ex, qy = fz.py - fz.ey, qz = fz.pz - fz.ez;
+    const cosA = Math.max(-1, Math.min(1, (vx * qx + vy * qy + vz * qz) / (lv * fz.dP)));
+    return Math.acos(cosA) - Math.asin(rb / lv) > fz.ang;
   };
 
   // Кидачі регіону: діапазони за блоками й видами (злиття сусідніх) і межі блоків (клітинки від кута регіону)
@@ -502,6 +535,8 @@ export async function createScene(canvas, settings = {}) {
     stats,
     get width() { return G.width; }, get height() { return G.height; },
     get cullOn() { return cullOn; },
+    // Великі рослини зблизька без дизерингу (bigSafe): false — усе матеріалом fl (порівняння)
+    setFlSplit(on) { flSplit = !!on; },
     setCull(on) { cullOn = !!on; for (const k of CULLED) { mats[k].cull = cullOn ? pc.CULLFACE_BACK : pc.CULLFACE_NONE; mats[k].update(); } },
     get info() { return { ...G.info, shadows: LG.quality, lights: LG.info() }; },
     app,
@@ -682,6 +717,19 @@ export async function createScene(canvas, settings = {}) {
         const q = p && project(m, [pt[0] + b.r[0] * 0.7, pt[1] + b.r[1] * 0.7, pt[2]], G.width, G.height);
         if (p && q) cut = { x: p[0], y: p[1], r: Math.hypot(q[0] - p[0], q[1] - p[1]) * (iso ? 1.6 : 2.4), depth: p[2] };
       }
+      // зони, де fl відкидає пікселі (bigSafe): усе — відносно цілі, у наших осях
+      fz.ex = e[0]; fz.ey = e[1]; fz.ez = e[2]; fz.far = xfade2[0] - FZ_M;
+      fz.drop = (laws.phys ? 0.5 / laws.phys.planetR : 0) * FLORA_NEAR * FLORA_NEAR;
+      fz.fade = fade2[1] > 0 ? fade2[1] + FZ_M : 0;
+      fz.cut = cut2[3] > 0.5;
+      if (fz.cut) {
+        fz.iso = cut2[3] > 1.5;
+        fz.px = me.x - t[0]; fz.py = me.y - t[1]; fz.pz = me.z + 0.45 - t[2];
+        fz.dP = Math.hypot(fz.px - fz.ex, fz.py - fz.ey, fz.pz - fz.ez) || 1;
+        fz.knee = cut3[1] - t[2] - FZ_M;
+        if (fz.iso) { fz.ux = -b.u[0]; fz.uy = -b.u[1]; fz.uz = -b.u[2]; fz.k = cut3[0] + FZ_M; }
+        else fz.ang = Math.acos(cut3[0]) + 0.02;
+      }
       tanomMap(laws, t[0], t[1]);
       M.setFrame({ tanom: ta4, tanomO: taO, wind: wind4, curve: laws.phys ? 0.5 / laws.phys.planetR : 0, target: tgtPC, seam: SEAM, time: lt, minLight: Lt.min, eye: eyePC, fade: fade2, cut: cutF, cut2, cut3, thin: thin2, xfade: xfade2 });
 
@@ -695,7 +743,7 @@ export async function createScene(canvas, settings = {}) {
       }
       const colK = `${Math.floor(t[0] / CS)},${Math.floor(t[1] / CS)}`;
       if (Un && (colK !== lastCol || rad !== lastRad)) { lastCol = colK; lastRad = rad; for (const Gr of Un.regions.values()) if (horiz(Gr, t) < FLORA_NEAR + 2 * CS) Gr.shDirty = true; }
-      let tris = 0;
+      let tris = 0, flTris = 0, flbTris = 0;
       if (Un) {
         Un.drawn = frame; Un.at = performance.now();
         for (const Gr of Un.regions.values()) {
@@ -748,7 +796,18 @@ export async function createScene(canvas, settings = {}) {
             if (f.off < 0 || !f.n) continue;
             if (colDist(f.cx, f.cy, t) >= FLORA_NEAR) continue;
             const c = f.bb;
-            if (inside || aabbInView(m, ox + c[0], oy + c[1], oz + c[2], ox + c[3], oy + c[4], oz + c[5])) pushR(L_FL, seg[L_FL * 2], f.off, f.n);
+            if (!inside && !aabbInView(m, ox + c[0], oy + c[1], oz + c[2], ox + c[3], oy + c[4], oz + c[5])) continue;
+            if (!flSplit || !f.nb) { pushR(L_FL, seg[L_FL * 2], f.off, f.n); continue; }
+            // великі: увесь стовпець поза зонами — одним діапазоном, інакше — кожен предмет за своєю коробкою
+            if (bigSafe(ox + c[0], oy + c[1], oz + c[2], ox + c[3], oy + c[4], oz + c[5])) pushR(L_FLB, seg[L_FLB * 2], f.off, f.nb);
+            else {
+              const ob = f.ob;
+              for (let i = 0; i < ob.length; i += 8) {
+                const j = bigSafe(ox + ob[i + 2], oy + ob[i + 3], oz + ob[i + 4], ox + ob[i + 5], oy + ob[i + 6], oz + ob[i + 7]) ? L_FLB : L_FL;
+                pushR(j, seg[j * 2], f.off + ob[i], ob[i + 1]);
+              }
+            }
+            if (f.n > f.nb) pushR(L_FL, seg[L_FL * 2], f.off + f.nb, f.n - f.nb);
           }
           for (let j = 0; j < NL; j++) seg[j * 2 + 1] = LN[j];
         }
@@ -757,7 +816,9 @@ export async function createScene(canvas, settings = {}) {
           if (Gr.shDirty) buildCasters(Un, Gr, t);
           for (const k in KINDS) {
             const j = KINDS[k][2], a = Gr.vis ? Gr.seg[j * 2] : 0, z = Gr.vis ? Gr.seg[j * 2 + 1] : 0;
-            tris += RG.setCamera(Gr.R, k, LF[j], LC[j], a, z) / 3;
+            const n3 = RG.setCamera(Gr.R, k, LF[j], LC[j], a, z) / 3;
+            tris += n3;
+            if (j === L_FLB) flbTris += n3; else if (j === L_FL) flTris += n3;
           }
         }
       }
@@ -850,7 +911,7 @@ export async function createScene(canvas, settings = {}) {
         v.setColor(loc.type === 'dust' ? [...laws.pal.desert.map((c) => c / 255 * (0.35 + 0.65 * Math.min(1, sk.lightK[1]))), 0.55] : [Qp.col[0] * lk, Qp.col[1] * lk, Qp.col[2] * lk, Qp.col[3]]);
         v.setIntensity(Math.min(1, loc.k));
       }
-      stats.tris = tris;
+      stats.tris = tris; stats.flTris = flTris; stats.flbTris = flbTris;
       return sk;
     },
   };

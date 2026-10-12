@@ -219,6 +219,34 @@ test('робота flora: рослини зблизька стовпця — т�
   });
 });
 
+test('робота flora: спершу великі рослини, коробки предметів покривають їх рівно й містять свої вершини, далі покрив', () => {
+  const seed = hashStr('test');
+  let objs = 0, cover = 0;
+  SPOTS.forEach(([d, n, cx, cy]) => {
+    const L = lawsOf(seed, d, n), cache = new Map();
+    runJob(L, { type: 'col', d, n, cx, cy }, cache);
+    const r = runJob(L, { type: 'flora', d, n, cx, cy }, cache), m = r.mesh;
+    if (!m.n) return;
+    assert.ok(m.nb >= 0 && m.nb <= m.n);
+    cover += m.n - m.nb;
+    const V = unpack(m.fl), ob = m.ob;
+    let at = 0;
+    for (let i = 0; i < ob.length; i += 8, objs++) {
+      assert.equal(ob[i], at, 'предмети йдуть підряд');
+      assert.ok(ob[i + 1] > 0);
+      for (let j = ob[i]; j < ob[i] + ob[i + 1]; j++) for (let a = 0; a < 3; a++) {
+        const p = V.pos[j * 3 + a];
+        assert.ok(p >= ob[i + 2 + a] - 0.01 && p <= ob[i + 5 + a] + 0.01, `вершина ${j} у коробці предмета`);
+      }
+      at += ob[i + 1];
+    }
+    assert.equal(at, m.nb, 'коробки — рівно великі рослини');
+    // покрив (трава, квіти, мітка проріджування 1…2047) — після великих (мітки немає)
+    for (let j = 0; j < m.n; j++) assert.equal(V.thin[j] > 0, j >= m.nb);
+  });
+  assert.ok(objs > 0 && cover > 0);
+});
+
 // ================= Стрімінг =================
 import { columnsInCircle, colPri, visibleMissing } from '../js/stream.js';
 import { createCamera, viewProj, THIRD } from '../js/camera.js';

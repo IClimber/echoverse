@@ -88,7 +88,7 @@ function boot(renderer) {
     stats() {
       frameStats();
       const st = g ? g.world.stats() : {}, R = renderer.R;
-      return { fps: perf.fps, frameMs: perf.frameMs, p99: perf.p99, frameMax: perf.max, upd: perf.upd, drw: perf.drw, gpuMs: R.gpuMs, draws: R.stats.draws, tris: R.stats.tris,
+      return { fps: perf.fps, frameMs: perf.frameMs, p99: perf.p99, frameMax: perf.max, upd: perf.upd, drw: perf.drw, gpuMs: R.gpuMs, draws: R.stats.draws, tris: R.stats.tris, flTris: R.stats.flTris, flbTris: R.stats.flbTris,
         gpuMB: (R.stats.gpuBytes + R.stats.arenaBytes) / 1048576, colsPerSec: st.colsPerSec, pending: st.pending, cols: st.cols, secs: st.secs, meshes: renderer.meshCount, lod: [...renderer.lodCounts], workers: st.workers, streamMs: g ? g.streamMs : 0,
         pcMs: R.cpuRenderMs, gpuPass: R.gpuPass, shTris: R.stats.shTris, shDraws: R.stats.shDraws, ...lightStats() };
     },
@@ -215,6 +215,10 @@ function boot(renderer) {
     setFloraNear(r) { setFloraNear(r); streamer.force(); },
     // Відсікання задніх граней землі: false — усе з обох боків (порівняння)
     setCull(on) { renderer.R.setCull(on); },
+    // Великі рослини зблизька матеріалом без дизерингу там, де він нічого не відкидає: false — усе з дизерингом (порівняння)
+    flSplit(on) { renderer.R.setFlSplit(on); return !!on; },
+    // Зупинити світ (годинник, рух, камера) без меню — знімки одного й того самого кадру
+    freeze(on) { g.frozen = !!on; return g.frozen; },
     // Стенд руху: гравець — на місце name (STAND_SPOTS), обличчям за поглядом місця
     spot(name) {
       const sp = STAND_SPOTS[name], me = g.me;
@@ -724,7 +728,7 @@ function boot(renderer) {
         if (g.dev.start(to, a) === 'cancel') toast('Стрибок скасовано');
       }
     }
-    if (!$('menu').hidden) return;                              // меню — пауза
+    if (!$('menu').hidden || g.frozen) return;                  // меню — пауза (`?dev` freeze — теж)
     g.clock += dt;                                              // годинник світу (доба кожного всесвіту — своя)
     const w = takeWheel(), [mx, my] = takeDrag(), turn = turnAxis();
     if (w) wheel(camera, w);
@@ -946,7 +950,7 @@ function boot(renderer) {
       const t0 = performance.now();
       update(dt, now);
       const t1 = performance.now();
-      if (g) draw(dt, now);
+      if (g) { if (g.frozen) draw(0, g.frozenAt ??= now); else { g.frozenAt = null; draw(dt, now); } }
       const t2 = performance.now();
       perf.upd = perf.upd * 0.95 + (t1 - t0) * 0.05; perf.drw = perf.drw * 0.95 + (t2 - t1) * 0.05;
       perf.cpu = perf.cpu * 0.95 + (t2 - t0) * 0.05;
