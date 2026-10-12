@@ -60,6 +60,10 @@ const ch = spawn('google-chrome', [`--remote-debugging-port=${port}`, ...flags, 
 // google-chrome — скрипт-обгортка: ch.kill() вбив би лише її, а браузер лишився б на порту (наступний запуск підключився б
 // до нього — зі старими модулями в HTTP-кеші й чужим навантаженням GPU). Тому — уся група процесів
 const quit = () => { try { process.kill(-ch.pid, 'SIGTERM'); } catch { /* уже завершився */ } };
+// за будь-якого виходу (і з винятком) — закрити браузер: інакше він лишається рендерити гру з сервера 8123 і їсть GPU
+// (12.10.2026: після невдалого старту висів, 36 % GPU — у користувача падали к/с і висла сторінка гри)
+process.on('exit', quit);
+process.on('SIGINT', () => process.exit(130)); process.on('SIGTERM', () => process.exit(143));
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 await wait(2000);
 const page = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find((t) => t.type === 'page');
