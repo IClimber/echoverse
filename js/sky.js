@@ -5,6 +5,10 @@
 // оберт за свій період — звідси фази. Зорі — нерухомі відносно полюса, обертаються з небом.
 // Світові осі: x, y — горизонталь, z — угору; схід — за азимутом всесвіту.
 
+import { skyOptics } from './optics.js';
+import { hash3, unit } from './rng.js';
+import { hsl } from './universe.js';
+
 const TAU = Math.PI * 2;
 const clamp01 = (v) => v < 0 ? 0 : v > 1 ? 1 : v;
 const smooth = (a, b, v) => { const t = clamp01((v - a) / (b - a)); return t * t * (3 - 2 * t); };
@@ -53,6 +57,16 @@ export function bodiesOf(L) {
     };
   });
   const moons = S.moons.map((m) => ({ ...m, size: Math.min(0.15, Math.max(0.01, 10 * m.Rkm / (m.D * Rpl))) }));
+  // компаньйон (М7): справжній кутовий радіус α з припливної сили f = 2·(ρк/ρп)·sin³α (≤ 60°), відстань D = Rк / sin α,
+  // період — Кеплер (q — відношення мас); тип 1 — газовий гігант, 2 — кам'яний, 3 — крижаний
+  const C = L.comp;
+  if (C) {
+    const sa = Math.min(Math.sin(Math.PI / 3), Math.cbrt(C.f / (2 * C.rhoR))), D = C.Rr / sa, q = C.rhoR * C.Rr ** 3, P = L.planet;
+    const perH = 1.406 * Math.sqrt(P.R / P.g0) * Math.sqrt(D ** 3 / (1 + q));
+    const col = [hsl(0.06 + 0.08 * C.hue, 0.45, 0.68), hsl(C.hue, 0.25, 0.5), hsl(0.55 + 0.05 * C.hue, 0.2, 0.86)][C.type];
+    const col2 = [hsl(0.03 + 0.1 * C.hue2, 0.5, 0.45), hsl(C.hue2, 0.35, 0.32), hsl(0.6, 0.15, 0.7)][C.type];
+    moons.push({ D, size: Math.asin(sa), period: Math.max(0.3, perH / P.rot), dec: C.inc, off: C.off, albedo: C.albedo, col, col2, comp: C.type + 1 });
+  }
   B = { suns, moons };
   bodyCache.set(L, B);
   return B;
@@ -78,54 +92,97 @@ function bodyDir(A, h, dec) {
   return [A.e[0] * ce + A.nn[0] * cn, A.e[1] * ce + A.nn[1] * cn, cu];
 }
 
-// Стан неба всесвіту L у мить clock: світила, світло для граней, кольори неба й туману, зорі.
+// Частка диска радіуса r1, закрита диском радіуса r2 на кутовій відстані d (площа перетину кругів)
+export function covered(r1, r2, d) {
+  if (d >= r1 + r2) return 0;
+  if (d <= Math.abs(r2 - r1)) return r2 >= r1 ? 1 : (r2 * r2) / (r1 * r1);
+  const a = Math.acos((d * d + r1 * r1 - r2 * r2) / (2 * d * r1)), b = Math.acos((d * d + r2 * r2 - r1 * r1) / (2 * d * r2));
+  const A = r1 * r1 * a + r2 * r2 * b - 0.5 * Math.sqrt(Math.max(0, (-d + r1 + r2) * (d + r1 - r2) * (d - r1 + r2) * (d + r1 + r2)));
+  return Math.min(1, A / (Math.PI * r1 * r1));
+}
+const angle = (a, b) => Math.acos(Math.max(-1, Math.min(1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2])));
+
+// Буря зорі (п. 4, М5): відрізки по ¼ доби (захоплена — 5 хв), імовірність 0,02 × активність / 0,3 (червоні карлики —
+// частіше), сила 0,3…1: швидкий підйом, повільний спад. Та сама мить — та сама буря
+export function stormAt(L, clock) {
+  const len = L.sky.lock ? 300 : L.sky.dayMin * 15, t = localTime(L, clock) / len, seg = Math.floor(t), u = t - seg;
+  const h = hash3(L.seed, seg, 0x5703);
+  if (unit(h) >= 0.02 * (L.star ? L.star.act : 0.3) / 0.3) return 0;
+  return (0.3 + 0.7 * unit(hash3(L.seed, seg, 0x5704))) * Math.min(1, u / 0.08) * (1 - smooth(0.3, 1, u));
+}
+
+// Стан неба всесвіту L у мить clock: світила, світло для граней, кольори неба й туману (оптика з фізики, optics.js), зорі,
+// затемнення, компаньйон (серед місяців, comp > 0), сяйва за овалом, буря зорі.
 // light — напрям (до світила, z > 0), lightK — множник світла (з кольором), amb — частка розсіяного;
 // zenith / horizon — небо, fog — колір туману (= обрій), day — 0…1 (ніч … день), dusk — сила заходу,
 // stars — яскравість зір, cel — матриця «світ → небесна сфера» (рядки), для зір
 export function skyState(L, clock) {
-  const S = L.sky, P = L.pal, A = axes(L), phase = dayPhase(L, clock), h0 = TAU * (phase - 0.5), Bo = bodiesOf(L);
+  const S = L.sky, A = axes(L), phase = dayPhase(L, clock), h0 = TAU * (phase - 0.5), Bo = bodiesOf(L);
   // сезон: склонення сонця — нахил осі × синус фази року; зоряний час випереджає сонячний на оберт за рік
-  const yp = yearPhase(L, clock), dec0 = S.year ? S.year.obliq * Math.sin(TAU * yp) : 0, hs = h0 + TAU * yp;
+  const yp = yearPhase(L, clock), obl = S.year ? S.year.obliq : 0, dec0 = obl * Math.sin(TAU * yp), hs = h0 + TAU * yp;
   const suns = Bo.suns.map((s) => ({
-    dir: s.far ? bodyDir(A, hs + TAU * s.off, s.dec) : bodyDir(A, h0 + TAU * s.off, dec0 + s.dec), col: s.col, size: s.size, bright: s.bright,
+    dir: s.far ? bodyDir(A, hs + TAU * s.off, s.dec) : bodyDir(A, h0 + TAU * s.off, dec0 + s.dec), col: s.col, size: s.size, bright: s.bright, eclipse: 0,
   }));
+  // місяці й компаньйон: відстають від сонця на оберт за свій період (фази); склонення — з екліптики (довгота сонця +
+  // відставання) і нахилу орбіти (затемнення — лише біля вузлів)
   const days = localTime(L, clock) / (S.dayMin * 60);
   const moons = Bo.moons.map((m) => {
-    const lag = (S.lock ? 0 : days / m.period) + m.off;
-    return { dir: bodyDir(A, h0 - TAU * (lag - Math.floor(lag)), dec0 + m.dec), col: m.col, size: m.size, albedo: m.albedo };
+    const lag = (S.lock ? 0 : days / m.period) + m.off, lf = lag - Math.floor(lag), lon = TAU * (yp + lf);
+    return { dir: bodyDir(A, h0 - TAU * lf, obl * Math.sin(lon) + m.dec * Math.sin(lon + TAU * m.off)), col: m.col, col2: m.col2, size: m.size, albedo: m.albedo, D: m.D, comp: m.comp || 0, eclipse: 0 };
   });
-  // день: найсильніше сонце над обрієм; захід — коли головне сонце біля обрію
+  // затемнення: сонце під диском місяця чи компаньйона — його світло × (1 − частка, повне — 2 %); місяць у тіні планети
+  // (кутовий радіус тіні — 1 / D, у видимих розмірах ×10, як і місяці; компаньйон — справжній) — темніє
+  const sh = (m) => (m.comp ? 1 : 10) / m.D;
+  for (const s of suns) {
+    let f = 0;
+    for (const m of moons) f = Math.max(f, covered(s.size, m.size, angle(s.dir, m.dir)));
+    s.eclipse = f; s.bright *= Math.max(0.02, 1 - f);
+  }
+  for (const m of moons) {
+    const anti = [-suns[0].dir[0], -suns[0].dir[1], -suns[0].dir[2]];
+    m.eclipse = Math.max(0, Math.min(1, (sh(m) + m.size - angle(m.dir, anti)) / (2 * m.size)));
+  }
+  // день: найсильніше сонце над обрієм; захід — коли головне сонце біля обрію (без повітря — немає)
   let day = 0, main = suns[0];
   for (const s of suns) { const k = s.bright * smooth(-0.1, 0.22, s.dir[2]); if (k > day) { day = k; main = s; } }
-  const dusk = Math.max(0, 1 - Math.abs(suns[0].dir[2] - 0.02) / 0.22) * (S.lock ? 0.5 : 1);
-  // світло: денне — від сонць над обрієм (колір — їхня суміш, біля обрію — тепліше), нічне — від місяців
+  const air = L.air || {}, tauAir = air.vacuum ? 0 : 0.097 * (air.pressure || 0) / Math.max(0.02, L.grav) + (air.tauA || 0);
+  const dusk = Math.max(0, 1 - Math.abs(suns[0].dir[2] - 0.02) / 0.22) * (S.lock ? 0.5 : 1) * clamp01(tauAir * 6);
+  // оптика: колір прямого світла кожного сонця (зоря × пропускання на його висоті), неба й заходу — від головного
+  for (const s of suns) s.lit = skyOptics(L, s.col, Math.max(0.02, Math.asin(Math.max(-1, Math.min(1, s.dir[2]))))).sun;
+  const O = skyOptics(L, main.col, Math.max(0.035, Math.asin(Math.max(-1, Math.min(1, main.dir[2])))));
+  // світло: денне — від сонць над обрієм (колір — їхня суміш), нічне — від місяців
   let lx = 0, ly = 0, lz = 0, cr = 0, cg = 0, cb = 0, w = 0;
   for (const s of suns) {
     const k = s.bright * smooth(-0.05, 0.25, s.dir[2]);
     if (k <= 0) continue;
-    lx += s.dir[0] * k; ly += s.dir[1] * k; lz += s.dir[2] * k; cr += s.col[0] * k; cg += s.col[1] * k; cb += s.col[2] * k; w += k;
+    lx += s.dir[0] * k; ly += s.dir[1] * k; lz += s.dir[2] * k; cr += s.lit[0] * k; cg += s.lit[1] * k; cb += s.lit[2] * k; w += k;
   }
-  let sunCol = w ? [cr / w / 255, cg / w / 255, cb / w / 255] : [1, 1, 1];
-  const warm = Math.max(0, dusk - 0.2);
-  sunCol = mix(sunCol, [S.dusk[0] / 255, S.dusk[1] / 255, S.dusk[2] / 255], warm * 0.5);
+  const sunCol = w ? [cr / w / 255, cg / w / 255, cb / w / 255] : [1, 1, 1];
   for (const m of moons) if (m.dir[2] > 0) { const k = (1 - day) * 0.5 * m.size / 0.08; lx += m.dir[0] * k; ly += m.dir[1] * k; lz += m.dir[2] * k; }
   let light = norm([lx, ly, Math.max(lz, 0.25 * Math.hypot(lx, ly) + 0.05)]);
   if (light[2] < 0.25) light = norm([light[0], light[1], 0.25]);
   const I = S.night + (1 - S.night) * day;
   const nightTint = [0.62, 0.72, 1.0];
   const tint = mix(nightTint, mix([1, 1, 1], sunCol, 0.6), day);
-  // небо
-  const dayH = P.sky, dayZ = [P.sky[0] * 0.72, P.sky[1] * 0.8, Math.min(255, P.sky[2] * 1.02)];
+  // небо: удень — оптика, уночі — колір ночі законів; захід — сяйво біля сонця
   const nZ = S.nightCol, nH = [S.nightCol[0] * 1.7 + 10, S.nightCol[1] * 1.7 + 10, S.nightCol[2] * 1.6 + 12];
-  const horizon = mix(mix(nH, dayH, day), S.dusk, dusk * 0.6), zenith = mix(mix(nZ, dayZ, day), S.dusk, dusk * 0.15);
-  // зорі: обертання навколо полюса на годинний кут
+  const horizon = mix(mix(nH, O.hor, day), O.glow, dusk * 0.6), zenith = mix(mix(nZ, O.zen, day), O.glow, dusk * 0.15);
+  // зорі: обертання навколо полюса на зоряний кут
   const cel = celMatrix(A, hs);
-  // полярне сяйво: у бік магнітного полюса (географічний північ, повернутий на нахил поля), лише вночі
-  const M = L.mag || { k: 0, tilt: 0, hue: 0.35 }, ct = Math.cos(M.tilt), stl = Math.sin(M.tilt);
-  const aurora = { dir: [A.nn[0] * ct - A.nn[1] * stl, A.nn[0] * stl + A.nn[1] * ct], k: Math.max(0, M.k - 0.25) * 1.6 * (1 - day), col: hsl3(M.hue), t: localTime(L, clock) };
+  // полярне сяйво (М5): овал на магнітній широті 67° (буря — до 20° ближче до екватора), видно за ±20° від нього — у бік
+  // полюса низько над обрієм, в овалі — над головою; колір — від складу повітря (L.mag.hue)
+  const M = L.mag || { k: 0, tilt: 0, hue: 0.35, lon: 0 }, I0 = stormAt(L, clock), lonA = (M.lon || 0) * Math.PI;
+  const phiM = S.lat - M.tilt * Math.cos(lonA), dl = (67 - 20 * I0) - phiM * 180 / Math.PI, rot = M.tilt * Math.sin(lonA);
+  const ct = Math.cos(rot), stl = Math.sin(rot), sg = dl < 0 ? -1 : 1;
+  const aurora = {
+    dir: [sg * (A.nn[0] * ct - A.nn[1] * stl), sg * (A.nn[0] * stl + A.nn[1] * ct)], e0: Math.max(0.12, 1 - Math.abs(dl) / 20),
+    k: Math.min(1, 1.2 * M.k) * (1 + 2 * I0) * smooth(20, 0, Math.abs(dl)) * (1 - day), col: hsl3(M.hue), t: localTime(L, clock),
+  };
+  // зорі вдень видно, якщо небо темне (розріджене повітря, вакуум, повне затемнення)
+  const dark = clamp01(1 - Math.max(...zenith) / 90);
   return {
-    phase, day, dusk, suns, moons, main, light, lightK: [tint[0] * I, tint[1] * I, tint[2] * I], amb: L.light.amb, I, tint, lock: !!S.lock,
-    aurora, zenith, horizon, fog: horizon, duskCol: S.dusk, stars: S.stars * (1 - day) * (1 - dusk * 0.5), starHue: S.starHue, rings: S.rings, pole: A.pole, cel,
+    phase, day, dusk, suns, moons, main, light, lightK: [tint[0] * I, tint[1] * I, tint[2] * I], amb: O.amb, I, tint, lock: !!S.lock, storm: I0,
+    aurora, zenith, horizon, fog: horizon, duskCol: O.glow, stars: Math.max(S.stars * (1 - day) * (1 - dusk * 0.5), 0.9 * dark), starHue: S.starHue, rings: S.rings, pole: A.pole, cel,
   };
 }
 
@@ -143,14 +200,11 @@ function celMatrix(A, h) {
   return [...X, ...Y, ...p];
 }
 
-// Атмосфера й погода поверх стану неба st (змінює його): розріджене повітря — темніший зеніт, без повітря — чорне
-// небо із зорями вдень; серпанок — колір обрію й видимість; хмари й опади — сіріше й темніше; пил — колір пустелі;
+// Погода поверх стану неба st (змінює його): серпанок — видимість (колір — оптика); хмари й опади — сіріше й темніше;
+// без повітря — без хмар; пил — колір пустелі;
 // блискавка — спалах. W — weather.js weatherAt, clock — для руху хмар. Додає st.cloud, st.flash, st.visK
 export function applyWeather(st, L, W, clock) {
-  const A = L.air, thin = clamp01(1 - A.pressure / 0.7), vac = A.pressure < 0.1, I = Math.min(1, st.lightK[1]);
-  st.zenith = mix(st.zenith, [4, 6, 14], thin * 0.8);
-  if (vac) { st.horizon = mix(st.horizon, [12, 14, 22], 0.85); st.stars = Math.max(st.stars, 0.9); st.dusk *= 0.2; }
-  st.horizon = mix(st.horizon, A.hazeCol.map((v) => v * (0.25 + 0.75 * I)), A.haze * 0.45);
+  const A = L.air, vac = !!A.vacuum, I = Math.min(1, st.lightK[1]);   // колір неба й серпанку — уже з оптики (skyState)
   const gray = [150 * (0.2 + 0.8 * I), 156 * (0.2 + 0.8 * I), 166 * (0.22 + 0.78 * I)];
   st.horizon = mix(st.horizon, gray, W.dim * 1.2 + (1 - W.vis) * 0.4 * (1 - W.dust));
   st.zenith = mix(st.zenith, gray, W.dim * 1.4);
@@ -196,13 +250,12 @@ export function lightsOf(sk, max = 3) {
     const b = s.bright * aboveHorizon(s.dir[2], s.size);
     if (b <= 0) continue;
     P = Math.max(P, smooth(z0, DIRECT_Z, s.dir[2])); Bs += b;
-    const dk = Math.max(0, 1 - Math.abs(s.dir[2] - 0.02) / 0.22) * (sk.lock ? 0.5 : 1), warm = Math.max(0, dk - 0.2);
-    L.push({ dir: s.dir, b, sun: true, col: mix(mix([1, 1, 1], s.col.map((v) => v / 255), 0.6), sk.duskCol.map((v) => v / 255), warm * 0.5) });
+    L.push({ dir: s.dir, b, sun: true, col: mix([1, 1, 1], (s.lit || s.col).map((v) => v / 255), 0.6) });
   }
   const M = sk.main;
   for (const m of sk.moons) {
     const lit = (1 - (m.dir[0] * M.dir[0] + m.dir[1] * M.dir[1] + m.dir[2] * M.dir[2])) / 2;   // фаза: повня — навпроти сонця
-    const vis = aboveHorizon(m.dir[2], m.size), b = M.bright * (m.albedo ?? MOON_ALBEDO) * m.size * m.size * lit * vis;
+    const vis = aboveHorizon(m.dir[2], m.size), b = M.bright * (m.albedo ?? MOON_ALBEDO) * m.size * m.size * lit * vis * (1 - 0.95 * (m.eclipse || 0));
     if (b > 0) { L.push({ dir: m.dir, b, sun: false, col: NIGHT_TINT }); Bm += b; Mm = Math.max(Mm, lit * vis); }
   }
   L.sort((a, b) => b.b - a.b); L.length = Math.min(L.length, max);
@@ -214,4 +267,6 @@ export function lightsOf(sk, max = 3) {
 }
 // Лінійна сила → intensity PlayCanvas: менша за 1 множить колір до переведення в лінійне ((колір·i)^2,2), тож корінь
 // 2,2-го степеня; від 1 — як є (src/scene/light.js, Light._updateLinearColor)
+// Кількість напрямлених світел (слотів) всесвіту: сонця + місяці + компаньйон, 1…3 (зміна — перекомпіляція)
+export const lightSlots = (L) => { const B = bodiesOf(L); return Math.max(1, Math.min(3, B.suns.length + B.moons.length)); };
 export const pcIntensity = (k) => k < 1 ? k ** (1 / 2.2) : k;

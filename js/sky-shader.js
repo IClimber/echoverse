@@ -3,9 +3,10 @@
 // екранні, тож ^2,2). З ECO_BAKE (запікання): без дисків і ореолів сонць, місяців, зір, сяйва, спалаху; нижче обрію —
 // колір обрію × 0,3 (земля відбиває менше за небо); × eco_bakeK (калібрування сили розсіяного, js/scene.js).
 // Уніформи — через dev.scope (js/scene.js): uZen, uHor, uMain, uDusk (rgb, сила), uSun[3] (напрям, кутовий радіус),
-// uSunCol[3] (колір, яскравість), uMoon[3], uMoonCol[3] (rgb, 0), uNSun, uNMoon, uDay, uStars (яскравість, відтінок),
+// uSunCol[3] (колір, яскравість), uMoon[4] (місяці й компаньйон), uMoonCol[4] (rgb, тип: 0 — місяць, 1 — газовий гігант,
+// 2 — кам'яний, 3 — крижаний), uMoon2[4] (другий колір візерунка, затемнення 0…1), uNSun, uNMoon, uDay, uStars (яскравість, відтінок),
 // uCel (обертання зоряного неба), uRing (r0, r1, непрозорість, смуг), uRingCol, uPole, uCloud (хмарність, зсув x, y,
-// темність), uCloudCol, uFlash, uAur (напрям на полюс x, y, сила, час), uAurCol, eco_bakeK.
+// темність), uCloudCol, uFlash, uAur (напрям на овал x, y, сила, час), uAurCol, uAurE (висота середини сяйва), eco_bakeK.
 // Шум хмар і сяйва — value noise з хешем без синуса (Hoskins) за клітинкою mod 256, fBm з множником рівно 2: період 256,
 // тож зсуви часу й вітру CPU загортає за ним (js/scene.js) — у шейдер не йдуть великі числа. Був хеш fract(sin(·)·43758):
 // на аргументах у тисячі sin на GPU втрачає точність — сяйво й хмари розпадались на прямокутні панелі (11.10.2026)
@@ -18,8 +19,9 @@ uniform vec3 uMain;
 uniform vec4 uDusk;
 uniform vec4 uSun[3];
 uniform vec4 uSunCol[3];
-uniform vec4 uMoon[3];
-uniform vec4 uMoonCol[3];
+uniform vec4 uMoon[4];
+uniform vec4 uMoonCol[4];
+uniform vec4 uMoon2[4];
 uniform int uNSun;
 uniform int uNMoon;
 uniform float uDay;
@@ -33,6 +35,7 @@ uniform vec3 uCloudCol;
 uniform float uFlash;
 uniform vec4 uAur;
 uniform vec3 uAurCol;
+uniform float uAurE;
 uniform float eco_bakeK;
 float ecoHash(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 45.164))) * 43758.5453); }
 float ecoHashN(vec2 p) { vec3 q = fract(mod(p, 256.0).xyx * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
@@ -80,21 +83,10 @@ vec3 ecoSky(vec3 d) {
     }
   }
 #ifndef ECO_BAKE
-  for (int i = 0; i < 3; i++) {
-    if (i >= uNMoon) break;
-    float cs = dot(d, uMoon[i].xyz), s = uMoon[i].w;
-    if (cs > cos(s)) {
-      vec3 v = (d - uMoon[i].xyz * cs) / sin(s);
-      float l2 = dot(v, v);
-      vec3 n = normalize(v - uMoon[i].xyz * sqrt(max(0.0, 1.0 - l2)));
-      float lit = smoothstep(-0.05, 0.15, dot(n, uMain));
-      c = mix(c, uMoonCol[i].rgb * (0.14 + 0.86 * lit), smoothstep(1.0, 0.9, l2) * above * (1.0 - 0.45 * uDay));
-    }
-  }
   if (uAur.z > 0.01 && up > 0.0) {
     vec2 h = normalize(d.xy + 1e-5);
-    float face = smoothstep(-0.2, 0.7, dot(h, uAur.xy)), ang = atan(h.y, h.x);
-    float band = smoothstep(0.05, 0.2, up) * (1.0 - smoothstep(0.35, 0.75, up));
+    float face = mix(smoothstep(-0.2, 0.7, dot(h, uAur.xy)), 1.0, smoothstep(0.6, 0.95, uAurE)), ang = atan(h.y, h.x);
+    float band = smoothstep(uAurE - 0.3, uAurE - 0.1, up) * (1.0 - smoothstep(uAurE + 0.1, uAurE + 0.45, up)) * smoothstep(0.0, 0.08, up);
     float wave = ecoFbm(vec2(ang * 3.0 + uAur.w * 0.02, up * 1.5 + uAur.w * 0.01));
     float rays = 0.55 + 0.45 * sin(ang * 70.0 + ecoFbm(vec2(ang * 9.0, uAur.w * 0.05)) * 12.0);
     float a = face * band * smoothstep(0.42, 0.75, wave) * rays * uAur.z;
@@ -108,6 +100,8 @@ vec3 ecoSky(vec3 d) {
     cover = smoothstep(1.02 - uCloud.x * 0.75, 1.25 - uCloud.x * 0.7, f + 0.25) * smoothstep(0.0, 0.12, up);
   }
 #ifndef ECO_BAKE
+  // сонця, потім місяці й компаньйон поверх (затемнення: диск місяця перед сонцем непрозорий)
+  float sunA = 0.0;
   for (int i = 0; i < 3; i++) {
     if (i >= uNSun) break;
     float cs = dot(d, uSun[i].xyz), s = uSun[i].w, th2 = max(0.0, 2.0 * (1.0 - cs));
@@ -116,6 +110,23 @@ vec3 ecoSky(vec3 d) {
     float hide = 1.0 - cover * 0.85;
     c = mix(c, min(vec3(1.0), sc * 1.3 + 0.15), disk * above * hide);
     c += sc * uSunCol[i].a * (exp(-th2 / (s * s * 9.0)) * 0.45 * hide + exp(-th2 / (s * s * 90.0)) * 0.12) * above;
+    sunA = max(sunA, disk);
+  }
+  for (int i = 0; i < 4; i++) {
+    if (i >= uNMoon) break;
+    float cs = dot(d, uMoon[i].xyz), s = uMoon[i].w;
+    if (cs > cos(s)) {
+      vec3 v = (d - uMoon[i].xyz * cs) / sin(s);
+      float l2 = dot(v, v);
+      vec3 n = normalize(v - uMoon[i].xyz * sqrt(max(0.0, 1.0 - l2)));
+      float lit = smoothstep(-0.05, 0.15, dot(n, uMain)), ty = uMoonCol[i].a;
+      vec3 mc = uMoonCol[i].rgb;
+      if (ty > 0.5 && ty < 1.5) mc = mix(mc, uMoon2[i].rgb, smoothstep(0.3, 0.7, 0.5 + 0.5 * sin(dot(n, uPole) * 16.0 + ecoFbm(n.xy * 4.0 + n.z * 3.0) * 2.5)));
+      else if (ty > 1.5 && ty < 2.5) mc = mix(mc, uMoon2[i].rgb, smoothstep(0.48, 0.56, ecoFbm(n.xy * 3.0 + n.z * 5.0 + 3.0)));
+      else if (ty > 2.5) mc = mix(mc, uMoon2[i].rgb, 0.4 * smoothstep(0.45, 0.65, ecoFbm(n.xy * 6.0 + n.z * 2.0)));
+      mc = mix(mc, mc * vec3(0.35, 0.12, 0.08), uMoon2[i].a);
+      c = mix(c, mc * (0.14 + 0.86 * lit), smoothstep(1.0, 0.9, l2) * above * max(1.0 - 0.45 * uDay, sunA));
+    }
   }
 #endif
   if (cover > 0.0) {
@@ -140,8 +151,9 @@ uniform uMain: vec3f;
 uniform uDusk: vec4f;
 uniform uSun: array<vec4f, 3>;
 uniform uSunCol: array<vec4f, 3>;
-uniform uMoon: array<vec4f, 3>;
-uniform uMoonCol: array<vec4f, 3>;
+uniform uMoon: array<vec4f, 4>;
+uniform uMoonCol: array<vec4f, 4>;
+uniform uMoon2: array<vec4f, 4>;
 uniform uNSun: i32;
 uniform uNMoon: i32;
 uniform uDay: f32;
@@ -155,6 +167,7 @@ uniform uCloudCol: vec3f;
 uniform uFlash: f32;
 uniform uAur: vec4f;
 uniform uAurCol: vec3f;
+uniform uAurE: f32;
 uniform eco_bakeK: f32;
 fn ecoHash(p: vec3f) -> f32 { return fract(sin(dot(p, vec3f(12.9898, 78.233, 45.164))) * 43758.5453); }
 fn ecoHashN(p: vec2f) -> f32 {
@@ -222,24 +235,12 @@ fn ecoSky(d: vec3f) -> vec3f {
     }
   }
 #ifndef ECO_BAKE
-  for (var i = 0; i < 3; i++) {
-    if (i >= uniform.uNMoon) { break; }
-    let mo = uniform.uMoon[i];
-    let cs = dot(d, mo.xyz);
-    let s = mo.w;
-    if (cs > cos(s)) {
-      let v = (d - mo.xyz * cs) / sin(s);
-      let l2 = dot(v, v);
-      let n = normalize(v - mo.xyz * sqrt(max(0.0, 1.0 - l2)));
-      let lit = ecoSs(-0.05, 0.15, dot(n, uniform.uMain));
-      c = mix(c, uniform.uMoonCol[i].rgb * (0.14 + 0.86 * lit), ecoSs(1.0, 0.9, l2) * above * (1.0 - 0.45 * uniform.uDay));
-    }
-  }
   if (uniform.uAur.z > 0.01 && up > 0.0) {
     let h = normalize(d.xy + 1e-5);
-    let face = ecoSs(-0.2, 0.7, dot(h, uniform.uAur.xy));
+    let e0 = uniform.uAurE;
+    let face = mix(ecoSs(-0.2, 0.7, dot(h, uniform.uAur.xy)), 1.0, ecoSs(0.6, 0.95, e0));
     let ang = atan2(h.y, h.x);
-    let band = ecoSs(0.05, 0.2, up) * (1.0 - ecoSs(0.35, 0.75, up));
+    let band = ecoSs(e0 - 0.3, e0 - 0.1, up) * (1.0 - ecoSs(e0 + 0.1, e0 + 0.45, up)) * ecoSs(0.0, 0.08, up);
     let wave = ecoFbm(vec2f(ang * 3.0 + uniform.uAur.w * 0.02, up * 1.5 + uniform.uAur.w * 0.01));
     let rays = 0.55 + 0.45 * sin(ang * 70.0 + ecoFbm(vec2f(ang * 9.0, uniform.uAur.w * 0.05)) * 12.0);
     let a = face * band * ecoSs(0.42, 0.75, wave) * rays * uniform.uAur.z;
@@ -253,6 +254,8 @@ fn ecoSky(d: vec3f) -> vec3f {
     cover = ecoSs(1.02 - uniform.uCloud.x * 0.75, 1.25 - uniform.uCloud.x * 0.7, f + 0.25) * ecoSs(0.0, 0.12, up);
   }
 #ifndef ECO_BAKE
+  // сонця, потім місяці й компаньйон поверх (затемнення: диск місяця перед сонцем непрозорий)
+  var sunA = 0.0;
   for (var i = 0; i < 3; i++) {
     if (i >= uniform.uNSun) { break; }
     let su = uniform.uSun[i];
@@ -264,6 +267,27 @@ fn ecoSky(d: vec3f) -> vec3f {
     let hide = 1.0 - cover * 0.85;
     c = mix(c, min(vec3f(1.0), sc * 1.3 + 0.15), disk * above * hide);
     c += sc * uniform.uSunCol[i].a * (exp(-th2 / (s * s * 9.0)) * 0.45 * hide + exp(-th2 / (s * s * 90.0)) * 0.12) * above;
+    sunA = max(sunA, disk);
+  }
+  for (var i = 0; i < 4; i++) {
+    if (i >= uniform.uNMoon) { break; }
+    let mo = uniform.uMoon[i];
+    let cs = dot(d, mo.xyz);
+    let s = mo.w;
+    if (cs > cos(s)) {
+      let v = (d - mo.xyz * cs) / sin(s);
+      let l2 = dot(v, v);
+      let n = normalize(v - mo.xyz * sqrt(max(0.0, 1.0 - l2)));
+      let lit = ecoSs(-0.05, 0.15, dot(n, uniform.uMain));
+      let ty = uniform.uMoonCol[i].a;
+      let m2 = uniform.uMoon2[i];
+      var mc = uniform.uMoonCol[i].rgb;
+      if (ty > 0.5 && ty < 1.5) { mc = mix(mc, m2.rgb, ecoSs(0.3, 0.7, 0.5 + 0.5 * sin(dot(n, uniform.uPole) * 16.0 + ecoFbm(n.xy * 4.0 + n.z * 3.0) * 2.5))); }
+      else if (ty > 1.5 && ty < 2.5) { mc = mix(mc, m2.rgb, ecoSs(0.48, 0.56, ecoFbm(n.xy * 3.0 + n.z * 5.0 + 3.0))); }
+      else if (ty > 2.5) { mc = mix(mc, m2.rgb, 0.4 * ecoSs(0.45, 0.65, ecoFbm(n.xy * 6.0 + n.z * 2.0))); }
+      mc = mix(mc, mc * vec3f(0.35, 0.12, 0.08), m2.a);
+      c = mix(c, mc * (0.14 + 0.86 * lit), ecoSs(1.0, 0.9, l2) * above * max(1.0 - 0.45 * uniform.uDay, sunA));
+    }
   }
 #endif
   if (cover > 0.0) {

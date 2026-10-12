@@ -386,7 +386,8 @@ test('атмосфера й погода: біля старту — придат
   assert.equal(localWeather(L, D, false, false, true).type, 'dust');
   assert.equal(localWeather(L, D, false, false, false).type, null);              // пилова буря — лише в сухому
   // без повітря — чорне небо із зорями вдень
-  const st = skyState(L, (0.5 - L.sky.off + 1) % 1 * L.sky.dayMin * 60), sv = applyWeather(skyState(L, (0.5 - L.sky.off + 1) % 1 * L.sky.dayMin * 60), { ...L, air: { ...L.air, pressure: 0.02 } }, { ...W, precip: 0, clouds: 0, dim: 0 }, 0);
+  const noon = (0.5 - L.sky.off + 1) % 1 * L.sky.dayMin * 60 / L.phys.time, Lv = { ...L, air: { ...L.air, pressure: 0, vacuum: true } };
+  const st = skyState(L, noon), sv = applyWeather(skyState(Lv, noon), Lv, { ...W, precip: 0, clouds: 0.5, dim: 0 }, 0);
   assert.ok(sv.zenith[2] < st.zenith[2] * 0.4 && sv.stars > 0.5 && !sv.cloud, 'без повітря');
   assert.ok(W_STORM === 3);
 });

@@ -18,7 +18,7 @@ import { CS, SEC, B_LIQ, B_MAGMA, solidB, BLOCK_NAMES } from './gen/chunk.js';
 import { LEVEL } from './iso.js';
 import { debugText, fmtN } from './debug.js';
 import { animate, VIEW_KEYS } from './anim.js';
-import { clockStr, skyState, lightsOf } from './sky.js';
+import { clockStr, skyState, lightsOf, lightSlots } from './sky.js';
 import { weatherAt, localWeather, areaClimate } from './weather.js';
 import { createCamera, rotate, wheel, smooth, moveBasis, camHead, camCollide, camDist, facing, setYaw, basis, pitchOf, setViewChunks, setLod, setFloraNear, ISO, THIRD, FIRST, NEXT, LIMITS, HEAD, EYE, EYE_OF, HEAD_OF, VIEW_R } from './camera.js';
 import { createStreamer, visibleMissing } from './stream.js';
@@ -93,7 +93,7 @@ function boot(renderer) {
     setPhase(ph) { const c = clockFor(ph); if (c === null) return false; g.clock = c; return true; },
     // Фаза 0…0,99 з найбільшою кількістю напрямлених світел (за рівності — найсильніших), ставить її
     bestPhase() {
-      const L = g.world.laws(g.d, g.n), k = Math.max(1, Math.min(3, L.sky.suns.length + L.sky.moons.length));
+      const L = g.world.laws(g.d, g.n), k = lightSlots(L);
       let best = 0, bn = -1, bw = -1;
       for (let i = 0; i < 100; i++) {
         const c = clockFor(i / 100);
@@ -104,7 +104,32 @@ function boot(renderer) {
       eco.setPhase(best);
       return { phase: best, lights: bn };
     },
-    // Погода для замірів: тип опадів ('rain' | 'snow' | 'dust' | 'acid'), сила 1; null — як є
+    // Знайти всесвіт за умовою pred(L) (закони) на глибині d від номера from (уперед, до count) і стрибнути туди: номер чи null
+    findLaw(pred, { d = g.d, from = g.n + 1, count = 200000 } = {}) {
+      for (let i = 0; i < count; i++) {
+        const n = from + i;
+        if (pred(g.world.laws(d, n))) { g.dev.start([d, n], 'jumpNext'); return n; }
+      }
+      return null;
+    },
+    // Годинник на фазу року ph (0…1; 0,25 — літо північної півкулі), фаза доби — та сама
+    setYear(ph) {
+      const L = g.world.laws(g.d, g.n), S = L.sky, Y = S.year, tk = L.phys ? L.phys.time : 1;
+      if (!Y || S.lock) return false;
+      const day = S.dayMin * 60 / tk, ph0 = clockFor(0.5) ?? 0, year = Y.min * 60 / tk, p = ((ph - Y.off) % 1 + 1) % 1;
+      g.clock = Math.round((p * year - ph0) / day) * day + ph0;
+      return true;
+    },
+    // Найближче (до 400 діб уперед) затемнення сонця місяцем чи компаньйоном (частка ≥ min): годинник — на нього
+    eclipse(min = 0.6) {
+      const L = g.world.laws(g.d, g.n), step = L.sky.dayMin * 60 / (L.phys ? L.phys.time : 1) / 400;
+      for (let c = g.clock, end = g.clock + step * 400 * 400; c < end; c += step) {
+        const s = skyState(L, c);
+        if (s.suns[0].eclipse >= min && s.suns[0].dir[2] > 0.2) { g.clock = c; return s.suns[0].eclipse; }
+      }
+      return null;
+    },
+    // Погода для замірів: тип опадів ('rain' | 'snow' | 'dust' | 'acid'), сила 1; 'clear' — ясно; null — як є
     weather(type) { wOver = type === undefined ? null : type; return wOver; },
     // Найближча (до 48 клітинок) точка, де можна стати, з укриттям вище голови ≥ 4 одиниць (печера): гравець — туди
     findCave() {
@@ -763,11 +788,12 @@ function boot(renderer) {
 
   function draw(dt, now) {
     const ch = g.dev.charge, me = g.me, L = g.world.laws(g.d, g.n);
-    const W = weatherAt(L, g.clock);
+    let W = weatherAt(L, g.clock);
+    if (wOver === 'clear') W = { ...W, kind: 0, clouds: 0, vis: 1, precip: 0, dust: 0, dim: 0, flash: 0 };
     if (me.placed) clim = areaClimate(L, me.x, me.y, clim);
     const C = me.placed && clim;
     let loc = localWeather(L, W, !!C && C.cold, !!C && C.desert, !!C && C.arid);
-    if (wOver !== null) loc = { ...loc, type: wOver || null, k: 1 };
+    if (wOver !== null) loc = { ...loc, type: wOver === 'clear' ? null : wOver || null, k: wOver === 'clear' ? 0 : 1 };
     g.loc = loc;                                     // опади тут (мокра стіна — лазіння)
     // голова — туди, куди погляд: перша й третя особа — камера (на стіні тіло дивиться в стіну), згори — на ціль під курсором
     me.carry = !!g.carry;

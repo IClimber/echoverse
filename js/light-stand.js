@@ -112,8 +112,8 @@ export async function runLight() {
   const LG = createLights(G, { shadows: QS.get('shadows') || 'pcf3' });
   LG.setDirectionalCount(1);
   const sc = dev.scope, U = (k, v) => sc.resolve(k).setValue(v);
-  const Z12 = new Float32Array(12);
-  U('uMoon[0]', Z12); U('uMoonCol[0]', Z12); U('uNMoon', 0); U('uNSun', 1); U('uStars', [0, 0]);
+  const Z16 = new Float32Array(16);
+  U('uMoon[0]', Z16); U('uMoonCol[0]', Z16); U('uMoon2[0]', Z16); U('uNMoon', 0); U('uAurE', 0.4); U('uNSun', 1); U('uStars', [0, 0]);
   U('uCel', new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1])); U('uRing', [0, 0, 0, 0]); U('uRingCol', [0, 0, 0]); U('uPole', [0, 0, 1]);
   U('uCloud', [0, 0, 0, 0]); U('uCloudCol', [1, 1, 1]); U('uFlash', 0); U('uAur', [0, 1, 0, 0]); U('uAurCol', [0, 0, 0]);
 

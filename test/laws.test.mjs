@@ -113,3 +113,54 @@ test('похолодання з висотою: 52 °C/км при 1 g, без �
   for (let n = 300; n < 200000; n += 13) { const V = lawsOf(hashStr('test'), 3, n); if (V.air.vacuum) { assert.equal(V.clim.lapse, 0); return; } }
   assert.fail('вакуум не трапився');
 });
+
+// Закони неба з одного всесвіту з підмінами (bodiesOf кешує за об'єктом — кожен виклик новий)
+const skyL = (sky, extra = {}) => { const L = lawsOf(hashStr('test'), 0, 0); return { ...L, sky: { ...L.sky, ...sky }, ...extra }; };
+
+test('небо: сезони (полудень сонцестояння на 45°), довший літній день, полярні день і ніч, захоплене сонце стоїть', async () => {
+  const { skyState } = await import('../js/sky.js');
+  const one = (lat, yoff, off = 0.5) => skyL({ lat: lat * PI / 180, off, year: { min: 1e9, off: yoff, obliq: 23 * PI / 180 }, lock: false });
+  const el = (L) => Math.asin(skyState(L, 0).suns[0].dir[2]) * 180 / PI;
+  near(el(one(45, 0.25)), 68, 1, 'полудень улітку'); near(el(one(45, 0.75)), 22, 1, 'полудень узимку');
+  const dayFrac = (lat, yoff) => { let n = 0; for (let i = 0; i < 200; i++) n += el(one(lat, yoff, i / 200)) > 0; return n / 200; };
+  assert.ok(dayFrac(45, 0.25) > 0.6 && dayFrac(45, 0.75) < 0.4, `день улітку ${dayFrac(45, 0.25)}, узимку ${dayFrac(45, 0.75)}`);
+  assert.equal(dayFrac(80, 0.25), 1); assert.equal(dayFrac(80, 0.75), 0);
+  const Lk = skyL({ lock: true, off: 0.6 });
+  assert.deepEqual(skyState(Lk, 0).suns[0].dir, skyState(Lk, 5000).suns[0].dir);
+});
+
+test('небо: затемнення — частка диска, повне — 2 % світла; місяць у тіні планети темніє', async () => {
+  const { skyState, covered } = await import('../js/sky.js');
+  near(covered(0.05, 0.05, 0), 1, 1e-9, 'повне'); near(covered(0.05, 5, 5), 0.5, 0.01, 'половина'); assert.equal(covered(0.05, 0.05, 0.11), 0);
+  const L0 = lawsOf(hashStr('test'), 0, 0), m = L0.sky.moons[0];
+  const big = { ...m, Rkm: m.Rkm * 3, dec: 0, off: 0, period: 30 };
+  const Le = skyL({ moons: [big], off: 0.5, year: { ...L0.sky.year, off: 0 } });
+  const s = skyState(Le, 0);
+  assert.ok(s.suns[0].eclipse === 1 && s.suns[0].bright <= 0.02 + 1e-9, `затемнення ${s.suns[0].eclipse}`);
+  const Ll = skyL({ moons: [{ ...big, off: 0.5 }], off: 0.5, year: { ...L0.sky.year, off: 0 } });
+  assert.ok(skyState(Ll, 0).moons[0].eclipse > 0.9, 'місячне затемнення в повню біля вузла');
+});
+
+test('компаньйон: видимий радіус з припливної сили, світить уночі, займає слот світла', async () => {
+  const { bodiesOf, lightSlots } = await import('../js/sky.js');
+  const L = skyL({}, { comp: { f: 0.05, type: 0, rhoR: 0.2, Rr: 8, inc: 0.1, albedo: 0.5, off: 0.3, hue: 0.4, hue2: 0.6 } });
+  const B = bodiesOf(L), C = B.moons[B.moons.length - 1];
+  near(C.size, Math.asin(Math.cbrt(0.05 / 0.4)), 1e-9, 'α'); assert.equal(C.comp, 1);
+  assert.equal(lightSlots(L), Math.min(3, B.suns.length + B.moons.length));
+});
+
+test('оптика: Земля — блакитне небо й помаранчевий захід; без повітря — чорне; густе — біліше; червона зоря — тепліше світло', async () => {
+  const { skyOptics } = await import('../js/optics.js');
+  const { starColor } = await import('../js/sky.js');
+  const air = (P, kind = 0, ta = 0.12) => ({ air: { pressure: P, comp: { CO2: 0.0004 }, tauA: ta, hazeKind: kind, vacuum: P < 0.002 }, grav: 1 });
+  const E = skyOptics(air(1), starColor(5772), PI / 3), Es = skyOptics(air(1), starColor(5772), 2 * PI / 180);
+  assert.deepEqual(E.zen.map(Math.round), [70, 130, 220]);
+  assert.ok(Es.glow[0] > Es.glow[1] * 1.4 && Es.glow[1] > Es.glow[2] * 2, `захід ${Es.glow}`);
+  assert.ok(Math.max(...skyOptics(air(0), starColor(5772), PI / 3).zen) < 1, 'вакуум');
+  const T = skyOptics(air(5, 0, 0.2), starColor(5772), PI / 3), sat = (c) => (Math.max(...c) - Math.min(...c)) / Math.max(...c);
+  assert.ok(sat(T.zen) < sat(E.zen), 'густе — менш насичене');
+  const R = skyOptics(air(1), starColor(3000), PI / 3);
+  assert.ok(R.sun[2] / R.sun[0] < E.sun[2] / E.sun[0] * 0.6, 'червона зоря');
+  const M = skyOptics(air(0.006, 3, 0.5), starColor(5772), 2 * PI / 180);
+  assert.ok(M.glow[2] > M.glow[0], 'пиловий захід — блакитний');
+});

@@ -19,7 +19,7 @@ import { SEA, MAX_AMP, L_LAVA } from './universe.js';
 import { liquidVis } from './collision.js';
 import { figureParts } from './gen/mesh.js';
 import { poseMatrices, viewArms } from './anim.js';
-import { skyState, applyWeather, lightsOf, pcIntensity } from './sky.js';
+import { skyState, applyWeather, lightsOf, lightSlots, pcIntensity } from './sky.js';
 import { ISO, FIRST, CAM_R, fovOf, VIEW_R, FAR_R, SEAM, viewProj, isoRadius, project, basis, aabbInView, aabbInside, LOD_R, LOD_CAP, LOD_ON, lodOf, keepLod, colDist, FLORA_NEAR, FLORA_FADE, FLORA_THIN } from './camera.js';
 import { regionOf, RS, RW, RH, PO, PQ } from './gen/pack.js';
 import { ck } from './world.js';
@@ -406,17 +406,17 @@ export async function createScene(canvas, settings = {}) {
   // ---- небо: уніформи (sky-shader.js) через dev.scope ----
   const sc = dev.scope, U = (k) => sc.resolve(k);
   const wrapN = (v) => ((v % 256) + 256) % 256;      // період шуму неба (sky-shader.js): зсув хмар — без великих чисел
-  const SU = Object.fromEntries(['uZen', 'uHor', 'uMain', 'uDusk', 'uSun[0]', 'uSunCol[0]', 'uMoon[0]', 'uMoonCol[0]', 'uNSun', 'uNMoon', 'uDay', 'uStars', 'uCel', 'uRing', 'uRingCol', 'uPole', 'uCloud', 'uCloudCol', 'uFlash', 'uAur', 'uAurCol', 'eco_bakeK'].map((k) => [k, U(k)]));
-  const sun4 = new Float32Array(12), sunC = new Float32Array(12), moon4 = new Float32Array(12), moonC = new Float32Array(12), cel = new Float32Array(9);
+  const SU = Object.fromEntries(['uZen', 'uHor', 'uMain', 'uDusk', 'uSun[0]', 'uSunCol[0]', 'uMoon[0]', 'uMoonCol[0]', 'uMoon2[0]', 'uNSun', 'uNMoon', 'uDay', 'uStars', 'uCel', 'uRing', 'uRingCol', 'uPole', 'uCloud', 'uCloudCol', 'uFlash', 'uAur', 'uAurCol', 'uAurE', 'eco_bakeK'].map((k) => [k, U(k)]));
+  const sun4 = new Float32Array(12), sunC = new Float32Array(12), moon4 = new Float32Array(16), moonC = new Float32Array(16), moon2 = new Float32Array(16), cel = new Float32Array(9);
   const c3 = (v) => [v[0] / 255, v[1] / 255, v[2] / 255];
   function setSky(st, bakeK) {
     SU.uZen.setValue(c3(st.zenith)); SU.uHor.setValue(c3(st.horizon)); SU.uMain.setValue([...st.suns[0].dir]);
     SU.uDusk.setValue([...c3(st.duskCol), st.dusk]);
-    sun4.fill(0); sunC.fill(0); moon4.fill(0); moonC.fill(0);
+    sun4.fill(0); sunC.fill(0); moon4.fill(0); moonC.fill(0); moon2.fill(0);
     st.suns.forEach((s, i) => { sun4.set([...s.dir, s.size], i * 4); sunC.set([...c3(s.col), s.bright], i * 4); });
-    st.moons.forEach((m, i) => { moon4.set([...m.dir, m.size], i * 4); moonC.set(c3(m.col), i * 4); });
-    SU['uSun[0]'].setValue(sun4); SU['uSunCol[0]'].setValue(sunC); SU['uMoon[0]'].setValue(moon4); SU['uMoonCol[0]'].setValue(moonC);
-    SU.uNSun.setValue(st.suns.length); SU.uNMoon.setValue(st.moons.length);
+    st.moons.forEach((m, i) => { if (i > 3) return; moon4.set([...m.dir, m.size], i * 4); moonC.set([...c3(m.col), m.comp || 0], i * 4); moon2.set([...c3(m.col2 || m.col), m.eclipse || 0], i * 4); });
+    SU['uSun[0]'].setValue(sun4); SU['uSunCol[0]'].setValue(sunC); SU['uMoon[0]'].setValue(moon4); SU['uMoonCol[0]'].setValue(moonC); SU['uMoon2[0]'].setValue(moon2);
+    SU.uNSun.setValue(st.suns.length); SU.uNMoon.setValue(Math.min(4, st.moons.length));
     SU.uDay.setValue(st.day); SU.uStars.setValue([st.stars, st.starHue]);
     cel.set(st.cel); SU.uCel.setValue(cel);
     const rg = st.rings;
@@ -425,7 +425,7 @@ export async function createScene(canvas, settings = {}) {
     const cl = st.cloud || { k: 0, off: [0, 0], dark: 0, col: [255, 255, 255] };
     SU.uCloud.setValue([cl.k, wrapN(cl.off[0]), wrapN(cl.off[1]), cl.dark]); SU.uCloudCol.setValue(c3(cl.col)); SU.uFlash.setValue(st.flash || 0);
     const au = st.aurora || { dir: [0, 1], k: 0, t: 0, col: [0, 0, 0] };
-    SU.uAur.setValue([au.dir[0], au.dir[1], au.k, au.t % 25600]); SU.uAurCol.setValue(c3(au.col));   // час: ×0,01 / 0,02 / 0,05 — кратні періоду шуму 256
+    SU.uAur.setValue([au.dir[0], au.dir[1], au.k, au.t % 25600]); SU.uAurCol.setValue(c3(au.col)); SU.uAurE.setValue(au.e0 ?? 0.4);   // час: ×0,01 / 0,02 / 0,05 — кратні періоду шуму 256
     SU.eco_bakeK.setValue(bakeK);
   }
   const lin = (c) => (c / 255) ** 2.2, lum = (c) => 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]);
@@ -550,7 +550,7 @@ export async function createScene(canvas, settings = {}) {
         tex = t2;
         M.setBlend(mats.liq, laws.liquid.alpha); M.setBlend(mats.liqR, laws.liquid.alpha);
       }
-      const slots = Math.max(1, Math.min(3, laws.sky.suns.length + laws.sky.moons.length));
+      const slots = lightSlots(laws);
       if (fresh) { lawsKey = tk; LG.setDirectionalCount(slots); }
       const lt = (st.clock || 0) * (laws.phys ? laws.phys.time : 1) % 3000;
 
