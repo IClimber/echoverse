@@ -21,7 +21,7 @@ import { LEVEL } from './iso.js';
 import { debugText, fmtN } from './debug.js';
 import { animate, VIEW_KEYS } from './anim.js';
 import { clockStr, skyState, lightsOf, lightSlots } from './sky.js';
-import { weatherAt, localWeather, areaClimate } from './weather.js';
+import { weatherAt, localWeather, areaClimate, reliefAt, windHeightK, lightningNear, meteorsAt } from './weather.js';
 import { createCamera, rotate, wheel, smooth, moveBasis, camHead, camCollide, camDist, facing, setYaw, basis, pitchOf, setViewChunks, setLod, setFloraNear, ISO, THIRD, FIRST, NEXT, LIMITS, HEAD, EYE, EYE_OF, HEAD_OF, VIEW_R } from './camera.js';
 import { createStreamer, visibleMissing } from './stream.js';
 import { aimRay, isoAim, screenRay, REACH } from './aim.js';
@@ -522,6 +522,15 @@ function boot(renderer) {
 
   // Тіла біля гравця (ширяюче каміння): крок фізики; гравець, що стоїть на тілі, тисне його вагою й їде разом з ним;
   // тіло, у яке йде гравець, штовхається (легке — відкотиться, важке — ні)
+  // Вітер біля гравця: погода в його точці (поле, weather.js) × висота й відкритість (середня висота поверхні в колі
+  // 48 м — після зсуву > 8 м); hk — множник висоти гравця (тіла — свій)
+  function windHere(L) {
+    const me = g.me;
+    if (!g.zbarAt || g.zbarAt.L !== L || Math.hypot(me.x - g.zbarAt.x, me.y - g.zbarAt.y) > 8) { g.zbar = reliefAt(L, me.x, me.y); g.zbarAt = { L, x: me.x, y: me.y }; }
+    const W = g.wPrev = weatherAt(L, g.clock, me.x, me.y, g.wPrev && g.wPrev.L === L ? g.wPrev : null), hk = windHeightK(me.z, g.zbar);
+    W.L = L;
+    return wOver === 'clear' ? { ...W, wind: [0, 0], windK: 0, hk: 1 } : { ...W, wind: [W.wind[0] * hk, W.wind[1] * hk], windK: W.windK * hk, hk };
+  }
   // Висота ґрунту (верх стовпця) — для зворотних плям тяжіння (worldphys.js)
   const groundZ = (x, y) => g.world.topAt(g.d, g.n, Math.floor(x), Math.floor(y));
   function simBodies(dt, L, W) {
@@ -541,7 +550,7 @@ function boot(renderer) {
     for (const b of near) {
       const ph = physAt3(L, b.x, b.y, b.z - b.hz, g.clock, groundZ), env = { g: ph.g, g0: ph.g0, vT: ph.vT0, tilt: ph.tilt, rev: ph.rev, bounce: L.phys.bounce, friction: L.phys.friction, wind: W.wind };
       if (b.sleep && !windMoves(b, env)) continue;                // спить і вітер не зрушить — не рахуємо
-      const lee = windShelter(P, b.x, b.y, b.z - b.hz, W.wind);
+      const lee = windShelter(P, b.x, b.y, b.z - b.hz, W.wind) * windHeightK(b.z - b.hz, g.zbar ?? b.z) / (W.hk || 1);
       env.wind = [W.wind[0] * lee, W.wind[1] * lee];
       stepBody(b, dt, P, env);
     }
@@ -710,7 +719,7 @@ function boot(renderer) {
       const sprint = sprintHeld();
       g.jumpLatch = g.jumpLatch || jump;
       for (let s = physT.advance(dt); s > 0; s--) {
-        const L = g.world.laws(g.d, g.n), W = weatherAt(L, g.clock);   // вітер — сила опору (густина повітря — у vT)
+        const L = g.world.laws(g.d, g.n), W = windHere(L);   // вітер — сила опору (густина повітря — у vT)
         me.px = me.visX ?? me.x; me.py = me.visY ?? me.y; me.pv = me.vis ?? me.z; g.stamp++;
         g.ph = physAt3(L, me.x, me.y, me.z, g.clock, groundZ);
         const probe = g.world.probe(g.d, g.n);
@@ -805,8 +814,12 @@ function boot(renderer) {
 
   function draw(dt, now) {
     const ch = g.dev.charge, me = g.me, L = g.world.laws(g.d, g.n);
-    let W = weatherAt(L, g.clock);
+    let W = me.placed ? windHere(L) : weatherAt(L, g.clock, me.x, me.y);
     if (wOver === 'clear') W = { ...W, kind: 0, clouds: 0, vis: 1, precip: 0, dust: 0, dim: 0, flash: 0 };
+    // блискавка поблизу (до 3 км від камери): спалах неба 1/(1 + (d/800)²), гасне за 0,25 с; розряд і світло — сцена
+    const bolt = wOver === 'clear' ? null : lightningNear(L, g.clock, g.cam[0], g.cam[1]);
+    if (bolt) { const d = Math.hypot(bolt.x - g.cam[0], bolt.y - g.cam[1]); W = { ...W, flash: bolt.k * (1 - (g.clock - bolt.t0) / 0.25) / (1 + (d / 800) ** 2) }; }
+    g.bolt = bolt;
     if (me.placed) clim = areaClimate(L, me.x, me.y, clim);
     const C = me.placed && clim;
     if (me.placed) { g.temp = tempAt(L, me.x, me.y, me.z, g.clock, W); g.snow = snowy(g.temp, g.snow); }   // сніг чи дощ — за температурою тут
@@ -834,7 +847,7 @@ function boot(renderer) {
     const fx = me.ix ?? me.x, fy = me.iy ?? me.y, fz = me.iv ?? me.vis ?? me.z;
     const sk = renderer.draw({
       lines, under: g.under ? L.liquid : null, skyOpen: (x, y, z) => g.world.skyOpen(g.d, g.n, x, y, z),
-      camera, target: g.cam, view: g.view, laws: L, far: g.far, clock: g.clock, bodies, aim: g.aimFx === false ? null : g.aim, weather: { W: loc.W, loc }, rain: me.placed && loc.type ? rainMap(now) : null,
+      camera, target: g.cam, view: g.view, laws: L, far: g.far, clock: g.clock, bodies, aim: g.aimFx === false ? null : g.aim, weather: { W: loc.W, loc }, bolt: g.bolt, rain: me.placed && loc.type ? rainMap(now) : null,
       // вигляд гравця: положення — інтерпольоване, стан — усе, що читають руки першої особи (VIEW_KEYS у anim.js)
       me: me.placed ? { ...Object.fromEntries(VIEW_KEYS.map((k) => [k, me[k]])), x: fx, y: fy, z: fz, anim, ao: g.world.skyOpen(g.d, g.n, fx, fy, fz + 0.5) } : null,
     });

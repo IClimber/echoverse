@@ -12,6 +12,8 @@ import { createLights, SHADOW_D } from './engine/graphics/lights.js';
 import { floatMesh } from './engine/graphics/meshes.js';
 import { createInstances } from './engine/graphics/instances.js';
 import { createParticleVolume, setShelter } from './engine/graphics/particles.js';
+import { createBolts } from './engine/graphics/bolts.js';
+import { cloudsAt, meteorsAt, boltSegs } from './weather.js';
 import { SKY_GLSL, SKY_WGSL } from './sky-shader.js';
 import { LEVEL, S } from './iso.js';
 import { CS } from './gen/chunk.js';
@@ -406,7 +408,7 @@ export async function createScene(canvas, settings = {}) {
   // ---- небо: уніформи (sky-shader.js) через dev.scope ----
   const sc = dev.scope, U = (k) => sc.resolve(k);
   const wrapN = (v) => ((v % 256) + 256) % 256;      // період шуму неба (sky-shader.js): зсув хмар — без великих чисел
-  const SU = Object.fromEntries(['uZen', 'uHor', 'uMain', 'uDusk', 'uSun[0]', 'uSunCol[0]', 'uMoon[0]', 'uMoonCol[0]', 'uMoon2[0]', 'uNSun', 'uNMoon', 'uDay', 'uStars', 'uCel', 'uRing', 'uRingCol', 'uPole', 'uCloud', 'uCloudCol', 'uFlash', 'uAur', 'uAurCol', 'uAurE', 'eco_bakeK'].map((k) => [k, U(k)]));
+  const SU = Object.fromEntries(['uZen', 'uHor', 'uMain', 'uDusk', 'uSun[0]', 'uSunCol[0]', 'uMoon[0]', 'uMoonCol[0]', 'uMoon2[0]', 'uNSun', 'uNMoon', 'uDay', 'uStars', 'uCel', 'uRing', 'uRingCol', 'uPole', 'uCloud', 'uCloudCol', 'uFlash', 'uAur', 'uAurCol', 'uAurE', 'uCloudC', 'uCloudMap', 'uMet[0]', 'uMetB[0]', 'uNMet', 'eco_bakeK'].map((k) => [k, U(k)]));
   const sun4 = new Float32Array(12), sunC = new Float32Array(12), moon4 = new Float32Array(16), moonC = new Float32Array(16), moon2 = new Float32Array(16), cel = new Float32Array(9);
   const c3 = (v) => [v[0] / 255, v[1] / 255, v[2] / 255];
   function setSky(st, bakeK) {
@@ -427,6 +429,38 @@ export async function createScene(canvas, settings = {}) {
     const au = st.aurora || { dir: [0, 1], k: 0, t: 0, col: [0, 0, 0] };
     SU.uAur.setValue([au.dir[0], au.dir[1], au.k, au.t % 25600]); SU.uAurCol.setValue(c3(au.col)); SU.uAurE.setValue(au.e0 ?? 0.4);   // час: ×0,01 / 0,02 / 0,05 — кратні періоду шуму 256
     SU.eco_bakeK.setValue(bakeK);
+  }
+  // Карта хмар неба (М8): хмарність погоди 64×64 клітинки на ±6 км навколо камери, оновлюється частинами (2 рядки за
+  // кадр) не частіше разу на секунду чи після зсуву > 200 м; новий всесвіт — одразу вся
+  const CM = 64, CMS = 12000, CMH = 800, cmBuf = new Uint8Array(CM * CM);
+  const cmTex = new pc.Texture(dev, { width: CM, height: CM, format: pc.PIXELFORMAT_R8, mipmaps: false, minFilter: pc.FILTER_LINEAR, magFilter: pc.FILTER_LINEAR, addressU: pc.ADDRESS_CLAMP_TO_EDGE, addressV: pc.ADDRESS_CLAMP_TO_EDGE });
+  SU.uCloudMap.setValue(cmTex);
+  let cmJob = null, cmRow = CM, cmAt = { L: null, x: 0, y: 0, t: -1e9 };
+  function cloudMap(L, clock, x, y, now) {
+    if (cmRow >= CM && (L !== cmAt.L || now - cmAt.t > 1000 || Math.hypot(x - cmAt.x, y - cmAt.y) > 200)) { cmJob = { L, clock, x, y, t: now }; cmRow = 0; }
+    if (cmRow < CM) {
+      const J = cmJob, last = J.L !== cmAt.L ? CM : Math.min(CM, cmRow + 2);
+      for (; cmRow < last; cmRow++) for (let i = 0; i < CM; i++)
+        cmBuf[cmRow * CM + i] = Math.round(255 * cloudsAt(J.L, J.clock, J.x + ((i + 0.5) / CM - 0.5) * CMS, J.y + ((cmRow + 0.5) / CM - 0.5) * CMS));
+      if (cmRow >= CM) { const a = cmTex.lock(); a.set(cmBuf); cmTex.unlock(); cmAt = J; }
+    }
+    SU.uCloudC.setValue([x - cmAt.x, y - cmAt.y, CMS, CMH]);
+  }
+  // Метеори (до 4) і розряд блискавки з його світлом (точкове без тіні)
+  const met4 = new Float32Array(16), metB = new Float32Array(16), bolts = createBolts(G);
+  let boltLight = null;
+  function meteors(L, clock, night) {
+    const M = meteorsAt(L, clock, night);
+    met4.fill(0); metB.fill(0);
+    M.forEach((m, i) => { met4.set([...m.a, m.t], i * 4); metB.set([...m.b, m.k], i * 4); });
+    SU['uMet[0]'].setValue(met4); SU['uMetB[0]'].setValue(metB); SU.uNMet.setValue(M.length);
+  }
+  function bolt(B, clock, eye) {
+    if (!B) { bolts.hide(); if (boltLight) boltLight.set({ enabled: false }); return; }
+    const k = Math.max(0, 1 - (clock - B.t0) / 0.25) * B.k;
+    bolts.show(boltSegs(B), eye, k);
+    if (!boltLight) boltLight = LG.addLight({ type: 'omni', pos: [B.x, B.y, B.z + 60], color: [0.8, 0.86, 1], intensity: 0, range: 500, castShadows: false, moving: true });
+    boltLight.set({ pos: [B.x, B.y, B.z + 60], intensity: 6 * k, enabled: true });
   }
   const lin = (c) => (c / 255) ** 2.2, lum = (c) => 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]);
   const sig = new Float32Array(12);
@@ -582,6 +616,9 @@ export async function createScene(canvas, settings = {}) {
       LG.setShadowDistance(iso ? 400 + view.rad : SHADOW_D);
       const bakeK = Lt.amb / Math.max(1e-4, 0.6 * lum(sk.zenith) + 0.4 * lum(sk.horizon));
       setSky(sk, bakeK);
+      cloudMap(laws, st.clock || 0, t[0] + view.eye[0], t[1] + view.eye[1], performance.now());
+      meteors(laws, st.clock || 0, 1 - sk.day);
+      bolt(st.bolt, st.clock || 0, [t[0] + view.eye[0], t[1] + view.eye[1], t[2] + view.eye[2]]);
       const cl = sk.cloud ? sk.cloud.k : 0, d0 = sk.suns[0].dir;
       sig.set([d0[0], d0[1], d0[2], ...c3(sk.zenith), ...c3(sk.horizon), sk.dusk, cl, Math.log2(bakeK + 1e-6) / 10]);
       sky.maybeBake(sig, fresh);

@@ -85,6 +85,7 @@ function axes(L) {
   const e = [Math.cos(az), Math.sin(az), 0], nn = [-Math.sin(az), Math.cos(az), 0];
   return { e, nn, lat, pole: [nn[0] * Math.cos(lat), nn[1] * Math.cos(lat), Math.sin(lat)] };
 }
+export const skyAxes = (L) => axes(L);
 // Напрям на світило з годинним кутом h (0 — найвище) і склоненням dec
 function bodyDir(A, h, dec) {
   const ce = -Math.cos(dec) * Math.sin(h), cn = Math.sin(dec) * Math.cos(A.lat) - Math.cos(dec) * Math.cos(h) * Math.sin(A.lat);

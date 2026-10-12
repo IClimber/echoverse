@@ -6,7 +6,9 @@
 // uSunCol[3] (колір, яскравість), uMoon[4] (місяці й компаньйон), uMoonCol[4] (rgb, тип: 0 — місяць, 1 — газовий гігант,
 // 2 — кам'яний, 3 — крижаний), uMoon2[4] (другий колір візерунка, затемнення 0…1), uNSun, uNMoon, uDay, uStars (яскравість, відтінок),
 // uCel (обертання зоряного неба), uRing (r0, r1, непрозорість, смуг), uRingCol, uPole, uCloud (хмарність, зсув x, y,
-// темність), uCloudCol, uFlash, uAur (напрям на овал x, y, сила, час), uAurCol, uAurE (висота середини сяйва), eco_bakeK.
+// темність), uCloudCol, uFlash, uAur (напрям на овал x, y, сила, час), uAurCol, uAurE (висота середини сяйва), uCloudC
+// (зсув камери від центру карти хмар x, y, розмір карти, висота шару хмар над камерою; м), uCloudMap (хмарність 64×64),
+// uMet[4] / uMetB[4] (метеор: початок і поступ, кінець і яскравість), uNMet, eco_bakeK.
 // Шум хмар і сяйва — value noise з хешем без синуса (Hoskins) за клітинкою mod 256, fBm з множником рівно 2: період 256,
 // тож зсуви часу й вітру CPU загортає за ним (js/scene.js) — у шейдер не йдуть великі числа. Був хеш fract(sin(·)·43758):
 // на аргументах у тисячі sin на GPU втрачає точність — сяйво й хмари розпадались на прямокутні панелі (11.10.2026)
@@ -36,6 +38,11 @@ uniform float uFlash;
 uniform vec4 uAur;
 uniform vec3 uAurCol;
 uniform float uAurE;
+uniform vec4 uCloudC;
+uniform sampler2D uCloudMap;
+uniform vec4 uMet[4];
+uniform vec4 uMetB[4];
+uniform int uNMet;
 uniform float eco_bakeK;
 float ecoHash(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 45.164))) * 43758.5453); }
 float ecoHashN(vec2 p) { vec3 q = fract(mod(p, 256.0).xyx * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
@@ -92,12 +99,24 @@ vec3 ecoSky(vec3 d) {
     float a = face * band * smoothstep(0.42, 0.75, wave) * rays * uAur.z;
     c += mix(uAurCol, uAurCol.bgr, smoothstep(0.2, 0.6, up)) * a * 0.9;
   }
+  for (int i = 0; i < 4; i++) {
+    if (i >= uNMet || up < 0.0) break;
+    vec3 a = normalize(uMet[i].xyz), b = normalize(uMetB[i].xyz);
+    float t = uMet[i].w;
+    vec3 hd = normalize(mix(a, b, t)), tl = normalize(mix(a, b, max(0.0, t - 0.35))), ab = hd - tl;
+    float s = clamp(dot(d - tl, ab) / max(dot(ab, ab), 1e-8), 0.0, 1.0), dist = length(d - (tl + ab * s));
+    c += vec3(1.0, 0.95, 0.85) * uMetB[i].w * s * (1.0 - t * t) * smoothstep(0.003, 0.0, dist) * smoothstep(0.0, 0.1, up);
+  }
 #endif
   float cover = 0.0;
   if (uCloud.x > 0.01 && up > 0.0) {
+    // хмарність — з карти погоди в точці шару хмар (uCloudC.w над камерою), за картою — середня
+    float cov = uCloud.x;
+    vec2 cm = (uCloudC.xy + d.xy * (uCloudC.w / max(up, 0.03))) / uCloudC.z + 0.5;
+    if (cm.x > 0.0 && cm.y > 0.0 && cm.x < 1.0 && cm.y < 1.0) cov = texture2D(uCloudMap, cm).r;
     vec2 uv = d.xy / (up + 0.08) * 0.9 + uCloud.yz;
     float f = ecoFbm(uv);
-    cover = smoothstep(1.02 - uCloud.x * 0.75, 1.25 - uCloud.x * 0.7, f + 0.25) * smoothstep(0.0, 0.12, up);
+    cover = cov > 0.01 ? smoothstep(1.02 - cov * 0.75, 1.25 - cov * 0.7, f + 0.25) * smoothstep(0.0, 0.12, up) : 0.0;
   }
 #ifndef ECO_BAKE
   // сонця, потім місяці й компаньйон поверх (затемнення: диск місяця перед сонцем непрозорий)
@@ -168,7 +187,13 @@ uniform uFlash: f32;
 uniform uAur: vec4f;
 uniform uAurCol: vec3f;
 uniform uAurE: f32;
+uniform uCloudC: vec4f;
+uniform uMet: array<vec4f, 4>;
+uniform uMetB: array<vec4f, 4>;
+uniform uNMet: i32;
 uniform eco_bakeK: f32;
+var uCloudMap: texture_2d<f32>;
+var uCloudMapSampler: sampler;
 fn ecoHash(p: vec3f) -> f32 { return fract(sin(dot(p, vec3f(12.9898, 78.233, 45.164))) * 43758.5453); }
 fn ecoHashN(p: vec2f) -> f32 {
   let m = p - floor(p / 256.0) * 256.0;
@@ -246,12 +271,28 @@ fn ecoSky(d: vec3f) -> vec3f {
     let a = face * band * ecoSs(0.42, 0.75, wave) * rays * uniform.uAur.z;
     c += mix(uniform.uAurCol, uniform.uAurCol.bgr, ecoSs(0.2, 0.6, up)) * a * 0.9;
   }
+  for (var i = 0; i < 4; i++) {
+    if (i >= uniform.uNMet || up < 0.0) { break; }
+    let a = normalize(uniform.uMet[i].xyz);
+    let b = normalize(uniform.uMetB[i].xyz);
+    let t = uniform.uMet[i].w;
+    let hd = normalize(mix(a, b, t));
+    let tl = normalize(mix(a, b, max(0.0, t - 0.35)));
+    let ab = hd - tl;
+    let s = clamp(dot(d - tl, ab) / max(dot(ab, ab), 1e-8), 0.0, 1.0);
+    let dist = length(d - (tl + ab * s));
+    c += vec3f(1.0, 0.95, 0.85) * uniform.uMetB[i].w * s * (1.0 - t * t) * ecoSs(0.003, 0.0, dist) * ecoSs(0.0, 0.1, up);
+  }
 #endif
   var cover = 0.0;
   if (uniform.uCloud.x > 0.01 && up > 0.0) {
+    var cov = uniform.uCloud.x;
+    let cm = (uniform.uCloudC.xy + d.xy * (uniform.uCloudC.w / max(up, 0.03))) / uniform.uCloudC.z + 0.5;
+    let cs = textureSampleLevel(uCloudMap, uCloudMapSampler, clamp(cm, vec2f(0.0), vec2f(1.0)), 0.0).r;
+    if (cm.x > 0.0 && cm.y > 0.0 && cm.x < 1.0 && cm.y < 1.0) { cov = cs; }
     let cuv = d.xy / (up + 0.08) * 0.9 + uniform.uCloud.yz;
     let f = ecoFbm(cuv);
-    cover = ecoSs(1.02 - uniform.uCloud.x * 0.75, 1.25 - uniform.uCloud.x * 0.7, f + 0.25) * ecoSs(0.0, 0.12, up);
+    cover = select(0.0, ecoSs(1.02 - cov * 0.75, 1.25 - cov * 0.7, f + 0.25) * ecoSs(0.0, 0.12, up), cov > 0.01);
   }
 #ifndef ECO_BAKE
   // сонця, потім місяці й компаньйон поверх (затемнення: диск місяця перед сонцем непрозорий)

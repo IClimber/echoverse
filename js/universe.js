@@ -341,7 +341,7 @@ export function lawsOf(seed, d, n) {
     f: nrm1T('компаньйон', tCm, [0, 0.01, 0.05, 0.15, 0.3]), type: cType,
     rhoR: [[0.12, 0.35], [0.6, 1.3], [0.3, 0.45]][cType].reduce((a, b) => a + (b - a) * U(457, 30)),
     Rr: [[4, 12], [0.5, 2], [0.6, 2.5]][cType].reduce((a, b) => a + (b - a) * U(458, 30)),
-    inc: 0.43 * L(459, 30), albedo: [0.5, 0.3, 0.65][cType], off: U(460, 20), hue: U(461, 30), hue2: U(462, 30),
+    inc: 0.43 * L(459, 30), albedo: [0.5, 0.3, 0.65][cType], off: U(466, 20), hue: U(467, 30), hue2: U(468, 30),
   } : null;
   const tRg = tOf(465, 60);
   const rings = lvAbs(tRg) >= 1 ? (lv('кільця', tRg), {
@@ -366,14 +366,14 @@ export function lawsOf(seed, d, n) {
     rho: rhoAir(Pr, airP.mu, Tsurf), H: scaleH(Tsurf, airP.mu, grav), tau: airP.tau, vacuum: !atmo,
     rad: radOf(st0.act, B, Pr, g0),
     tauA, hazeKind, haze: atmo ? clamp01(0.06 + 1.6 * tauA) : 0,
-    wind: atmo ? nrm('вітер', 460, 30, [0.5, 1.5, 2.5, 3.5, 5, 7, 12, 22, 45]) : 0, windAz: 3.14159 * L(167, 40),
+    wind: atmo ? nrm('вітер', 460, 30, [0.5, 1.5, 2.5, 3.5, 5, 7, 12, 22, 45]) : 0,   // у ясну погоду на відкритій рівнині, м/с
     w: atmo ? {                                        // ваги погод: ясно, хмарно, дощ, гроза, туман, пилова буря
       clear: 1.2 + 1.5 * dry, cloudy: 0.6 + 0.6 * U(168, 30), rain: 0.15 + 1.6 * clamp01(0.4 + 0.7 * wet),
       storm: 0.4 * U(169, 30) * clamp01(0.4 + temp + wet), fog: 0.1 + 0.8 * U(170, 30) * clamp01(0.5 + wet),
       dust: dry * (0.2 + 1.2 * U(171, 30)) * (0.5 + 0.8 * qOf(lane(ds, 166, n, 30))),
     } : { clear: 1, cloudy: 0, rain: 0, storm: 0, fog: 0, dust: 0 },
     acid: airP.gas === 3 || kind === L_ACID,
-    segMin: 2 + 6 * U(172, 30),                       // скільки триває погода, хв
+    cS: 4000 * (0.6 + U(172, 30)), cT: 1800 * (0.6 + U(173, 30)),   // поле погоди: розмір плям, м, і час зміни, с
   };
   // Гори й глибини (смуги 250…; генератор v9): гірські хребти (висота до сотень і тисяч блоків — у легкій гравітації
   // вищі; частка гористих земель; розмір хребтів), глибина океанів. Біля старту — помірні (до ~150 блоків)

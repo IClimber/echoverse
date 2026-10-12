@@ -218,3 +218,69 @@ test('температура в точці: доба, сезон, висота; 
   for (let n = 300; n < 300000; n += 13) { const V = lawsOf(hashStr('test'), 3, n); if (V.air.vacuum && !V.sky.lock) { assert.ok(V.clim.Ad > 60, `без повітря ±${V.clim.Ad}`); return; } }
   assert.fail('вакуум не трапився');
 });
+
+test('вітер: без повітря немає; межа падіння при 1 g і 1 атм ≈ 35 м/с; у розрідженому штовхає слабше; «не перестарайся»', async () => {
+  const { physOf } = await import('../js/universe.js');
+  const { weatherAt, windHeightK } = await import('../js/weather.js');
+  const L = lawsOf(hashStr('test'), 0, 0), E = { ...L, grav: 1, air: { ...L.air, pressure: 1 } };
+  near(physOf(E).vT, 35, 1, 'межа падіння'); 
+  const k = (P) => 1 / physOf({ ...E, air: { ...E.air, pressure: P } }).vT ** 2;   // опір ∝ (v / vT)²
+  near(k(1) / k(0.1), 10, 0.01, 'у 10 разів слабше при 0,1 атм');
+  for (let n = 300; n < 300000; n += 13) { const V = lawsOf(hashStr('test'), 3, n); if (V.air.vacuum) { const W = weatherAt(V, 1234, 5, 5); assert.ok(W.windK === 0 && W.precip === 0 && W.clouds === 0); break; } }
+  assert.ok(windHeightK(80, 20) > windHeightK(20, 20) && windHeightK(20, 20) > windHeightK(0, 20), 'вершина — сильніше, долина — слабше');
+  // частка часу, коли на рівнині вітер зносить (вище межі падіння × √тертя): медіана 0, p95 < 2 %, у звичайних — 0
+  const F = [];
+  for (let i = 0; i < 400; i++) {
+    const V = lawsOf(hashStr('вітер'), 0, 200 + i * 37), vT = physOf(V).vT * Math.sqrt(V.phys.friction);
+    let b = 0, N = 0;
+    for (let m = 0; m < 100; m++) for (let p = 0; p < 5; p++) { N++; b += weatherAt(V, m * 997.3, p * 3001, p * 1709).windK > vT; }
+    if (V.strange.cls === 0) assert.equal(b, 0, `звичайний всесвіт ${200 + i * 37}`);
+    F.push(b / N);
+  }
+  F.sort((a, b) => a - b);
+  assert.ok(F[200] === 0 && F[380] < 0.02, `медіана ${F[200]}, p95 ${F[380]}`);
+});
+
+test('погода в просторі: стан триває хвилини, сусідні точки — та сама погода, поле пливе за вітром', async () => {
+  const { weatherAt, cloudsAt, prevailing } = await import('../js/weather.js');
+  for (const n of [0, 300, -777]) {
+    const L = lawsOf(hashStr('1hsb1wu'), 0, n);
+    let prev = null, last = -1, t0 = 0, pa = null, pb = null, same = 0, N = 0;
+    const durs = [];
+    for (let t = 0; t < 86400; t += 2) { const W = weatherAt(L, t, 100, 100, prev); prev = W; if (W.kind !== last) { if (last >= 0) durs.push(t - t0); t0 = t; last = W.kind; } }
+    for (let t = 0; t < 86400; t += 30) { N++; pa = weatherAt(L, t, 100, 100, pa); pb = weatherAt(L, t, 200, 100, pb); same += pa.kind === pb.kind; }
+    durs.sort((a, b) => a - b);
+    assert.ok(durs[durs.length >> 1] >= 240 && durs[0] >= 60 && same / N > 0.9, `${n}: медіана ${durs[durs.length >> 1]} с, найкоротший ${durs[0]} с, та сама за 100 м ${same / N}`);
+  }
+  // за вітром: хмарність у точці, зсунутій на u·Δt, ближча до попередньої, ніж на місці
+  const L = lawsOf(hashStr('1hsb1wu'), 0, 300), Pw = prevailing(L), u = 0.5 * L.air.wind, dt = 600;
+  let dMove = 0, dStay = 0;
+  for (let i = 0; i < 300; i++) {
+    const x = i * 211, y = i * 97, c0 = cloudsAt(L, 1000, x, y);
+    dMove += Math.abs(cloudsAt(L, 1000 + dt, x + Pw.dir[0] * u * dt, y + Pw.dir[1] * u * dt) - c0);
+    dStay += Math.abs(cloudsAt(L, 1000 + dt, x, y) - c0);
+  }
+  assert.ok(dMove < dStay, `за вітром ${dMove}, на місці ${dStay}`);
+});
+
+test('блискавки — лише в грозу, у найвищу точку околу; метеори — лише з повітрям', async () => {
+  const { weatherAt, lightningNear, meteorsAt } = await import('../js/weather.js');
+  const { tile } = await import('../js/gen/chunk.js');
+  let L = null;
+  for (let n = 100; n < 5000 && !L; n++) { const V = lawsOf(hashStr('1hsb1wu'), 0, n); if (V.air.w.storm > 0.3) L = V; }
+  let hits = 0;
+  for (let t = 0; t < 7200 && hits < 20; t += 0.1) {
+    const B = lightningNear(L, t, 0, 0);
+    if (!B || Math.abs(t - B.t0) > 0.05) continue;
+    hits++;
+    const W = weatherAt(L, Math.floor(B.t0 * 2) / 2, B.cx, B.cy);
+    assert.ok(W.precip > 0.7 && W.dim > 0.3, `не гроза: опади ${W.precip}, темніше ${W.dim}`);
+    const o = {}; tile(L, Math.floor(B.x), Math.floor(B.y), o);
+    assert.ok(Math.abs((o.h + 1) * 0.5 - B.z) < 1e-9, 'ціль — верх клітинки');
+  }
+  assert.ok(hits > 0, 'блискавок немає');
+  for (let n = 300; n < 300000; n += 13) { const V = lawsOf(hashStr('test'), 3, n); if (V.air.vacuum) { for (let t = 0; t < 3600; t += 1) assert.equal(meteorsAt(V, t, 1).length, 0); break; } }
+  const E = lawsOf(hashStr('test'), 0, 0);
+  let m = 0; for (let t = 0; t < 3600; t += 0.35) m += meteorsAt(E, t, 1).length > 0;
+  assert.ok(m > 0, 'метеорів немає');
+});
