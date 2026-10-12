@@ -153,14 +153,15 @@ test('плавна поверхня: рівнина — пласка на вер
   assert.ok(pa.size > 0 && pb.size > 0);
 });
 
-test('гравітація: розподіл з реальних тіл (0,027…3,4 g, медіана 1 g), ≈ 1 g біля старту; легка — вільніший рух', async () => {
+test('гравітація: з радіуса й густини планети (нормально навколо 1 g), ≈ 1 g біля старту; легка — вільніший рух', async () => {
   const { physOf, FLOAT_G } = await import('../js/universe.js');
   const seed = hashStr('гравітація'), G = [];
   let lo = null, hi = null;
+  assert.ok(Math.abs(lawsOf(seed, 0, 0).grav - 1) < 0.03, `(0, 0): ${lawsOf(seed, 0, 0).grav}`);
   for (let i = 0; i < 20000; i++) {
     const n = i < 801 ? i - 400 : 200 + i * 7, g = lawsOf(seed, 0, n).grav;
-    assert.ok(g >= 0.027 && g <= 3.4, `${n}: ${g}`);
-    if (Math.abs(n) <= 5) assert.ok(g > 0.8 && g < 1.2, `біля старту ${n}: ${g}`);
+    assert.ok(g >= 0.02 && g <= 4, `${n}: ${g}`);
+    if (Math.abs(n) <= 8) assert.ok(g > 0.85 && g < 1.15, `біля старту ${n}: ${g}`);
     if (g < FLOAT_G && lo === null) lo = n;
     if (g > 1.4 && hi === null) hi = n;
     if (i >= 801) G.push(g);
@@ -168,7 +169,8 @@ test('гравітація: розподіл з реальних тіл (0,027�
   assert.ok(lo !== null && hi !== null, 'немає легких чи важких всесвітів');
   G.sort((a, b) => a - b);
   const q = (p) => G[Math.floor(G.length * p)];
-  for (const [p, v] of [[0.08, 0.38], [0.5, 1], [0.97, 2.3]]) assert.ok(Math.abs(q(p) - v) < 0.06 * v + 0.02, `квантиль ${p}: ${q(p)} замість ${v}`);
+  const pc = (f) => G.filter(f).length / G.length * 100;
+  assert.ok(q(0.5) > 0.95 && q(0.5) < 1.05 && pc((g) => g < 0.38) < 1 && pc((g) => g > 2) < 0.5, `медіана ${q(0.5)}, < 0,38 — ${pc((g) => g < 0.38)} %, > 2 — ${pc((g) => g > 2)} %`);
   const pl = physOf(lawsOf(seed, 0, lo)), ph = physOf(lawsOf(seed, 0, hi));
   assert.ok(pl.up >= ph.up && pl.speed > ph.speed);
 });
@@ -405,19 +407,20 @@ test('рідкісність законів: класи всесвітів 30 / 
     if (L.strange.cls === 0) { n0++; c0 += L.land.cliff.share; }
     if (L.land.cliff.share >= 0.4) c4++; if (L.land.fam[5].share > 0) inv++; if (L.land.P > 150) p150++;
     if (L.islands > 0) isl++; if (L.anom.freq >= 0.02) anom++; if (L.relief.volcano > 0.4) volc++;
-    const kmh = L.air.wind * 2.2 * 1.8 * 3.6; W.push(kmh); if (kmh > 360) w360++;
+    const kmh = L.air.wind * 2.2 * 3.6; W.push(kmh); if (kmh > 200) w360++;
   }
   const pc = (v) => v / N * 100;
   [30, 45, 20, 5].forEach((v, i) => assert.ok(Math.abs(pc(cls[i]) - v) < 3, `${STRANGE_NAMES[i]}: ${pc(cls[i]).toFixed(1)} %`));
   // рельєф 3.1 (як гори) — від повільної незвичайності, свій бюджет: тож і серед «звичайних» трапляються незвичні форми
   assert.ok(pc(none) > 20 && pc(none) < 42, `без незвичного ${pc(none)}`);
   assert.ok(c0 / n0 > 0.05 && c0 / n0 < 0.2 && pc(c4) < 6 && pc(inv) < 2.5 && pc(p150) < 8, `скелі у звичайних ${c0 / n0}, ≥ 0,4 — ${pc(c4)} %, перевернутий ${pc(inv)} %, плато > 150 — ${pc(p150)} %`);
-  assert.ok(pc(ext) > 12 && pc(ext) < 30, `з крайнім ${pc(ext)}`);
-  assert.ok(pc(leg) > 0.2 && pc(leg) < 2.5, `з легендарним ${pc(leg)}`);
+  // з п. 4 (12.10.2026) — ще ~25 законів фізики світу, кожен з крайнім ~1 % і легендарним ~0,2 %
+  assert.ok(pc(ext) > 15 && pc(ext) < 35, `з крайнім ${pc(ext)}`);
+  assert.ok(pc(leg) > 1 && pc(leg) < 6, `з легендарним ${pc(leg)}`);
   assert.ok(pc(isl) > 1.2 && pc(isl) < 6, `острови ${pc(isl)}`);
   assert.ok(pc(anom) < 25 && pc(volc) < 10, `аномалії ${pc(anom)}, вулкани ${pc(volc)}`);
   W.sort((a, b) => a - b);
-  assert.ok(W[N >> 1] < 90 && pc(w360) < 1 && W[N - 1] > 400, `вітер: медіана ${W[N >> 1]}, > 360 — ${pc(w360)} %, максимум ${W[N - 1]}`);
+  assert.ok(W[N >> 1] < 90 && pc(w360) < 1 && W[N - 1] > 200, `вітер у грозу: медіана ${W[N >> 1]} км/год, > 200 — ${pc(w360)} %, максимум ${W[N - 1]}`);
   for (let n = -5; n <= 5; n++) { const L = lawsOf(seed, 0, n); assert.equal(Object.keys(L.tiers).length, 0, `біля старту ${n}: ${Object.keys(L.tiers)}`); }
 });
 
@@ -551,14 +554,15 @@ test('рельєф 3.1: форми майже не зменшують схожі
   };
   const crit = [(L) => L.land.cliff.share >= 0.4, ...[0, 1, 2, 3, 4].map((i) => (L) => L.land.fam[i].share >= 0.4), (L) => L.land.fam[5].share > 0.05,
     (L) => L.land.cuesta.share >= 0.3, (L) => L.land.insel.prob >= 0.35, (L) => L.land.karst.share >= 0.15, (L) => L.land.rift.share >= 0.25, (L) => Math.abs(L.land.ero.bias) >= 0.4];
+  // на форму — три всесвіти (з різною гравітацією: висоти × 1/g, тож розкид великий — від 0 до ~0,12), середнє
   const res = [];
   for (const f of crit) {
-    let n = null;
-    for (let i = 0; i < 30000 && n === null; i++) if (f(lawsOf(seed, 0, 200 + 7 * i))) n = 200 + 7 * i;
-    assert.ok(n !== null, 'форма не трапилась');
-    const s = sim(n, false), s0 = sim(n, true);
-    res.push(s);
-    assert.ok(s > s0 - 0.08, `всесвіт ${n}: схожість ${s.toFixed(3)} проти ${s0.toFixed(3)} без форм 3.1`);
+    const ns = [];
+    for (let i = 0; i < 60000 && ns.length < 3; i++) if (f(lawsOf(seed, 0, 200 + 7 * i))) { ns.push(200 + 7 * i); i += 30; }
+    assert.equal(ns.length, 3, 'форма не трапилась');
+    let ds = 0;
+    for (const n of ns) { const s = sim(n, false); ds += sim(n, true) - s; res.push(s); }
+    assert.ok(ds / 3 < 0.08, `всесвіти ${ns}: схожість у середньому на ${(ds / 3).toFixed(3)} менша, ніж без форм 3.1`);
   }
   assert.ok(res.reduce((a, b) => a + b) / res.length > 0.8, `середня схожість ${res}`);
 });

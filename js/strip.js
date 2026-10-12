@@ -6,7 +6,7 @@ import { regionAt, speciesOf, pickSpecies, groundTint } from './gen/flora.js';
 import { GOLD, SPOTS } from './golden.js';
 import { hashStr } from './rng.js';
 import { fmtN } from './debug.js';
-import { skyState } from './sky.js';
+import { skyState, bodiesOf } from './sky.js';
 
 const SIZE = 96, PX = 2;                       // клітинок на бік, px на клітинку
 
@@ -55,8 +55,8 @@ function skyBar(L) {
     gr.addColorStop(0, css(st.zenith)); gr.addColorStop(1, css(st.horizon));
     ctx.fillStyle = gr; ctx.fillRect(i * w, 0, w, 14);
   });
-  L.sky.suns.forEach((s, i) => { ctx.fillStyle = css(s.col); ctx.beginPath(); ctx.arc(8 + i * 10, 7, 2 + s.size * 40, 0, 7); ctx.fill(); });
-  L.sky.moons.forEach((m, i) => { ctx.fillStyle = css(m.col); ctx.beginPath(); ctx.arc(2 * w + 8 + i * 10, 7, 2 + m.size * 40, 0, 7); ctx.fill(); });
+  bodiesOf(L).suns.forEach((s, i) => { ctx.fillStyle = css(s.col); ctx.beginPath(); ctx.arc(8 + i * 10, 7, 2 + s.size * 40, 0, 7); ctx.fill(); });
+  bodiesOf(L).moons.forEach((m, i) => { ctx.fillStyle = css(m.col); ctx.beginPath(); ctx.arc(2 * w + 8 + i * 10, 7, 2 + m.size * 40, 0, 7); ctx.fill(); });
   if (L.sky.rings) { ctx.strokeStyle = css(L.sky.rings.col); ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(w * 1.5, 12, w * 0.4, 4, 0, Math.PI, 0); ctx.stroke(); }
   return cv;
 }

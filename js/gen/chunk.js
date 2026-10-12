@@ -6,6 +6,7 @@ import { hash2, hash3, unit } from '../rng.js';
 import { noise2, noise3, fbm3 } from '../noise.js';
 import { SEA, L_WATER, L_DRY, WORLD_H, KMIN, KMAX, floats, gravityAt } from '../universe.js';
 import { LEVEL } from '../iso.js';
+import { nsqrt } from '../num.js';
 import { BIOMES, pickBiome, Z_TEMP, Z_COLD, Z_HOT, Z_WET, Z_DRY, Z_DESERT, Z_SNOW, Z_PEAK, Z_BEACH } from './biomes.js';
 import { regionAt, speciesOf, pickSpecies } from './flora.js';
 
@@ -52,13 +53,6 @@ function lonely(L, x, y, r, dense, rs) {
   return true;
 }
 
-// Квадратний корінь ітераціями Ньютона: лише + − × ÷, тож однаковий у всіх рушіях (Math.sqrt — ні)
-function nsqrt(v) {
-  if (v <= 0) return 0;
-  let r = v < 1 ? 0.5 + 0.5 * v : 0.5 * v + 0.5;
-  for (let i = 0; i < 10; i++) r = 0.5 * (r + v / r);
-  return r;
-}
 const absv = (v) => v < 0 ? -v : v;
 const ss = (t) => { t = t < 0 ? 0 : t > 1 ? 1 : t; return t * t * (3 - 2 * t); };   // плавний крок 0…1
 // Маска області закону o = {share, thr} масштабу S (0 — поза, 1 — усередині; край — плавно); n — номер (області
@@ -301,14 +295,14 @@ export function tile(L, x, y, out = {}, lite = false) {
   // висота: основа (плато бувають вищі за амплітуду), вулкани, шпилі, останці, карст і гори — понад неї
   let h = e >= L.seaE ? SEA + 1 + Math.floor((e - L.seaE) / span) + Math.floor(xb) : SEA + 1 + Math.floor((ex - L.seaE) / span);
   if (h > KMAX - 64) h = KMAX - 64;
-  // вище — холодніше; висота для клімату — неперервна (не округлена до блоків) і без дрібниць рельєфу, інакше біля
-  // снігової межі кожен горбик у 1–2 блоки — снігова пляма (і так само зі скелею вершин). Додане рельєфом 3.1 (плато,
-  // куести, рифти, останці, карст) холоднішає вдесятеро повільніше — інакше кожне плато було б сніговим
-  const hc = (ex - L.seaE) / span - fineB * dk - 0.9 * (bl - fineB * dk - A * uc + xr), T = out.T = T0 - 0.05 * hc;
+  // вище — холодніше (п. 4: земний градієнт 52 °C/км × g, у рівнях — L.clim.lapse / 64 одиниць температури; без
+  // повітря — 0); висота для клімату — неперервна (не округлена до блоків) і без дрібниць рельєфу, інакше біля снігової
+  // межі кожен горбик у 1–2 блоки — снігова пляма. Скеля вершин — за висотою без рельєфу 3.1 (плато — не скеля)
+  const hT = (ex - L.seaE) / span - fineB * dk, hc = hT - (bl - fineB * dk - A * uc + xr), T = out.T = T0 - L.clim.lapse / 64 * hT;
   let t;
   if (T < -0.45) t = T_SNOW;
   else if (xb - mt > 2 || out.magma) t = T_ROCK;              // вулкани, шпилі, останці, карст — скеля (гори — за висотою)
-  else if (hc + 1 >= Math.max(6, L.amp * 0.72)) t = T_ROCK;
+  else if (hc + 1 >= Math.max(6, L.amp * 0.72) && T < -0.25) t = T_ROCK;   // вершини — скеля лише в холоді (альпійський пояс: до ~6 °C над сніговою межею)
   else if (h === SEA + 1 && ex - L.seaE < 0.025) t = T_SAND;
   else if (W < -0.35) t = T > 0.15 ? T_DESERT : T_DRY;
   else if (W < -0.05) t = T_DRY;

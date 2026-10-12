@@ -314,8 +314,10 @@ test('небо й час: біля старту — одне сонце, міс�
     if (Math.abs(n) <= 8) assert.ok(S.suns.length === 1 && S.moons.length === 1 && !S.lock && !S.rings && S.dayMin >= 16 && S.dayMin <= 24, `біля старту ${n}`);
     multi += S.suns.length > 1; rings += !!S.rings; lock += S.lock; noMoon += !S.moons.length;
   }
-  assert.ok(multi > 100 && rings > 100 && lock > 10 && noMoon > 50, `сонць ${multi}, кілець ${rings}, вічних ${lock}, без місяця ${noMoon}`);
-  const L = lawsOf(seed, 0, 0), day = L.sky.dayMin * 60, at = (ph) => ((ph - L.sky.off + 1) % 1) * day;
+  // вічний день — припливне захоплення близькою тьмяною зорею (~0,5 % всесвітів): шукаємо далі
+  for (let n = 1501; !lock && n < 300000; n += 7) lock += lawsOf(seed, 0, n).sky.lock;
+  assert.ok(multi > 100 && rings > 100 && lock > 0 && noMoon > 50, `сонць ${multi}, кілець ${rings}, вічних ${lock}, без місяця ${noMoon}`);
+  const L = lawsOf(seed, 0, 0), day = L.sky.dayMin * 60 / L.phys.time, at = (ph) => ((ph - L.sky.off + 1) % 1) * day;
   assert.ok(Math.abs(dayPhase(L, at(0.5)) - 0.5) < 1e-9 && clockStr(0.5) === '12:00' && clockStr(0.25) === '06:00');
   const noon = skyState(L, at(0.5)), night = skyState(L, at(0));
   assert.ok(noon.day > 0.95 && night.day < 0.05 && noon.lightK[1] > night.lightK[1] * 2 && night.lightK[1] > 0.05, 'ніч не темрява, день світліший');
@@ -368,7 +370,7 @@ test('атмосфера й погода: біля старту — придат
   for (const d of [0, 3]) for (let n = -1000; n <= 1000; n++) {
     const A = lawsOf(seed, d, n).air;
     if (d === 0 && Math.abs(n) <= 8) assert.ok(A.breath && A.pressure > 0.8 && A.pressure < 1.2 && A.rad < 0.1, `біля старту ${n}`);
-    assert.ok(A.pressure > 0 && A.pressure <= 10 && A.rad >= 0 && A.rad <= 1 && A.haze >= 0 && A.haze <= 1);
+    assert.ok(A.pressure >= 0 && A.pressure <= 100 && A.rad >= 0 && A.rad <= 1 && A.haze >= 0 && A.haze <= 1);
     gases.add(A.gas); vac += A.pressure < 0.1;
   }
   for (let n = 1001; !vac && n < 200000; n += 3) vac += lawsOf(seed, 3, n).air.pressure < 0.1;   // без повітря — рідкість
@@ -420,10 +422,11 @@ test('інша фізика: ковзкий ґрунт — інерція; оп�
   let s = 0, bo = 0, tm = 0, small = 0;
   for (let n = -1000; n <= 1000; n++) {
     const L = lawsOf(seed, 0, n), F = L.phys;
-    if (Math.abs(n) <= 8) assert.ok(F.friction === 1 && F.bounce === 0 && F.time === 1, `біля старту ${n}`);
-    s += F.friction < 1; bo += F.bounce > 0; tm += Math.abs(F.time - 1) > 0.3; small += F.planetR < 800;
+    if (Math.abs(n) <= 8) assert.ok(F.friction === 1 && F.bounce === 0 && Math.abs(F.time - 1) < 0.1, `біля старту ${n}`);
+    s += F.friction < 1; bo += F.bounce > 0; tm += Math.abs(F.time - 1) > 0.3; small += F.planetR < 3000;    // радіус, км
   }
-  assert.ok(s > 20 && bo > 20 && tm > 20 && small > 3, `ковзких ${s}, пружних ${bo}, з іншим часом ${tm}, малих ${small}`);
+  for (let n = 1001; small < 3 && n < 300000; n += 7) small += lawsOf(seed, 0, n).phys.planetR < 3000;   // малі планети — рідкість
+  assert.ok(s > 20 && bo > 20 && tm > 20 && small >= 3, `ковзких ${s}, пружних ${bo}, з іншим часом ${tm}, малих ${small}`);
   const L0 = lawsOf(seed, 0, 0);
   assert.ok(physOf({ ...L0, air: { ...L0.air, pressure: 2.5 } }).vT < physOf({ ...L0, air: { ...L0.air, pressure: 0.3 } }).vT);
 });
