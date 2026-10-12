@@ -108,7 +108,7 @@ test('промінь на кубі з 12 трикутників; призма й
 test('зіткнення = рендер: висота під променем — та сама, що в меші chunkMesh цілого стовпця; секція з b = віртуальна', async () => {
   const { lawsOf } = await import('../js/universe.js');
   const { hashStr } = await import('../js/rng.js');
-  const { genChunk, genCol, genSection, bi, H, B_AIR, B_STONE, SEC } = await import('../js/gen/chunk.js');
+  const { genChunk, genCol, genSection, bi, H, B_AIR, B_STONE, SEC, FR } = await import('../js/gen/chunk.js');
   const { chunkMesh } = await import('../js/gen/mesh.js');
   const { colliderOf } = await import('../js/collision.js');
   const seed = hashStr('test');
@@ -123,11 +123,11 @@ test('зіткнення = рендер: висота під променем �
     const block = (x, y, k) => {
       const lx = x - cx * 16, ly = y - cy * 16;
       if (k >= H) return B_AIR;
-      if (k < -1) return B_STONE;
-      if (lx < -1 || ly < -1 || lx > 16 || ly > 16) return -1;
+      if (k < -FR) return B_STONE;
+      if (lx < -FR || ly < -FR || lx > 15 + FR || ly > 15 + FR) return -1;
       return C.b[bi(lx, ly, k)];
     };
-    const P = { block, obj: () => null, liquid: L.liquid, laws: L };
+    const P = { block, obj: () => null, liquid: L.liquid, laws: L, sky: () => C.sky };
     // та сама ділянка, але секції — з genSection (швидкий шлях, як у грі)
     const col = genCol(L, cx, cy), secs = new Map();
     const Ps = { ...P, sec: (x, y, z) => { if (x !== cx || y !== cy || z < 0 || z >= H / SEC) return undefined; if (!secs.has(z)) secs.set(z, genSection(L, col, z)); return secs.get(z); } };
@@ -213,5 +213,39 @@ test('у куті (дві стіни, будь-який розхил) форма
       }
       assert.equal(seen.size, 1, `розхил ${2 * half}°, ${mode}: ${[...seen].join(' | ')}`);
     }
+  }
+});
+
+// Прямі стіни (12.10.2026): під стелею стіна від 2 блоків — прямі кути з підлогою й стелею, у плані — у прямих стін;
+// відкритий рельєф під небом — плавний, як був (рішення користувача)
+test('прямі стіни під стелею: хід 1 × 2 у породі — 1 м до самої підлоги, кут кімнати прямий; рів під небом і уступ — плавні', async () => {
+  const { colliderOf } = await import('../js/collision.js');
+  const { B_AIR, B_STONE } = await import('../js/gen/chunk.js');
+  const world = (f) => ({ liquid: { swim: true }, obj: () => null, block: (x, y, k) => (Math.abs(x) > 40 || Math.abs(y) > 40 ? -1 : f(x, y, k) ? B_AIR : B_STONE) });
+  const ray = (P, o, d, max = 6) => { const C = colliderOf(P), L = C.gather(o[0] - max, o[1] - max, o[2] - max, o[0] + max, o[1] + max, o[2] + max, createList()), r = rayCast(L, ...o, ...d, max); return r ? r.t : null; };
+  // хід уздовж x: y = 5, рівні k 2…3 (1 м), порода до k 7 — під стелею; підлога — z 1
+  const tunnel = world((x, y, k) => k >= 2 && (k < 4 && y === 5 || k >= 8));
+  for (const z of [1.02, 1.5, 1.98]) {
+    const w = ray(tunnel, [6.5, 5.5, z], [0, 1, 0]) + ray(tunnel, [6.5, 5.5, z], [0, -1, 0]);
+    assert.ok(Math.abs(w - 1) < 1e-6, `хід під стелею на висоті ${z}: ширина ${w}`);
+  }
+  assert.ok(Math.abs(ray(tunnel, [6.5, 5.3, 1.5], [0, 0, -1]) - 0.5) < 1e-6, 'підлога пласка до стіни');
+  // той самий рів під небом: кути зрізано — на 0,3 над підлогою вужче за 1 м
+  const trench = world((x, y, k) => k >= 2 && (k < 4 && y === 5 || k >= 4));
+  const wt = ray(trench, [6.5, 5.5, 1.3], [0, 1, 0]) + ray(trench, [6.5, 5.5, 1.3], [0, -1, 0]);
+  assert.ok(wt < 0.8, `рів під небом: ширина ${wt}`);
+  // кімната 4 × 4 під стелею: промінь з центру в кут на висоті 0,5 — до самого кута (прямий у плані)
+  const room = world((x, y, k) => k >= 2 && (k < 6 && x >= 2 && x < 6 && y >= 2 && y < 6 || k >= 10));
+  const dc = ray(room, [4, 4, 2], [Math.SQRT1_2, Math.SQRT1_2, 0]);
+  assert.ok(Math.abs(dc - 2 * Math.SQRT2) < 1e-6, `кут кімнати: ${dc}`);
+  // діагональ сходинками в плані (стіна 2 блоки, під стелею) — скіс лишається: промінь у внутрішній кут сходинки — коротший
+  const stair = world((x, y, k) => k >= 2 && (k < 4 && x + y < 10 && x > -10 && y > -10 || k >= 8));
+  const ds = ray(stair, [3.5, 3.5, 1.5], [Math.SQRT1_2, Math.SQRT1_2, 0]);
+  assert.ok(ds < 3 / Math.SQRT2 * 2 - 0.05 && ds > 0, `діагональ у плані — скіс: ${ds}`);
+  // уступ в 1 блок під небом і під стелею — схил (не прямий кут): вершина на половині
+  const step = (roof) => world((x, y, k) => k >= 2 + (x >= 5 ? 1 : 0) && (!roof || k < 6) || roof && k >= 8);
+  for (const roof of [false, true]) {
+    const z = 2.9 - ray(step(roof), [4.85, 0.5, 2.9], [0, 0, -1]);    // за 0,15 до ребра: прямий кут дав би 1,0
+    assert.ok(z > 1.05 && z < 1.45, `уступ ${roof ? 'під стелею' : 'під небом'}: висота біля ребра ${z}`);
   }
 });

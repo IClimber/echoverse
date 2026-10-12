@@ -2,7 +2,7 @@
 // позиції (float32 ×3), нормалі (int8 ×3), кольори (uint8 ×3), матеріали (uint8 — шар текстури), індекси.
 // Світло, туман і текстуру (за матеріалом, координати — проєкцією на площину грані) додає шейдер.
 // Земля — з блоків: грань лише між твердим і порожнім.
-import { CS, SEC, H, O_TREE, O_FLOAT, O_COVER, solidB, B_AIR, B_LIQ, B_ICE, B_SAND, B_GRASS, B_DRY, B_DESERT, B_SNOW, B_ROCK, B_BED, B_MUD, B_SOIL, B_STONE, B_SANDSTONE, B_MAGMA, B_FLOAT, B_LADDER, B_VINE } from './chunk.js';
+import { CS, FR, ci, SEC, H, O_TREE, O_FLOAT, O_COVER, solidB, B_AIR, B_LIQ, B_ICE, B_SAND, B_GRASS, B_DRY, B_DESERT, B_SNOW, B_ROCK, B_BED, B_MUD, B_SOIL, B_STONE, B_SANDSTONE, B_MAGMA, B_FLOAT, B_LADDER, B_VINE } from './chunk.js';
 import { L_LAVA, SEA, gravityAt } from '../universe.js';
 import { LEVEL } from '../iso.js';
 import { template, place, footprint, extent } from './plants.js';
@@ -137,9 +137,10 @@ export function chunkMesh(C, L, { near = true, far = true } = {}) {
   const M = new Mesh(), W = new Mesh(), Mc = new Mesh(), P = L.pal, B = C.b;
   // груба ґратка (рівні деталізації, genCoarse): ST — крок точок у блоках, N — точок на бік; координати сітки → локальні
   // блоки: × ST + (1 − ST) / 2 (клітинка — навколо точки); при ST = 1 — ті самі числа
-  const ST = C.step || 1, N = CS / ST, NW = N + 2, OF = (1 - ST) / 2, OZ = OF * LEVEL;
-  // об'єм: висоти K0…K0+NK−1 (локальні k від 0), рамка — k = −1 і k = NK
-  const NK = C.nk ?? H, K0 = C.k0 ?? 0, cix = (x, y) => (y + 1) * NW + x + 1, bi = (x, y, k) => cix(x, y) * (NK + 2) + k + 1;
+  // рамка масивів FB: точна секція — FR (2: прямі стіни дивляться на блок далі за куб), груба ґратка — 1
+  const ST = C.step || 1, N = CS / ST, FB = ST === 1 ? FR : 1, NW = N + 2 * FB, OF = (1 - ST) / 2, OZ = OF * LEVEL;
+  // об'єм: висоти K0…K0+NK−1 (локальні k від 0), рамка — k = −FB…−1 і NK…NK+FB−1
+  const NK = C.nk ?? H, K0 = C.k0 ?? 0, SKK = NK + 2 * FB, cix = (x, y) => (y + FB) * NW + x + FB, bi = (x, y, k) => cix(x, y) * SKK + k + FB;
   const mp = (x, y, z) => [x * ST + OF, y * ST + OF, z * ST + OZ];
   let T = M;                                       // куди пишуть гладкі грані (обрізи — у Mc)
   const COL = [], TOPM = [], SIDEM = [];
@@ -202,17 +203,61 @@ export function chunkMesh(C, L, { near = true, far = true } = {}) {
   // середина ребра (від нижнього кута куба) і зсув кута в масиві блоків
   const EX = EDGES.map(([a, b]) => ((a & 1) + (b & 1)) / 2), EY = EDGES.map(([a, b]) => ((a >> 1 & 1) + (b >> 1 & 1)) / 2), EZ = EDGES.map(([a, b]) => ((a >> 2) + (b >> 2)) / 2);
   const CO = [0, 1, 2, 3, 4, 5, 6, 7].map((c) => bi(c & 1, c >> 1 & 1, c >> 2) - bi(0, 0, 0));
+  // Прямі стіни (12.10.2026, скарга: «прямих кутів в грі бути не може» — Surface Nets зрізав і внутрішні кути, прохід між
+  // стінами за 1 м мав на підлозі 0,5 м). Лише під стелею (рішення користувача: печери, ходи, лази, навіси; відкритий
+  // рельєф під небом — ями, уступи, круті схили — плавний, як був): куб, де повітря нижче верху ґрунту клітинки C.sky
+  // (блок; водойма — −1). Без C.sky (груба ґратка) — плавно. Перетин горизонтального ребра (a, b) — грань блоку; «та сама грань» у сусідньому
+  // шарі / ряду — пара блоків зі зсувом d з тим самим боком твердого
+  const SKY = ST === 1 ? C.sky : null;
+  const covered = (x, y, k, o0) => {
+    for (let c = 0; c < 8; c++) {
+      const q = B[o0 + CO[c]];
+      if (!SOL[q] && q !== B_LIQ && K0 + k + (c >> 2) < SKY[cix(x + (c & 1), y + (c >> 1 & 1))]) return true;
+    }
+    return false;
+  };
+  const same = (oa, ob, d) => SOL[B[oa + d]] === SOL[B[oa]] && SOL[B[ob + d]] === SOL[B[ob]];
+  // куб o0 — стіна: вертикальна грань (перетин горизонтального ребра) тягнеться ≥ 2 блоки — є й шаром вище чи нижче
+  // (у кубі чи на блок за ним). Уступ в 1 блок — ні (лишається схилом)
+  const wallCube = (o0) => {
+    for (let e = 0; e < 8; e++) {
+      const a = EA[e], b = EB[e];
+      if (cornerSolid[a] === cornerSolid[b]) continue;
+      const oa = o0 + CO[a], ob = o0 + CO[b];
+      if (same(oa, ob, a & 4 ? -1 : 1) || same(oa, ob, a & 4 ? 1 : -1)) return true;
+    }
+    return false;
+  };
+  // грань уздовж осі ax (0 — x-ребра, 1 — y-ребра) пряма в плані: є й у сусідньому ряду (у кубі чи на клітинку за ним)
+  const straight = (o0, ax) => {
+    const D = ax ? SKK : NW * SKK, bit = ax ? 1 : 2;   // сусідній ряд: для x-ребер — по y, для y-ребер — по x
+    for (let e = ax * 4; e < ax * 4 + 4; e++) {
+      const a = EA[e], b = EB[e];
+      if (cornerSolid[a] === cornerSolid[b]) continue;
+      const oa = o0 + CO[a], ob = o0 + CO[b];
+      if (same(oa, ob, a & bit ? -D : D) || same(oa, ob, a & bit ? D : -D)) return true;
+    }
+    return false;
+  };
   const dualV = (x, y, k) => {
     const o = (((k + 1) * NX + y + 1) * NX + x + 1) * 3;
     if (VC[o] === VC[o]) return o;
     const o0 = bi(x, y, k);
     for (let c = 0; c < 8; c++) cornerSolid[c] = SOL[B[o0 + CO[c]]];
-    let sx = 0, sy = 0, sz = 0, n = 0;
+    let sx = 0, sy = 0, sz = 0, n = 0, hx = 0, hy = 0, hn = 0;
     for (let e = 0; e < 12; e++) {
       if (cornerSolid[EA[e]] === cornerSolid[EB[e]]) continue;
       sx += EX[e]; sy += EY[e]; sz += EZ[e]; n++;
+      if (e < 8) { hx += EX[e]; hy += EY[e]; hn++; }   // ребра 0–3 — уздовж x, 4–7 — уздовж y, 8–11 — уздовж z
     }
     if (!n) { sx = sy = sz = 0.5; n = 1; }             // поверхня не перетинає куб (лише обрізи грубої ґратки) — центр
+    if (FB === 2 && SKY && hn && covered(x, y, k, o0) && wallCube(o0)) {
+      // стіна (вертикальна грань ≥ 2 блоки): підлога, стеля й верхнє ребро доходять до неї прямим кутом (z — центр куба);
+      // у плані — середнє лише горизонтальних перетинів (діагональ сходинками — скіс), а пряма в плані грань — точно
+      sz = 0.5 * n;
+      sx = straight(o0, 0) ? 0.5 * n : hx / hn * n;
+      sy = straight(o0, 1) ? 0.5 * n : hy / hn * n;
+    }
     VC[o] = x + 0.5 + sx / n; VC[o + 1] = y + 0.5 + sy / n; VC[o + 2] = (k + 0.5 + sz / n) * LEVEL;
     let ns = 0;
     for (let c = 0; c < 8; c++) ns += cornerSolid[c];
@@ -310,14 +355,14 @@ export function chunkMesh(C, L, { near = true, far = true } = {}) {
   }
   // Маска граней шару: fm[y·CS + x] — біт 1 << d, якщо блок твердий, а сусід у напрямку d — ні; rows[d·CS + r] — є
   // такі в ряду r (для ±x — стовпчик x, для ±y — рядок y)
-  const fm = new Uint8Array(N * N), rows = new Uint8Array(6 * N), SK = NK + 2, SX = SK, SY = NW * SK;
+  const fm = new Uint8Array(N * N), rows = new Uint8Array(6 * N), SX = SKK, SY = NW * SKK;
   const NB = [SX, -SX, SY, -SY, 1, -1];
   for (let k = 0; k < NK; k++) {
-    if (!inS[k + 1] || (allS[k + 1] === NW * NW && inS[k + 2] === N * N && inS[k] === N * N)) continue;
+    if (!inS[k + 1] || (allS[k + 1] === (N + 2) * (N + 2) && inS[k + 2] === N * N && inS[k] === N * N)) continue;
     rows.fill(0);
     let anyF = 0;
     for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
-      const o = ((y + 1) * NW + x + 1) * SK + k + 1;
+      const o = bi(x, y, k);
       let f = 0;
       if (SOL[B[o]]) for (let d = 0; d < 6; d++) if (!SOL[B[o + NB[d]]]) { f |= 1 << d; rows[d * N + (d < 2 ? x : y)] = 1; }
       fm[y * N + x] = f; anyF |= f;
@@ -478,7 +523,7 @@ function objMeshes(C, L, K0, NK, near, far, dz = 0) {
     if (o.z < K0 || o.z >= K0 + NK) continue;                 // предмет — у секції своєї основи
     const z = (o.z - K0) * LEVEL + dz, v = o.v, g = C.sp[o.s], q = objPose(C, L, o);
     if (o.k === O_FLOAT) continue;                            // ширяюче каміння — тіла (bodies.js), малюються окремо
-    const { cx, cy, rot, s, cj } = q, sk = C.top ? skyK(C.top[(o.y + 1) * (CS + 2) + o.x + 1] - o.z) : 1;   // AO неба над основою
+    const { cx, cy, rot, s, cj } = q, sk = C.top ? skyK(C.top[ci(o.x, o.y)] - o.z) : 1;   // AO неба над основою
     if (o.k === O_TREE) {
       const tl = ((v >> 2 & 7) / 7) * 0.1;
       if (near) place(F, template(g, v % 3, 0), cx, cy, z, rot, s, tl, cj, sk);

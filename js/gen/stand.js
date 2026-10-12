@@ -2,7 +2,7 @@
 // зони: A — лази (присідання, повзання), B — стіни (лазіння: камінь, лід, драбина, ліана, навіс), C — схили (сповзання:
 // скеля й лід), D — басейн зі щілиною під водою (пірнання), E — рослини й каміння (ціль, обрис). Ті самі роботи генератора
 // (job.js: стовпець, секція, рослини, далечінь, предмет) — з цього модуля, закони — всесвіту (0, 0) зерна «stand».
-import { CS, CW, SEC, ci, bv, solidB, B_AIR, B_LIQ, B_ICE, B_GRASS, B_ROCK, B_SOIL, B_STONE, B_BED, B_LADDER, B_VINE, O_TREE, O_ROCK, O_COVER, T_LUSH, T_WATER } from './chunk.js';
+import { CS, CW, FR, SEC, ci, bv, emptyOf, solidB, B_AIR, B_LIQ, B_ICE, B_GRASS, B_ROCK, B_SOIL, B_STONE, B_BED, B_LADDER, B_VINE, O_TREE, O_ROCK, O_COVER, T_LUSH, T_WATER } from './chunk.js';
 import { BIOMES } from './biomes.js';
 import { speciesOf, regionAt, pickSpecies, groundTint } from './flora.js';
 import { M_LUSH } from './materials.js';
@@ -74,7 +74,7 @@ export function standCol(L, cx, cy) {
   const n = CW * CW, h = new Int16Array(n), t = new Uint8Array(n), v = new Uint8Array(n), bm = new Uint8Array(n).fill(BM), sky = new Int16Array(n), top = new Int16Array(n);
   const cells = new Array(n), x0 = cx * CS, y0 = cy * CS;
   let hmin = Infinity, hmax = -Infinity;
-  for (let y = -1; y <= CS; y++) for (let x = -1; x <= CS; x++) {
+  for (let y = -FR; y < CS + FR; y++) for (let x = -FR; x < CS + FR; x++) {
     const i = ci(x, y), wx = x0 + x, wy = y0 + y;
     let k = 60;
     while (k > 0 && !solidB(standBlock(wx, wy, k))) k--;
@@ -98,16 +98,11 @@ export function standCol(L, cx, cy) {
 
 // Секція cz стовпця стенду: блоки з рамкою (як genSection)
 export function standSection(col, cz) {
-  const k0 = cz * SEC, b = new Uint8Array(CW * CW * (SEC + 2)), x0 = col.cx * CS, y0 = col.cy * CS;
-  let air = 0, solid = 0;
-  for (let y = -1; y <= CS; y++) for (let x = -1; x <= CS; x++) for (let k = -1; k <= SEC; k++) {
-    const q = standBlock(x0 + x, y0 + y, k0 + k);
-    b[bv(x, y, k, SEC)] = q;
-    if (q === B_AIR) air++; else if (solidB(q)) solid++;
-  }
-  if (air === b.length) return { empty: true, k0, nk: SEC };
-  if (solid === b.length) return { empty: true, solid: true, k0, nk: SEC };
-  return { b, k0, nk: SEC };
+  const k0 = cz * SEC, b = new Uint8Array(CW * CW * (SEC + 2 * FR)), x0 = col.cx * CS, y0 = col.cy * CS;
+  for (let y = -FR; y < CS + FR; y++) for (let x = -FR; x < CS + FR; x++) for (let k = -FR; k < SEC + FR; k++)
+    b[bv(x, y, k, SEC)] = standBlock(x0 + x, y0 + y, k0 + k);
+  const e = emptyOf(b, SEC);
+  return e ? { ...e, k0, nk: SEC } : { b, k0, nk: SEC };
 }
 
 // Плитка далечі стенду: квадрат рівнини на висоті трави (за полігоном — та сама рівнина)

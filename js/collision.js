@@ -4,13 +4,13 @@
 // src.gather(коробка, список). P — «щуп» світу (player.js): block, obj, objR, bodies, liquid; необов'язково sec (секція
 // з масивом b — швидкий шлях), laws (для chunkMesh; геометрія від законів не залежить), ver (лічильник даних світу).
 import { chunkMesh } from './gen/mesh.js';
-import { CS, CW, SEC, bv, solidB, B_STONE, B_LIQ } from './gen/chunk.js';
+import { CS, CW, FR, SEC, bv, solidB, B_STONE, B_LIQ } from './gen/chunk.js';
 import { LEVEL } from './iso.js';
 import { lawsOf } from './universe.js';
 import { pushTri, prismTris, boxTris } from './engine/physics/collide.js';
 
 const MAX_SECS = 128;                // секцій у кеші (найдавніша — геть)
-const NB = CW * CW * (SEC + 2);
+const NB = CW * CW * (SEC + 2 * FR);
 let GEOM_L = null;                   // закони для chunkMesh, коли P їх не має (кольори не потрібні)
 const ZERO = new Uint8Array(CW * CW), ZERO16 = new Int16Array(CW * CW);
 
@@ -27,10 +27,22 @@ function createCollider(P) {
   let stampN = 0;
   const vb = new Uint8Array(NB);
 
-  // Трикутники секції (cx, cy, cz): з масиву b (рамка −1…SEC) — chunkMesh, як у worker
+  // Трикутники секції (cx, cy, cz): з масиву b (рамка FR з усіх боків) — chunkMesh, як у worker
+  // Верх ґрунту клітинок стовпця (cx, cy) з рамкою (C.sky, блоки): прямі стіни — лише під стелею (mesh.js). Світ — зі
+  // зведення стовпця; без нього (P.sky немає — тести, стенди) — найвищий твердий блок над секцією з P.block (до +64)
+  function skyOf(cx, cy, K) {
+    if (P.sky) return P.sky(cx, cy);
+    const s = new Int16Array(CW * CW);
+    for (let y = -FR; y < CS + FR; y++) for (let x = -FR; x < CS + FR; x++) {
+      let k = K + SEC + 64;
+      while (k > K - FR - 1) { const q = P.block(cx * CS + x, cy * CS + y, k); if (q !== -1 && solidB(q)) break; k--; }
+      s[(y + FR) * CW + x + FR] = k;
+    }
+    return s;
+  }
   function fromBlocks(b, k0, nk, cx, cy) {
     const L = P.laws || GEOM_L || (GEOM_L = lawsOf(0, 0, 0));
-    const m = chunkMesh({ cx, cy, b, k0, nk, h: ZERO16, bm: ZERO, v: ZERO, lt: null, top: null, obj: [], sp: [] }, L, { near: false, far: false }).solid;
+    const m = chunkMesh({ cx, cy, b, k0, nk, h: ZERO16, bm: ZERO, v: ZERO, lt: null, top: null, sky: skyOf(cx, cy, k0), obj: [], sp: [] }, L, { near: false, far: false }).solid;
     const n = m.count / 3, pos = new Float32Array(n * 9), hint = new Float32Array(n * 3), zr = new Float32Array(n * 2);
     const cnt = new Int32Array(CS * CS + 1);
     const cells = (i, f) => {
@@ -64,7 +76,7 @@ function createCollider(P) {
       // −1, — одна така точка: запис дійсний, поки всі вони ще не згенеровані
       let solid = 0;
       const X = cx * CS, Y = cy * CS, K = cz * SEC, unk = [];
-      for (let k = -1; k <= SEC; k++) for (let y = -1; y <= CS; y++) for (let x = -1; x <= CS; x++) {
+      for (let k = -FR; k < SEC + FR; k++) for (let y = -FR; y < CS + FR; y++) for (let x = -FR; x < CS + FR; x++) {
         let b = P.block(X + x, Y + y, K + k);
         if (b === -1) {
           b = B_STONE;

@@ -1,7 +1,7 @@
 // gen/job.js — одна робота генератора (у worker чи в головному потоці): зведення стовпця чи секція з мешем.
 // Стовпець (клітинки, «небо», ґратка шуму, предмети з положеннями) рахується раз і живе в кеші: секції стовпця беруть
 // його звідти. Зведення стовпця — поверхня, укриття від опадів, межі секцій із поверхнею, предмети.
-import { genCol, genSection, genCoarse, shelterTop, CW, SEC, T_WATER, T_ICE, T_BED, O_FLOAT } from './chunk.js';
+import { genCol, genSection, genCoarse, shelterTop, CS, ci, SEC, T_WATER, T_ICE, T_BED, O_FLOAT } from './chunk.js';
 import { chunkMesh, floraMesh, farFlora, objPose, objMesh } from './mesh.js';
 import { packMesh, concat, frameOf, RS } from './pack.js';
 import { farMesh, FT } from './far.js';
@@ -28,15 +28,15 @@ function colFor(L, q, cache) {
 export function colSummary(col, L) {
   const top = shelterTop(col, L).slice();
   let lo = Infinity, hi = -Infinity;
-  for (let i = 0; i < CW * CW; i++) {
-    const c = col.cells[i], basin = c.t === T_WATER || c.t === T_ICE || c.t === T_BED, sky = col.sky[i];
+  for (let y = -1; y <= CS; y++) for (let x = -1; x <= CS; x++) {   // свої клітинки й рамка в 1 клітинку (діапазон секцій — як до рамки 2)
+    const i = ci(x, y), c = col.cells[i], basin = c.t === T_WATER || c.t === T_ICE || c.t === T_BED, sky = col.sky[i];
     lo = Math.min(lo, (basin ? c.bed : Math.min(sky, c.h)) - 10);
     // скелі — над поверхнею; водойма — до рівня рідини (глибоке море: інакше секцію з поверхнею не підвантажували)
     hi = Math.max(hi, (basin && c.t !== T_BED ? Math.max(c.h, SEA) : c.h + (c.fb || 0)) + 8);
   }
   for (const o of col.obj) hi = Math.max(hi, o.z + 1);
   return {
-    d: col.d, n: col.n, cx: col.cx, cy: col.cy, h: col.h.slice(), t: col.t.slice(), v: col.v.slice(), bm: col.bm.slice(), top,
+    d: col.d, n: col.n, cx: col.cx, cy: col.cy, h: col.h.slice(), t: col.t.slice(), v: col.v.slice(), bm: col.bm.slice(), top, sky: col.sky.slice(),
     czLo: Math.floor(lo / SEC), czHi: Math.floor(hi / SEC), isl: L.islands > 0.02 ? ISL_CZ : [], obj: col.obj, sp: col.sp,
   };
 }
@@ -84,7 +84,7 @@ export function runJob(L, q, cache) {
   }
   const sec = q.stand ? standSection(col, q.cz) : genSection(L, col, q.cz);
   if (sec.empty) return { data: sec, bufs: [] };
-  const m = chunkMesh({ cx: q.cx, cy: q.cy, h: col.h, bm: col.bm, v: col.v, top: shelterTop(col, L), b: sec.b, k0: sec.k0, nk: sec.nk, obj: col.obj, sp: col.sp }, L, { near: false });
+  const m = chunkMesh({ cx: q.cx, cy: q.cy, h: col.h, bm: col.bm, v: col.v, top: shelterTop(col, L), sky: col.sky, b: sec.b, k0: sec.k0, nk: sec.nk, obj: col.obj, sp: col.sp }, L, { near: false });
   const [dx, dy, dz] = frameOf(q.cx, q.cy, q.cz), s = packMesh(m.solid, dx, dy, dz), f = packMesh(m.far, dx, dy, dz);
   const op = f.n ? concat(s, f) : s, lq = m.liquid ? packMesh(m.liquid, dx, dy, dz) : null;
   const bufs = [sec.b.buffer, op.buf];

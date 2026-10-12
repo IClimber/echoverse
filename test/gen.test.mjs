@@ -483,13 +483,13 @@ test('рельєф 3.1: родини кривої «материк → висо�
 });
 
 test('скелі: вежі й нависання є, відірваних шматків немає; межі чанків і окремий стовпець збігаються', async () => {
-  const { genCol, genBlocks, genColumn, bv, solidB, B_FLOAT } = await import('../js/gen/chunk.js');
+  const { genCol, genBlocks, genColumn, bv, solidB, B_FLOAT, CW, FR } = await import('../js/gen/chunk.js');
   const seed = hashStr('скелі');
   let L = null;
   for (let i = 0; i < 20000 && !L; i++) { const M = lawsOf(seed, 0, 7 * i); if (M.land.cliff.share >= 0.4 && M.land.cliff.F >= 40) L = M; }
   assert.ok(L, 'немає всесвіту зі скелями');
   let cx0 = null, cy0 = 0;                                   // чанк з вежами (> 50 блоків скель)
-  const towers = (col) => { let t = 0; for (let i = 0; i < col.cells.length; i++) { const c = col.cells[i], x = i % (CS + 2), y = Math.floor(i / (CS + 2)); if (c.fk && x > 0 && y > 0 && x <= CS && y <= CS) for (const v of c.fk) t += v; } return t; };
+  const towers = (col) => { let t = 0; for (let i = 0; i < col.cells.length; i++) { const c = col.cells[i], x = i % CW - FR, y = Math.floor(i / CW) - FR; if (c.fk && x >= 0 && y >= 0 && x < CS && y < CS) for (const v of c.fk) t += v; } return t; };
   for (let cy = -20; cy < 20 && cx0 === null; cy++) for (let cx = -20; cx < 20; cx++) if (tile(L, cx * CS + 8, cy * CS + 8).fb > 10 && towers(genCol(L, cx, cy)) > 50) { cx0 = cx; cy0 = cy; break; }
   assert.ok(cx0 !== null, 'немає смуги скель');
   const cols = {};

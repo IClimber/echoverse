@@ -41,7 +41,7 @@ test('workerOf: стовпець і його секції — в одного, �
 // ================= Щільна вершина, алокатор, еталон мешів =================
 import { hashStr, rng } from '../js/rng.js';
 import { lawsOf } from '../js/universe.js';
-import { genChunk, genCol, genSection, CS, SEC } from '../js/gen/chunk.js';
+import { genChunk, genCol, genSection, CS, SEC, FR } from '../js/gen/chunk.js';
 import { chunkMesh, objPose } from '../js/gen/mesh.js';
 import { colSummary } from '../js/gen/job.js';
 import { packMesh, unpack, meshHash, meshDigest, regionOf, frameOf, packStats, VB, RS, RW, RH } from '../js/gen/pack.js';
@@ -134,7 +134,7 @@ export function meshDigests(seedText) {
     for (const cz of czs) {
       const sec = genSection(L, col, cz);
       if (sec.empty) continue;
-      const m = chunkMesh({ cx, cy, h: col.h, bm: col.bm, v: col.v, top: col.top, b: sec.b, k0: sec.k0, nk: sec.nk, obj: col.obj, sp: col.sp }, L);
+      const m = chunkMesh({ cx, cy, h: col.h, bm: col.bm, v: col.v, top: col.top, sky: col.sky, b: sec.b, k0: sec.k0, nk: sec.nk, obj: col.obj, sp: col.sp }, L);
       const dz = cz * SEC * LEVEL - rz0 * RS * SEC * LEVEL;
       out[`${i}:${cz}:solid`] = meshDigest(meshHash(packMesh(m.solid, dx, dy, dz).buf));
       if (m.liquid) out[`${i}:${cz}:liq`] = meshDigest(meshHash(packMesh(m.liquid, dx, dy, dz).buf));
@@ -177,7 +177,7 @@ test('грані твердого — назовні (для відсіканн�
     for (const cz of S.isl) if (!czs.includes(cz)) czs.push(cz);
     for (const cz of czs) {
       const sec = genSection(L, col, cz);
-      if (!sec.empty) check(chunkMesh({ cx, cy, h: col.h, bm: col.bm, v: col.v, b: sec.b, k0: sec.k0, nk: sec.nk, obj: col.obj, sp: col.sp }, L, { near: false, far: false }).solid, `${i}:${cz}`);
+      if (!sec.empty) check(chunkMesh({ cx, cy, h: col.h, bm: col.bm, v: col.v, sky: col.sky, b: sec.b, k0: sec.k0, nk: sec.nk, obj: col.obj, sp: col.sp }, L, { near: false, far: false }).solid, `${i}:${cz}`);
       for (const s of [2, 4]) {
         const G = genCoarse(L, col, cz, s);
         if (G.empty) continue;
@@ -375,14 +375,14 @@ test('рівні: пороги й гістерезис', () => {
 import { B_ROCK as B_R } from '../js/gen/chunk.js';
 import { template as tmpl } from '../js/gen/plants.js';
 import { speciesOf as spOf, regionAt as regAt } from '../js/gen/flora.js';
-const NWa = CS + 2, NKa = 16;
+const NWa = CS + 2 * FR, NKa = 16;
 // синтетична секція: solid(x, y, k) → тверде; top — верх укриття (блоки) чи null
 function aoSection(solid, top) {
-  const b = new Uint8Array(NWa * NWa * (NKa + 2));
-  for (let y = -1; y <= CS; y++) for (let x = -1; x <= CS; x++) for (let k = -1; k <= NKa; k++)
-    if (solid(x, y, k)) b[((y + 1) * NWa + x + 1) * (NKa + 2) + k + 1] = B_R;
+  const b = new Uint8Array(NWa * NWa * (NKa + 2 * FR));
+  for (let y = -FR; y < CS + FR; y++) for (let x = -FR; x < CS + FR; x++) for (let k = -FR; k < NKa + FR; k++)
+    if (solid(x, y, k)) b[((y + FR) * NWa + x + FR) * (NKa + 2 * FR) + k + FR] = B_R;
   const T = top === null ? null : new Int16Array(NWa * NWa);
-  if (T) for (let y = -1; y <= CS; y++) for (let x = -1; x <= CS; x++) T[(y + 1) * NWa + x + 1] = typeof top === 'function' ? top(x, y) : top;
+  if (T) for (let y = -FR; y < CS + FR; y++) for (let x = -FR; x < CS + FR; x++) T[(y + FR) * NWa + x + FR] = typeof top === 'function' ? top(x, y) : top;
   return { cx: 0, cy: 0, b, h: new Int16Array(NWa * NWa).fill(4), bm: new Uint8Array(NWa * NWa), v: new Uint8Array(NWa * NWa), top: T, k0: 0, nk: NKa, obj: [], sp: [] };
 }
 const upVerts = (m) => { const r = []; for (let v = 0; v < m.mat.length; v++) if (m.nor[v * 3 + 2] > 100) r.push(v); return r; };

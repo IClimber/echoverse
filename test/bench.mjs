@@ -75,12 +75,13 @@ console.log(`дальність 32 (14 / 42 / 44 % стовпців — повн
     for (let cy = 0; cy < 3; cy++) for (let cx = 0; cx < 3; cx++) { C.set(`${cx},${cy}`, genChunk(L, cx, cy)); cols.set(`${cx},${cy}`, genCol(L, cx, cy)); }
     const block = (x, y, k) => { const c = C.get(`${Math.floor(x / 16)},${Math.floor(y / 16)}`); if (!c) return -1; if (k < 0) return B_STONE; if (k >= H) return B_AIR; return c.b[bi(x - Math.floor(x / 16) * 16, y - Math.floor(y / 16) * 16, k)]; };
     const secs = new Map(), sec = (cx, cy, cz) => { const col = cols.get(`${cx},${cy}`); if (!col || cz < 0 || cz >= H / SEC) return undefined; const k = `${cx},${cy},${cz}`; if (!secs.has(k)) secs.set(k, genSection(L, col, cz)); return secs.get(k); };
-    for (const P of [{ liquid: L.liquid, laws: L, obj: () => null, block, sec }, { liquid: L.liquid, laws: L, obj: () => null, block }]) {
+    const sky = (cx, cy) => { const c = cols.get(`${cx},${cy}`); return c ? c.sky : null; };   // як у грі (world.probe)
+    for (const P of [{ liquid: L.liquid, laws: L, obj: () => null, block, sec, sky }, { liquid: L.liquid, laws: L, obj: () => null, block, sky }]) {
       const b0 = stats.builds, t0 = stats.buildMs;
       colliderOf(P).gather(1, 1, 0, 47, 47, H * 0.5, createList(1 << 16));
       if (P.sec) { secB += stats.buildMs - t0; nB += stats.builds - b0; } else { secV += stats.buildMs - t0; nV += stats.builds - b0; }
     }
-    const P = { liquid: L.liquid, laws: L, obj: () => null, block, sec };
+    const P = { liquid: L.liquid, laws: L, obj: () => null, block, sec, sky };
     let p = null;
     for (let d = 0; d < 16 && !p; d++) for (let dy = -d; dy <= d && !p; dy++) for (let dx = -d; dx <= d && !p; dx++) {
       const x = 24 + dx + 0.5, y = 24 + dy + 0.5;

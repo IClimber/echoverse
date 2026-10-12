@@ -16,7 +16,7 @@ import { CameraControls } from 'playcanvas/scripts/esm/camera-controls.mjs';
 import { SKY_GLSL, SKY_WGSL } from './sky-shader.js';
 import { lawsOf } from './universe.js';
 import { hashStr } from './rng.js';
-import { CS, SEC, B_GRASS, B_SOIL, B_STONE, B_ROCK } from './gen/chunk.js';
+import { CS, FR, SEC, B_GRASS, B_SOIL, B_STONE, B_ROCK } from './gen/chunk.js';
 import { chunkMesh, Mesh } from './gen/mesh.js';
 import { packMesh, frameOf, PO, PQ, RW, RH } from './gen/pack.js';
 import { texturesOf, TEX } from './textures.js';
@@ -47,13 +47,13 @@ function topOf(x, y) { for (let k = 34; k >= 0; k--) if (block(x, y, k)) return 
 
 // Секція (cx, cy, cz) у форматі chunkMesh: блоки з рамкою, верх укриття, без рослин
 function section(cx, cy, cz) {
-  const NW = CS + 2, NK = SEC, b = new Uint8Array(NW * NW * (NK + 2)), top = new Int16Array(NW * NW);
-  for (let y = -1; y <= CS; y++) for (let x = -1; x <= CS; x++) {
-    const X = cx * CS + x, Y = cy * CS + y, c = (y + 1) * NW + x + 1;
-    top[c] = topOf(X, Y);
-    for (let k = -1; k <= NK; k++) b[c * (NK + 2) + k + 1] = block(X, Y, cz * SEC + k);
+  const NW = CS + 2 * FR, NK = SEC, b = new Uint8Array(NW * NW * (NK + 2 * FR)), top = new Int16Array(NW * NW), sky = new Int16Array(NW * NW);
+  for (let y = -FR; y < CS + FR; y++) for (let x = -FR; x < CS + FR; x++) {
+    const X = cx * CS + x, Y = cy * CS + y, c = (y + FR) * NW + x + FR;
+    top[c] = topOf(X, Y); sky[c] = top[c] - 1;
+    for (let k = -FR; k < NK + FR; k++) b[c * (NK + 2 * FR) + k + FR] = block(X, Y, cz * SEC + k);
   }
-  return { cx, cy, b, h: top, bm: new Uint8Array(NW * NW), v: new Uint8Array(NW * NW), top, k0: cz * SEC, nk: NK, obj: [], sp: [] };
+  return { cx, cy, b, h: top, bm: new Uint8Array(NW * NW), v: new Uint8Array(NW * NW), top, sky, k0: cz * SEC, nk: NK, obj: [], sp: [] };
 }
 
 export async function runLight() {

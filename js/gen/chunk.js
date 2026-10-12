@@ -10,8 +10,10 @@ import { nsqrt } from '../num.js';
 import { BIOMES, pickBiome, Z_TEMP, Z_COLD, Z_HOT, Z_WET, Z_DRY, Z_DESERT, Z_SNOW, Z_PEAK, Z_BEACH } from './biomes.js';
 import { regionAt, speciesOf, pickSpecies } from './flora.js';
 
-export const CS = 16, CW = CS + 2;            // чанк і чанк із рамкою в одну клітинку з усіх боків (бічні грані)
-export const ci = (x, y) => (y + 1) * CW + x + 1;   // індекс клітинки (x, y ∈ −1…CS) у масивах чанка
+// FR — рамка: стільки клітинок (і блоків) з кожного боку від чанка. 2 (12.10.2026, прямі стіни: вершині куба
+// Surface Nets треба знати блоки на 1 далі за куб — mesh.js dualV); до того — 1
+export const CS = 16, FR = 2, CW = CS + 2 * FR;   // чанк і чанк із рамкою FR з усіх боків (бічні грані)
+export const ci = (x, y) => (y + FR) * CW + x + FR;   // індекс клітинки (x, y ∈ −FR…CS+FR−1) у масивах чанка
 // T_WATER — водойма з рідиною всесвіту (вода, кислота, метан, лава): h — рівень дна, поверхня — SURF_Z;
 // T_ICE — замерзла вода (по ній ходять, h = SEA); T_BED — сухе русло (водойма всесвіту без рідини, h — дно)
 export const T_WATER = 0, T_ICE = 1, T_SAND = 2, T_LUSH = 3, T_DRY = 4, T_DESERT = 5, T_SNOW = 6, T_ROCK = 7, T_BED = 8;
@@ -381,7 +383,7 @@ const TOP_BLOCK = [B_BED, B_ICE, B_SAND, B_GRASS, B_DRY, B_DESERT, B_SNOW, B_ROC
 const SUB_BLOCK = [B_SOIL, B_SOIL, B_SANDSTONE, B_SOIL, B_SOIL, B_SANDSTONE, B_SOIL, B_STONE, B_SOIL];
 // Об'єм блоків (секція чи стовпець): x, y ∈ −1…CS (рамка), k ∈ −1…nk (рамка знизу й згори); індекс — стовпець
 // за стовпцем. k — локальний (від k0 об'єму)
-export const bv = (x, y, k, nk) => ((y + 1) * CW + x + 1) * (nk + 2) + k + 1;
+export const bv = (x, y, k, nk) => ((y + FR) * CW + x + FR) * (nk + 2 * FR) + k + FR;
 export const bi = (x, y, k) => bv(x, y, k, H);           // стовпець 0…H−1 (тести, відбитки)
 export const SEC = 16;                                    // секція — 16×16×16 блоків
 const ISL0 = 44, ISL1 = 84, ISLC = 63;                    // смуга висот ширяючих островів (блоки)
@@ -600,20 +602,20 @@ export function genCol(L, cx, cy) {
   const n = CW * CW, h = new Int16Array(n), t = new Uint8Array(n), v = new Uint8Array(n), bm = new Uint8Array(n), sky = new Int16Array(n);
   const cells = new Array(n), x0 = cx * CS, y0 = cy * CS;
   let hmin = Infinity, hmax = -Infinity;
-  for (let y = -1; y <= CS; y++) for (let x = -1; x <= CS; x++) {
+  for (let y = -FR; y < CS + FR; y++) for (let x = -FR; x < CS + FR; x++) {
     const c = tile(L, x0 + x, y0 + y), i = ci(x, y);
     cells[i] = c; h[i] = c.h; t[i] = c.t; v[i] = c.v; bm[i] = c.bm;
     if (c.h < hmin) hmin = c.h;
     if (c.h > hmax) hmax = c.h;
   }
-  cliffBands(L, x0 - 1, y0 - 1, CW, CW, (i, j) => cells[ci(i - 1, j - 1)]);
+  cliffBands(L, x0 - FR, y0 - FR, CW, CW, (i, j) => cells[ci(i - FR, j - FR)]);
   let top = hmax;                                         // найвищий блок скель (острови в їхній смузі — з ґратки)
   for (const c of cells) if (c.h + c.fb > top) top = c.h + c.fb;
-  const Lt = lattice(L, x0 - 1, y0 - 1, x0 + CS, y0 + CS, hmin - SKY_D - 8, top + 16);
+  const Lt = lattice(L, x0 - FR, y0 - FR, x0 + CS + FR - 1, y0 + CS + FR - 1, hmin - SKY_D - 8, top + 16);
   const obj = [], sp = [], spi = new Map();
   const spIndex = (g) => { let i = spi.get(g.id); if (i === undefined) { i = sp.length; sp.push(g); spi.set(g.id, i); } return i; };
   const one = new Uint8Array(3);
-  for (let y = -1; y <= CS; y++) for (let x = -1; x <= CS; x++) {
+  for (let y = -FR; y < CS + FR; y++) for (let x = -FR; x < CS + FR; x++) {
     const i = ci(x, y), c = cells[i], px = x0 + x + 0.5, py = y0 + y + 0.5;
     sky[i] = isBasin(c) ? -1 : skyOf(L, Lt, c, px, py);
     if (!c.o || x < 0 || y < 0 || x >= CS || y >= CS) continue;
@@ -632,12 +634,12 @@ export function genCol(L, cx, cy) {
 
 // Блоки стовпця col на висотах k0…k0+nk−1 (з рамкою з усіх боків, індекс bv): {b, k0, nk}
 export function genBlocks(L, col, k0, nk) {
-  const b = new Uint8Array(CW * CW * (nk + 2)), x0 = col.cx * CS, y0 = col.cy * CS;
-  const Lt = k0 - 1 >= col.Lt.q0 * G && k0 + nk + 4 <= (col.Lt.q0 + col.Lt.nk - 1) * G ? col.Lt
-    : lattice(L, x0 - 1, y0 - 1, x0 + CS, y0 + CS, k0 - 1, k0 + nk + 4);
-  for (let y = -1; y <= CS; y++) for (let x = -1; x <= CS; x++) {
+  const b = new Uint8Array(CW * CW * (nk + 2 * FR)), x0 = col.cx * CS, y0 = col.cy * CS;
+  const Lt = k0 - FR >= col.Lt.q0 * G && k0 + nk + FR + 3 <= (col.Lt.q0 + col.Lt.nk - 1) * G ? col.Lt
+    : lattice(L, x0 - FR, y0 - FR, x0 + CS + FR - 1, y0 + CS + FR - 1, k0 - FR, k0 + nk + FR + 3);
+  for (let y = -FR; y < CS + FR; y++) for (let x = -FR; x < CS + FR; x++) {
     const i = ci(x, y);
-    fillCell(L, Lt, col.cells[i], x0 + x + 0.5, y0 + y + 0.5, col.sky[i], k0 - 1, nk + 2, b, bv(x, y, -1, nk));
+    fillCell(L, Lt, col.cells[i], x0 + x + 0.5, y0 + y + 0.5, col.sky[i], k0 - FR, nk + 2 * FR, b, bv(x, y, -FR, nk));
   }
   return { b, k0, nk };
 }
@@ -658,7 +660,7 @@ export function shelterTop(col, L) {
 // Чанк (cx, cy) стовпцем 0…H−1 (тести, відбитки, стенди): поверхня, блоки (індекс bi), предмети
 export function genChunk(L, cx, cy) {
   const col = genCol(L, cx, cy), V = genBlocks(L, col, 0, H);
-  return { d: L.d, n: L.n, cx, cy, h: col.h, t: col.t, v: col.v, bm: col.bm, top: shelterTop(col, L), b: V.b, k0: 0, nk: H, obj: col.obj, sp: col.sp };
+  return { d: L.d, n: L.n, cx, cy, h: col.h, t: col.t, v: col.v, bm: col.bm, top: shelterTop(col, L), sky: col.sky, b: V.b, k0: 0, nk: H, obj: col.obj, sp: col.sp };
 }
 
 // Секція (cx, cy, cz) стовпця col: блоки SEC заввишки; порожня (усе повітря) — {empty: true}
@@ -666,11 +668,19 @@ export function genChunk(L, cx, cy) {
 // немає) — {empty: true, solid: true}
 export function genSection(L, col, cz) {
   const V = genBlocks(L, col, cz * SEC, SEC);
-  let air = 0, solid = 0;
-  for (let i = 0; i < V.b.length; i++) { const b = V.b[i]; if (b === B_AIR) air++; else if (solidB(b)) solid++; }
-  if (air === V.b.length) return { empty: true, k0: V.k0, nk: SEC };
-  if (solid === V.b.length) return { empty: true, solid: true, k0: V.k0, nk: SEC };
-  return V;
+  const e = emptyOf(V.b, SEC);
+  return e ? { ...e, k0: V.k0, nk: SEC } : V;
+}
+
+// Секція без граней: усе повітря чи все тверде в собі й рамці в 1 блок (дальша рамка лише уточнює вершини наявних
+// граней — mesh.js dualV) → {empty: true[, solid: true]}, інакше null
+export function emptyOf(b, nk) {
+  let air = 0, solid = 0, n = 0;
+  for (let y = -1; y <= CS; y++) for (let x = -1; x <= CS; x++) {
+    const o = bv(x, y, -1, nk);
+    for (let k = 0; k < nk + 2; k++) { const q = b[o + k]; n++; if (q === B_AIR) air++; else if (solidB(q)) solid++; }
+  }
+  return air === n ? { empty: true } : solid === n ? { empty: true, solid: true } : null;
 }
 
 // Клітинки рамки грубої вибірки поза стовпцем (x чи y = −s): tile, скелі — смугою (рядок y = −s, x від −s до 16, і

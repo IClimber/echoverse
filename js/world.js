@@ -236,6 +236,7 @@ export function createWorld(seed, onMesh, opts = {}) {
       P = {
         liquid: L.liquid, laws: L, block: (x, y, k) => W.block(d, n, x, y, k), obj: (x, y) => W.obst(d, n, x, y), get objR() { return objR; },
         bodies: (x, y, r = 2) => W.bodiesNear(d, n, x, y, r), sec: (cx, cy, cz) => W.sec(d, n, cx, cy, cz), ver: () => W.ver,
+        sky: (cx, cy) => { const C = colOf(d, n, cx * CS, cy * CS); return C ? C.sky : null; },   // верх ґрунту клітинок (прямі стіни під стелею)
       };
       probes.set(k, P);
       if (probes.size > 4) probes.delete(probes.keys().next().value);
