@@ -14,14 +14,14 @@ export const NEXT = { first: THIRD, third: ISO, iso: FIRST };   // V: перша
 const D2R = Math.PI / 180;
 export const LIMITS = {
   iso: { pitch: [20 * D2R, 75 * D2R], zoom: [0.45, 2.5] },
-  third: { pitch: [-70 * D2R, 80 * D2R], dist: [2.5, 16] },   // від'ємний нахил — погляд угору (eyeDir)
+  third: { pitch: [-70 * D2R, 80 * D2R], dist: [3.75, 24] },   // від'ємний нахил — погляд угору (eyeDir)
   first: { pitch: [-89 * D2R, 89 * D2R] },
 };
 export const FOV = 55 * D2R, FOV1 = 70 * D2R;   // кут огляду по вертикалі: третя особа, перша (як у Minecraft)
 export const fovOf = (c) => c.mode === FIRST ? FOV1 : FOV;
-export const EYE = 0.92;             // перша особа: око над ногами (очі фігури); під низькою стелею — нижче
+export const EYE = 1.65;             // перша особа: око над ногами (очі фігури); під низькою стелею — нижче
 // Око першої особи й ціль третьої за позою (player.js p.pose): стоїть, присів, лежить, пливе під рідиною
-export const EYE_OF = { stand: EYE, crouch: 0.64, crawl: 0.3, swim: 0.3 };
+export const EYE_OF = { stand: EYE, crouch: 1.08, crawl: 0.4, swim: 0.4 };
 // Дальність (третя особа) — налаштування гравця, 8–32 чанки (setViewChunks; живі прив'язки ES-модулів — імпортери бачать нове)
 export let VIEW_R = 256;             // повні секції (клітинок)
 export let FAR_R = 1400;             // далечінь (плитки поверхні, gen/far.js), далі — туман і небо
@@ -52,13 +52,13 @@ export function setViewChunks(c) {
   VIEW_R = c * CS; SEAM = VIEW_R - 8; FAR_R = Math.max(1400, Math.round(VIEW_R * 2.75));
   return c;
 }
-export const HEAD = 1.0;             // третя особа: камера дивиться на висоту голови
-export const HEAD_OF = { stand: HEAD, crouch: 0.75, crawl: 0.45, swim: 0.45 };
+export const HEAD = 1.75;             // третя особа: камера дивиться на висоту голови
+export const HEAD_OF = { stand: HEAD, crouch: 1.15, crawl: 0.5, swim: 0.5 };
 // Третя й перша особа: куди дивиться камера (по горизонталі) — туди обернений гравець (у третій — спиною до камери)
 export const facing = (c) => c.yaw + Math.PI;
 
 export function createCamera(mode = ISO) {
-  const c = { mode, yaw: 0, pitch: 30 * D2R, zoom: 1.4, dist: 7, pitch3: 20 * D2R, pitch1: 0, distT: 7, zoomT: 1.4 };
+  const c = { mode, yaw: 0, pitch: 30 * D2R, zoom: 1.4, dist: 10.5, pitch3: 20 * D2R, pitch1: 0, distT: 10.5, zoomT: 1.4 };
   setYaw(c, Math.PI / 4);
   c.pitchT = c.pitch; c.pitch3T = c.pitch3; c.pitch1T = c.pitch1;
   return c;

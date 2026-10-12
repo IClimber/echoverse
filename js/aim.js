@@ -10,7 +10,7 @@ import { solidB, CS } from './gen/chunk.js';
 import { LEVEL, S } from './iso.js';
 import { basis, fovOf, ISO } from './camera.js';
 
-export const REACH = 3;              // досяжність рук (як удар)
+export const REACH = 4.5;            // досяжність рук, м (як удар; у Minecraft — 4,5)
 const isBody = (r) => !!r && r.hz !== undefined;
 const LST = createList(4096);
 

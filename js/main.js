@@ -8,7 +8,7 @@ import { createWorld, findSpawn, keepFor } from './world.js';
 import { colliderOf, underLiquid } from './collision.js';
 import { createList } from './engine/physics/collide.js';
 import { createDevice, landing, landingChunks, CHARGE } from './device.js';
-import { step, standableB, settle, hits, SHAPE, windShelter, SPRINT, GRAVITY, FOOT, PLAYER_MASS, HIT_IMPULSE } from './player.js';
+import { step, standableB, settle, hits, SHAPE, windShelter, SPRINT, GRAVITY, FOOT, BODY, PLAYER_MASS, HIT_IMPULSE } from './player.js';
 import { stepBody, windMoves, push, rayBody, collideBodies } from './engine/physics/bodies.js';
 import { initInput, moveAxis, turnAxis, sprintHeld, crouchHeld, vertAxis, takeActions, takeWheel, takeDrag, clearInput, lockPointer, unlockPointer, locked, cursor, devKey } from './input.js';
 import { listWorlds, putWorld, deleteWorld, serialize, deserialize, newId } from './save.js';
@@ -488,7 +488,7 @@ function boot(renderer) {
     const ox = ob && ob.x, oy = ob && ob.y;
     if (ob) { ob.vz -= PLAYER_MASS * GRAVITY * (g.ph ? g.ph.g : L.grav) * dt / ob.mass; ob.sleep = false; ob.calm = 0; }
     if (me.moving && !me.fly) for (const b of g.world.bodiesNear(g.d, g.n, me.x, me.y, 1.5)) {
-      if (b === ob || b.held || Math.abs(me.x - b.x) > b.hx + FOOT + 0.08 || Math.abs(me.y - b.y) > b.hy + FOOT + 0.08 || me.z > b.z + b.hz || me.z + (me.h || 0.98) < b.z - b.hz) continue;
+      if (b === ob || b.held || Math.abs(me.x - b.x) > b.hx + FOOT + 0.08 || Math.abs(me.y - b.y) > b.hy + FOOT + 0.08 || me.z > b.z + b.hz || me.z + (me.h || BODY) < b.z - b.hz) continue;
       const dx = b.x - me.x, dy = b.y - me.y, l = Math.hypot(dx, dy) || 1, mv = Math.hypot(me.vx || 0, me.vy || 0);
       if (mv > 0.1 && (dx * me.vx + dy * me.vy) > 0) { push(b, [dx / l * PLAYER_MASS * 5 * dt, dy / l * PLAYER_MASS * 5 * dt, 0]); b.dirty = true; }
     }
@@ -518,7 +518,7 @@ function boot(renderer) {
   function actTarget() {
     const a = g.aim, me = g.me;
     if (!a || camera.mode !== ISO) return a;
-    if (Math.hypot(a.p[0] - me.x, a.p[1] - me.y, a.p[2] - (me.z + 0.55 * (me.h || 0.98))) > REACH + 0.5) { toast('Задалеко'); return undefined; }
+    if (Math.hypot(a.p[0] - me.x, a.p[1] - me.y, a.p[2] - (me.z + 0.55 * (me.h || BODY))) > REACH + 0.5) { toast('Задалеко'); return undefined; }
     me.yaw = Math.atan2(a.p[1] - me.y, a.p[0] - me.x);
     return a;
   }
@@ -527,7 +527,7 @@ function boot(renderer) {
     const me = g.me;
     if (camera.mode !== ISO) return lookDir();
     const a = g.aim;
-    if (a) { const d = [a.p[0] - me.x, a.p[1] - me.y, a.p[2] - (me.z + 0.55 * (me.h || 0.98))], l = Math.hypot(...d) || 1; return d.map((v) => v / l); }
+    if (a) { const d = [a.p[0] - me.x, a.p[1] - me.y, a.p[2] - (me.z + 0.55 * (me.h || BODY))], l = Math.hypot(...d) || 1; return d.map((v) => v / l); }
     return [Math.cos(me.yaw), Math.sin(me.yaw), 0];
   }
   function drop() { if (g.carry) { g.carry.b.held = false; g.carry.b.dirty = true; g.carry = null; } }
@@ -774,7 +774,7 @@ function boot(renderer) {
     const wrap = (v) => Math.atan2(Math.sin(v), Math.cos(v));
     if (camera.mode !== ISO) me.look = { p: pitchOf(camera), y: wrap(facing(camera) - me.yaw) };
     else if (g.aim && me.placed) {
-      const dx = g.aim.p[0] - me.x, dy = g.aim.p[1] - me.y, dz = g.aim.p[2] - (me.z + 0.9 * (me.h || 0.98));
+      const dx = g.aim.p[0] - me.x, dy = g.aim.p[1] - me.y, dz = g.aim.p[2] - (me.z + 0.9 * (me.h || BODY));
       me.look = { p: Math.atan2(-dz, Math.hypot(dx, dy)), y: wrap(Math.atan2(dy, dx) - me.yaw) };
     } else me.look = { p: 0, y: 0 };
     const anim = animate(me, dt, now, physOf(L).speed * (me.run ? SPRINT * 0.85 : 1));
@@ -797,9 +797,9 @@ function boot(renderer) {
     setText('addr', g.rec.stand ? `Стенд руху · g ${gStr(L)} · тертя ${String(+L.phys.friction.toFixed(2)).replace('.', ',')}${wOver === 'rain' ? ' · дощ' : ''}`
       : `Глибина ${g.d} · всесвіт ${fmtN(g.n)} · ${clockStr(sk.phase)}${L.sky.lock ? ' (вічно)' : ''}`);
     const an = g.ph && g.ph.anom ? ` · аномалія ×${g.ph.anom.toFixed(1).replace('.', ',')}` : '';
-    setText('coords', `x ${Math.floor(me.x)} · y ${Math.floor(me.y)} · висота ${Math.floor(me.z / LEVEL) - SEA} · гравітація ${gStr(L)}${an}${me.wet ? ` · у рідині: ${liqStr(L.liquid)}${L.liquid.danger ? ' — небезпечно' : ''}` : ''}`);
+    setText('coords', `x ${Math.floor(me.x)} · y ${Math.floor(me.y)} · висота ${Math.round(me.z - SEA * LEVEL)} м · гравітація ${gStr(L)}${an}${me.wet ? ` · у рідині: ${liqStr(L.liquid)}${L.liquid.danger ? ' — небезпечно' : ''}` : ''}`);
     const A = L.air;
-    setText('env', `${loc.name}${W.windK > 0.3 ? ` · вітер ${(W.windK * 1.8).toFixed(0)} м/с${g.lee < 0.5 ? ' (затишок)' : g.me.windPush ? ' (зносить)' : ''}` : ''}${A.breath ? '' : ` · повітря ${A.gasName}`}${A.rad > 0.3 ? ` · радіація ${A.rad > 0.65 ? 'висока' : 'помірна'}` : ''}`);
+    setText('env', `${loc.name}${W.windK > 0.3 ? ` · вітер ${W.windK.toFixed(0)} м/с${g.lee < 0.5 ? ' (затишок)' : g.me.windPush ? ' (зносить)' : ''}` : ''}${A.breath ? '' : ` · повітря ${A.gasName}`}${A.rad > 0.3 ? ` · радіація ${A.rad > 0.65 ? 'висока' : 'помірна'}` : ''}`);
     $('charge').hidden = !ch;
     if (ch) {
       setText('chargeTxt', ch.t < CHARGE ? `Стрибок → ${addrStr(ch.to[0], ch.to[1])}` : 'Стабілізація…');

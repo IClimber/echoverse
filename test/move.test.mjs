@@ -21,21 +21,25 @@ function go(p, P, n, ix, iy, ctl = {}, ph = PH1, mb = X, jumpAt = -1) {
 }
 const man = (x, y, z) => ({ x, y, z, vz: 0, ground: true });
 
-// Печера: зала x < 3 (4 блоки заввишки), далі хід: y — ws…we, заввишки hc блоків, з x ≥ 7 — lo блоків (до x < x1),
-// потім знову зала; підлога — верх k = 1
+// Печера: зала x < 3 (6 рівнів — 3 м заввишки), далі хід: y — ws…we, заввишки hc рівнів, з x ≥ 7 — lo рівнів (до x < x1),
+// потім знову зала; підлога — верх k = 1. Гравець 1,8 м (12.10.2026)
 const cave = (ws, we, hc, lo, x1 = 99) => box((x, y, k) => {
   if (k < 2) return B_STONE;
-  if (x < 3 || x >= x1) return y >= -3 && y <= 5 && k < 6 ? B_AIR : B_STONE;
+  if (x < 3 || x >= x1) return y >= -3 && y <= 5 && k < 8 ? B_AIR : B_STONE;
   return y >= ws && y <= we && k < 2 + (x >= 7 ? lo : hc) ? B_AIR : B_STONE;
 });
 const free = (P, p) => !hits(P, p.x, p.y, p.z, shapeOf(p));
 
-test('присідання: коридор 1×2 (видимо 0,75) — стоячи ні, з Ctrl — так; швидкість ×0,3', () => {
-  const P = cave(1, 1, 2, 2);
-  const a = go(man(1.5, 1.5, 1), P, 400, 1, 0);
-  assert.ok(a.x < 3.3 && a.pose === 'stand', `стоячи: ${a.x} ${a.pose}`);
-  const b = go(man(1.5, 1.5, 1), P, 1600, 1, 0, { crouch: true });
-  assert.ok(b.x > 10 && b.pose === 'crouch' && free(P, b), `з Ctrl: ${b.x} ${b.pose}`);
+test('присідання: коридори 1 × 4 і 1 × 3 рівні (видимо 1,75 і 1,25) — стоячи ні, з Ctrl — так; 2 × 4 — стоячи; швидкість ×0,3', () => {
+  for (const hc of [4, 3]) {
+    const P = cave(1, 1, hc, hc);
+    const a = go(man(1.5, 1.5, 1), P, 400, 1, 0);
+    assert.ok(a.x < 4.5 && a.pose === 'stand', `${hc}: стоячи ${a.x} ${a.pose}`);
+    const b = go(man(1.5, 1.5, 1), P, 1600, 1, 0, { crouch: true });
+    assert.ok(b.x > 10 && b.pose === 'crouch' && free(P, b), `${hc}: з Ctrl ${b.x} ${b.pose}`);
+  }
+  const W = cave(0, 1, 4, 4), w = go(man(1.5, 1.0, 1), W, 600, 1, 0);
+  assert.ok(w.x > 10 && w.pose === 'stand' && free(W, w), `2 × 4: ${w.x} ${w.pose}`);
   // швидкість присіду — на рівнині за 1 с
   const F = box((x, y, k) => k < 2 ? B_STONE : B_AIR), c = go(man(0.5, 0.5, 1), F, 120, 1, 0, { crouch: true });
   assert.ok(Math.abs(c.x - 0.5 - SPEED * SNEAK) < SPEED * SNEAK * 0.03, `присід за 1 с: ${c.x - 0.5}`);
@@ -44,9 +48,9 @@ test('присідання: коридор 1×2 (видимо 0,75) — стоя
   assert.ok(Math.abs(d.x - c.x) < 1e-9, `біг у присіді: ${d.x} / ${c.x}`);
 });
 
-test('повзання: з присіду в лаз 3×1 і 2×1 лягаєш сам; 1×1 — ні; без Ctrl — ні; з лазу без Ctrl — встаєш', () => {
-  for (const [ws, we] of [[0, 2], [0, 1]]) {
-    const P = cave(ws, we, 2, 1);
+test('повзання: з присіду в лаз 3 × 2 і 1 × 2 рівні (видимо 1,0 і 0,75) лягаєш сам; 2 × 1 (0,48) — ні; без Ctrl — ні; з лазу без Ctrl — встаєш', () => {
+  for (const [ws, we] of [[0, 2], [1, 1]]) {
+    const P = cave(ws, we, 3, 2);
     const a = go(man(1.5, 1.5, 1), P, 400, 1, 0);
     assert.ok(a.x < 6.6 && a.pose === 'stand', `${we - ws + 1}: стоячи ${a.x}`);
     let crawl = false;
@@ -54,10 +58,10 @@ test('повзання: з присіду в лаз 3×1 і 2×1 лягаєш с
     go(b, P, 1, 1, 0, { crouch: true }); crawl = b.pose === 'crawl';
     assert.ok(b.x > 10 && crawl && free(P, b), `${we - ws + 1}: з Ctrl ${b.x} ${b.pose}`);
   }
-  const one = go(man(1.5, 1.5, 1), cave(1, 1, 2, 1), 3000, 1, 0, { crouch: true });
-  assert.ok(one.x < 7, `1×1: ${one.x}`);
-  // лаз 2×1 від x = 7 до 11, далі зала: Ctrl відпустив у лазі — лежиш (стеля), вийшов — стоїш
-  const P = cave(0, 1, 2, 1, 11), p = go(man(1.5, 1.0, 1), P, 760, 1, 0, { crouch: true });
+  const one = go(man(1.5, 1.0, 1), cave(0, 1, 3, 1), 3000, 1, 0, { crouch: true });
+  assert.ok(one.x < 8, `2 × 1: ${one.x}`);
+  // лаз 3 × 2 від x = 7 до 11, далі зала: Ctrl відпустив у лазі — лежиш (стеля), вийшов — стоїш
+  const P = cave(0, 2, 3, 2, 11), p = go(man(1.5, 1.0, 1), P, 760, 1, 0, { crouch: true });
   assert.ok(p.x > 7.5 && p.x < 11 && p.pose === 'crawl', `у лазі: ${p.x} ${p.pose}`);
   go(p, P, 30, 0, 0);
   assert.ok(p.pose === 'crawl' && free(P, p), `під стелею без Ctrl: ${p.pose}`);
@@ -192,10 +196,10 @@ test('драбина й ліана: чіпляєшся, зайшовши; шви
 // Басейн: дно — верх k = 1 (z 1), вода k 2…7 (поверхня 3,35); стіна x = 10 зі щілиною в 1 блок (k 3) на y −1…2
 const pool = (wall = false) => box((x, y, k) => {
   if (k < 2) return B_STONE;
-  if (wall && x === 10 && k < 8 && !(k === 3 && y >= -1 && y <= 2)) return B_STONE;
-  return k < 8 ? B_LIQ : B_AIR;
+  if (wall && x === 10 && k < 12 && !((k === 3 || k === 4) && y >= -1 && y <= 2)) return B_STONE;
+  return k < 12 ? B_LIQ : B_AIR;
 });
-const SURF = 4 - 0.15;
+const SURF = 6 - 0.15;
 
 test('пірнання: Ctrl — униз, відпустив — спливаєш до рівня плавання; пробіл — угору; Shift — куди дивишся', () => {
   const P = pool(), p = man(5.5, 0.5, SURF - FLOAT_Z);
@@ -233,11 +237,11 @@ test('плавання за поглядом: на поверхні до 30° у
   assert.ok(p.z > z2 + 0.2, `погляд угору — угору: ${z2} → ${p.z}`);
   go(p, P, 120, 0, -1, { look: dir(80) }, PH1, TO_WALL);
   const z3 = p.z;
-  go(p, P, 1440, 0, 0);                                    // з дна (z 1) — 0,3 од/с
+  go(p, P, 2400, 0, 0);                                    // з дна (z 1) — 0,3 м/с
   assert.ok(!p.dive && Math.abs(p.z - fz) < 0.05 && z3 < fz - 1, `відпустив — виштовхує: ${z3} → ${p.z} ${p.dive}`);
 });
 
-test('під водою щілину в 1 блок пропливаєш бігом (поза плавання), без бігу — ні', () => {
+test('під водою щілину в 1 м (2 рівні) пропливаєш бігом (поза плавання), без бігу — ні', () => {
   const P = pool(true), L = [1, 0, 0];
   const s = man(7.5, 0.5, 1.56);
   s.dive = true;
@@ -277,15 +281,19 @@ test('фігура: голова — за поглядом; присів — с�
   let a1; for (let i = 0; i < 200; i++) a1 = animate(me1, 1 / 60, i * 16);
   const H = pm(a1, 0, 0, 0, 0).head, tilt = Math.atan2(-H[2], H[0]);
   assert.ok(Math.abs(tilt - 0.5) < 0.01, `голова: ${tilt}`);
-  // присів: низ гомілок на землі, верх ≤ 0,74
+  // стоїть: ступні на землі, верх голови — 1,8 (зріст)
+  const st = all({ pose: 'stand' }).map((p) => p[2]);
+  assert.ok(Math.min(...st) > -0.02 && Math.abs(Math.max(...st) - 1.8) < 0.03, `стоїть: ${Math.min(...st)}…${Math.max(...st)}`);
+  // присів: низ гомілок на землі, верх ≤ 1,22 (форма присіду — 1,2)
   const cr = { pose: 'crouch' }, shins = [...pts(cr, 'shinL'), ...pts(cr, 'shinR')], zc = all(cr).map((p) => p[2]);
   const lowS = Math.min(...shins.map((p) => p[2]));
-  assert.ok(lowS > -0.02 && lowS < 0.03 && Math.max(...zc) <= 0.74, `присів: низ ${lowS}, верх ${Math.max(...zc)}`);
-  // лежить: верх ≤ 0,45, середнє x — біля центру капсули
+  assert.ok(lowS > -0.02 && lowS < 0.03 && Math.max(...zc) <= 1.22, `присів: низ ${lowS}, верх ${Math.max(...zc)}`);
+  // лежить: верх ≤ 0,62 (форма — 0,6), середнє x — біля центру капсули
   const ly = all({ pose: 'crawl' }), mx = ly.reduce((s, p) => s + p[0], 0) / ly.length;
-  assert.ok(Math.max(...ly.map((p) => p[2])) <= 0.45 && Math.abs(mx) < 0.2, `лежить: верх ${Math.max(...ly.map((p) => p[2]))}, x ${mx}`);
+  assert.ok(Math.max(...ly.map((p) => p[2])) <= 0.62 && Math.abs(mx) < 0.25, `лежить: верх ${Math.max(...ly.map((p) => p[2]))}, x ${mx}`);
   // стіна з нормаллю −x (стіна з боку +x): yaw = atan2(−ny, −nx) = 0 — обличчя (+x голови) до стіни
-  const wl = { pose: 'stand', climb: { kind: 'wall', nx: -1, ny: 0 }, yaw: 0, moving: true, climbD: 1 }, Hd = pts(wl, 'head');
-  const face = Math.max(...Hd.map((p) => p[0])), back = Math.min(...Hd.map((p) => p[0]));
-  assert.ok(face > 0.1 && back < 0, `стіна: обличчя ${face}`);
+  const wl = { pose: 'stand', climb: { kind: 'wall', nx: -1, ny: 0 }, yaw: 0, moving: true, climbD: 1 };
+  let aw; for (let i = 0; i < 200; i++) aw = animate(wl, 1 / 60, i * 16);
+  const Hw = pm(aw, 0, 0, 0, 0).head;
+  assert.ok(Hw[0] > 0.9, `стіна: обличчя (вісь +x голови) ${Hw[0]}`);
 });

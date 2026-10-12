@@ -16,17 +16,17 @@ const SCENES = arg('scenes', Object.keys(ALL).join(',')).split(',').filter((k) =
 // Стенд руху ?move (gen/stand.js): сцена — дії через ?dev (eco.spot — місце, eco.key — клавіші, eco.look — камера)
 const K = (c, d = true) => `eco.key('${c}', ${d});`;
 const MOVE = {
-  mcrouch: ["eco.setCam('third'); eco.spot('start');", K('ControlLeft'), 600, 'eco.look(-0.9, 0.25, 4);', 600, 'shot', K('ControlLeft', false)],
-  mcrawl: ["eco.setCam('third'); eco.spot('A3');", K('ControlLeft') + K('KeyW'), 2500, K('KeyW', false) + 'eco.g.me.x = 20.3;', 300, 'eco.look(Math.PI + 0.5, 0.15, 3);', 700, 'shot'],
+  mcrouch: ["eco.setCam('third'); eco.spot('start');", K('ControlLeft'), 600, 'eco.look(-0.9, 0.25, 6);', 600, 'shot', K('ControlLeft', false)],
+  mcrawl: ["eco.setCam('third'); eco.spot('A5');", K('ControlLeft') + K('KeyW'), 2500, K('KeyW', false) + 'eco.g.me.x = 20.3;', 300, 'eco.look(Math.PI + 0.5, 0.15, 4.5);', 700, 'shot'],
   mcrawl1: ["eco.setCam('first'); eco.g.me.x = 17;", 300, 'eco.look(0, 0.1);', 500, 'shot', "eco.setCam('third');" + K('ControlLeft', false)],
-  mclimb: ["eco.setCam('third'); eco.spot('B2');", K('KeyW'), 300, K('Space'), 120, K('Space', false), 1200, K('KeyW', false) + 'eco.look(-0.9, 0, 5);', 600, 'shot'],
-  mladder: ["eco.setCam('third'); eco.spot('B5');", K('KeyW'), 1200, K('KeyW', false) + 'eco.look(-1.0, 0, 5);', 600, 'shot'],
-  mslide: ["eco.setCam('third'); eco.spot('C6'); eco.look(Math.PI - 1.0, 0.25, 6);", 600, 'eco.g.me.x = 58.5; eco.g.me.z = 9; eco.g.me.vz = 0;', 500, 'shot'],
+  mclimb: ["eco.setCam('third'); eco.spot('B2');", K('KeyW'), 300, K('Space'), 120, K('Space', false), 1200, K('KeyW', false) + 'eco.look(-0.9, 0, 7);', 600, 'shot'],
+  mladder: ["eco.setCam('third'); eco.spot('B5');", K('KeyW'), 1200, K('KeyW', false) + 'eco.look(-1.0, 0, 7);', 600, 'shot'],
+  mslide: ["eco.setCam('third'); eco.spot('C6'); eco.look(Math.PI - 1.0, 0.25, 9);", 600, 'eco.g.me.x = 58.5; eco.g.me.z = 9; eco.g.me.vz = 0;', 500, 'shot'],
   mdive: ["eco.setCam('third'); eco.spot('D');", 800, K('ControlLeft'), 1200, K('ControlLeft', false) + "eco.setCam('first'); eco.look(0, 0.1);", 400, 'shot'],
   maimb: ["eco.setCam('first'); eco.spot('A1'); eco.look(0, 0.6);", 800, 'shot'],
   maimo: ["eco.setCam('first'); eco.spot('E'); eco.g.me.x = 76.2; eco.g.me.y = 32.2;", 400, 'eco.look(Math.atan2(30.5 - 32.2, 78.5 - 76.2), 0.1);', 1200, 'shot'],
-  maimbody: ["eco.setCam('third'); eco.spot('bodies'); eco.look(0, 0.45, 5);", 1000, 'shot'],
-  mcarry: ["eco.setCam('third'); eco.spot('bodies'); eco.look(0, 0.45, 5);", 800, K('KeyF'), 50, K('KeyF', false), 800, 'eco.look(-1.4, 0.3, 4);', 800, 'shot', K('KeyF'), 50, K('KeyF', false)],
+  maimbody: ["eco.setCam('third'); eco.spot('bodies'); eco.look(0, 0.45, 7);", 1000, 'shot'],
+  mcarry: ["eco.setCam('third'); eco.spot('bodies'); eco.look(0, 0.45, 7);", 800, K('KeyF'), 50, K('KeyF', false), 800, 'eco.look(-1.4, 0.3, 6);', 800, 'shot', K('KeyF'), 50, K('KeyF', false)],
   miso: ["eco.setCam('iso'); eco.spot('E'); eco.look(120 * Math.PI / 180);", 800, 'mouse', 600, 'shot', "eco.setCam('third');"],
 };
 const MSCENES = arg('mscenes', Object.keys(MOVE).join(',')).split(',').filter((k) => MOVE[k]);
@@ -86,7 +86,7 @@ for (const [gpu, sh, view] of COMBOS) {
     if (sp === 'under') {                         // водойма ≥ 3 одиниць: око на 1,5 під поверхнею, погляд трохи вгору (політ — не тоне)
       const w = await ev('eco.findLiquid(12)');
       if (!w) { R.push({ gpu, sh, view, sc, skip: 'водойми не знайдено' }); continue; }
-      await ev(`(() => { const me = eco.g.me; me.x = ${w[0]}; me.y = ${w[1]}; me.z = ${w[2]} - 1.5 - 0.92; me.fly = true; me.vz = 0; eco.look(0.6, -0.35); return 1; })()`);
+      await ev(`(() => { const me = eco.g.me; me.x = ${w[0]}; me.y = ${w[1]}; me.z = ${w[2]} - 1.5 - 1.65; me.fly = true; me.vz = 0; eco.look(0.6, -0.35); return 1; })()`);
       last = null; await idle(); await wait(500);
     }
     if (sp === 'slope') {                         // третя особа, камера — з боку, де земля вища (схил за спиною)

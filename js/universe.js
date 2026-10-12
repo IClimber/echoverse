@@ -444,7 +444,8 @@ export function physOf(L) {
     up: g < FLOAT_G ? 2 : 1,
     speed: g > 1 ? Math.max(0.55, 1 - 0.18 * (g - 1)) : 1 + 0.1 * (1 - g),
     settle: Math.min(20, Math.max(5, 14 * g)),
-    vT: Math.min(80, Math.max(4, 18 * Math.sqrt(g / (pr + 0.05)))),
+    // межа падіння гравця (м/с): вага = опір, m·g = ½·ρ·v²·CdA (m 70 кг, CdA 0,9 м², ρ — 1,225 кг/м³ на атмосферу)
+    vT: Math.min(500, Math.sqrt(2 * 70 * 9.81 * g / (1.225 * Math.max(pr, 1e-4) * 0.9))),
     friction: P.friction, bounce: P.bounce,
     g,
   };

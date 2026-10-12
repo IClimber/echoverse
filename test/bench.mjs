@@ -131,7 +131,7 @@ console.log(`дальність 32 (14 / 42 / 44 % стовпців — повн
     return { us: (t / n * 1000).toFixed(1), p };
   };
   const out = [];
-  for (const [name, s, ctl, j] of [['стоїть', 'A1', {}], ['присів', 'A2', { crouch: true }], ['лежить', 'A3', { crouch: true }], ['стіна', 'B3', {}, 20], ['драбина', 'B5', {}], ['під водою', 'D', { crouch: true, vert: -1 }]]) {
+  for (const [name, s, ctl, j] of [['стоїть', 'A1', {}], ['присів', 'A3', { crouch: true }], ['лежить', 'A5', { crouch: true }], ['стіна', 'B3', {}, 20], ['драбина', 'B5', {}], ['під водою', 'D', { crouch: true, vert: -1 }]]) {
     const r = run(s, ctl, j);
     out.push(`${name} ${r.us} (${r.p.climb ? r.p.climb.kind : r.p.dive ? 'пірнає' : r.p.pose})`);
   }
