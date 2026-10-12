@@ -382,16 +382,23 @@ fn getModelMatrix() -> mat4x4f {
 }
 `;
 
-// Обрис (OutlineRenderer): у його проході компілюються лише вершинні шматки — вітер і кривизна, як у рослин, тож обрис
-// гойдається разом з ними; номер матеріалу — у pos.w (як у щільних вершинах)
+// Обрис (OutlineRenderer): у його проході компілюються лише вершинні шматки — вітер (з часовими аномаліями) і кривизна,
+// як у рослин, тож обрис гойдається разом з ними; номер матеріалу — у pos.w (як у щільних вершинах)
 const OUT_DECL_VS = `
 uniform vec4 eco_wind;
+uniform vec4 eco_tanom;
+uniform vec2 eco_tanomO;
+uniform sampler2D eco_tanomMap;
 uniform float eco_curve;
 uniform vec3 eco_target;
 uniform vec4 eco_mat[${MAT_N}];
 `;
 const OUT_DECL_VS_W = `
 uniform eco_wind: vec4f;
+uniform eco_tanom: vec4f;
+uniform eco_tanomO: vec2f;
+var eco_tanomMap: texture_2d<f32>;
+var eco_tanomMapSampler: sampler;
 uniform eco_curve: f32;
 uniform eco_target: vec3f;
 uniform eco_mat: array<vec4f, ${MAT_N}>;

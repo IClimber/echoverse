@@ -45,7 +45,7 @@ function minimap(L, x0, y0) {
   return { cv, biomes: bset.size, species: sset.size };
 }
 
-// Смужка неба всесвіту: полудень (зеніт → обрій), захід, північ; крапки — сонця (кольором), місяці, кільця
+// Смужка неба всесвіту (кольори — оптика з фізики, optics.js): полудень (зеніт → обрій), захід, північ; крапки — сонця (кольором), місяці, кільця
 function skyBar(L) {
   const cv = document.createElement('canvas');
   cv.width = SIZE * PX; cv.height = 14;
@@ -90,7 +90,8 @@ export function runStrip() {
         L.land.insel.prob >= 0.3 && 'останці', L.land.karst.share >= 0.15 && 'карст', L.land.rift.share >= 0.2 && 'рифти',
         L.land.ero.bias <= -0.35 && 'рівнини', L.land.ero.bias >= 0.35 && 'порізано'].filter(Boolean);
       const odd = Object.entries(L.tiers).filter(([, t]) => t >= 2).map(([k, t]) => `${k} (${TIER_NAMES[t]})`);
-      cap.textContent = `${d}:${fmtN(n)} · ${STRANGE_NAMES[L.strange.cls]}${odd.length ? ': ' + odd.join(', ') : ''} · доба ${S.lock ? 'вічна' : S.dayMin.toFixed(0) + ' хв'} · сонць ${S.suns.length}, місяців ${S.moons.length}${S.rings ? ', кільця' : ''} · повітря ${L.air.gasName.split(' ')[0]} ${L.air.pressure.toFixed(1)} атм${L.phys.friction < 1 ? ' · ковзко' : ''}${L.phys.bounce ? ' · пружно' : ''}${L.phys.time !== 1 ? ` · час ×${L.phys.time.toFixed(1)}` : ''} · планета ${L.phys.planetR.toFixed(0)} · ${L.grav.toFixed(L.grav < 0.1 ? 3 : 2)} g · ${L.liquid.name}${L.liquid.kind === 0 ? ' ' + L.liquid.tC + '°' : ''} · море ${L.seaE.toFixed(2)} · рельєф ${L.amp} · t ${L.temp.toFixed(2)} · вол ${L.wet.toFixed(2)} · біомів ${mm.biomes}, видів ${mm.species}${forms.length ? ' · ' + forms.join(', ') : ''}`;
+      const St = L.star, P = L.air.pressure, phen = [L.comp && 'компаньйон', L.anom.rev && 'зворотна гравітація', L.tanom && 'часові аномалії'].filter(Boolean);
+      cap.textContent = `${d}:${fmtN(n)} · ${STRANGE_NAMES[L.strange.cls]}${odd.length ? ': ' + odd.join(', ') : ''} · зоря ${'MKGFAB'[St.cls]} ${St.T.toFixed(0)} K${St.n > 1 ? ` (+${St.n - 1})` : ''} · ${L.grav.toFixed(L.grav < 0.1 ? 3 : 2)} g · ${(L.clim.Tpatch - 273.15).toFixed(0)} °C · ${L.air.vacuum ? 'без повітря' : `${P < 0.1 ? P.toPrecision(1) : P.toFixed(1)} атм, ${L.air.gasName.split(' ')[0]}`}${phen.length ? ' · ' + phen.join(', ') : ''} · доба ${S.lock ? 'вічна' : S.dayMin.toFixed(0) + ' хв'} · сонць ${S.suns.length}, місяців ${S.moons.length}${S.rings ? ', кільця' : ''}${L.phys.friction < 1 ? ' · ковзко' : ''}${L.phys.bounce ? ' · пружно' : ''}${L.phys.time !== 1 ? ` · час ×${L.phys.time.toFixed(1)}` : ''} · планета ${(L.planet.R * 6371).toFixed(0)} км · ${L.liquid.name}${L.liquid.kind === 0 ? ' ' + L.liquid.tC + '°' : ''} · море ${L.seaE.toFixed(2)} · рельєф ${L.amp} · t ${L.temp.toFixed(2)} · вол ${L.wet.toFixed(2)} · біомів ${mm.biomes}, видів ${mm.species}${forms.length ? ' · ' + forms.join(', ') : ''}`;
       fig.append(skyBar(L), mm.cv, cap);
       wrap.append(fig);
     }

@@ -5,7 +5,7 @@ import { physOf, STRANGE_NAMES, TIER_NAMES, FAM_NAMES } from './universe.js';
 import { BIOMES } from './gen/biomes.js';
 import { regionAt, speciesOf, FORMS } from './gen/flora.js';
 import { jumpHeight } from './player.js';
-import { dayPhase, clockStr } from './sky.js';
+import { dayPhase, clockStr, yearPhase } from './sky.js';
 import { weatherAt, WEATHER_NAMES } from './weather.js';
 import { LEVEL } from './iso.js';
 import { LOD_ON } from './camera.js';
@@ -54,32 +54,80 @@ export function aimLine(a, gg) {
 export const fmtN = (n) => n > 0 ? '+' + n : n < 0 ? '−' + -n : '0';
 
 const f1 = (v) => v.toFixed(1).replace('.', ','), f2 = (v) => v.toFixed(2).replace('.', ',');
+const f0 = (v) => v.toFixed(0).replace('-', '−'), pc = (v) => (v >= 0.1 ? (v * 100).toFixed(0) : (v * 100).toPrecision(1)).replace('.', ',') + ' %';
+const sg = (v, d = 1) => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(d).replace('.', ',');
+const atm = (P) => (P < 0.01 ? P.toPrecision(1) : P < 0.1 ? P.toFixed(3) : P < 10 ? P.toFixed(2) : P.toFixed(0)).replace('.', ',');
+const CLS = 'MKGFAB', COMP = ['', 'газовий гігант', "кам'яна", 'крижана'], dg = (r) => (r * 180 / Math.PI).toFixed(0) + '°';
+// Зоря: T, клас, світність, радіус, маса (сонячні), відстань (земні для цієї світності), велика піввісь (а. о.), інсоляція; інші
+function starLine(L) {
+  const S = L.star, x = S.extra.map((e) => `${CLS[e.cls]} ${f0(e.T)} K ${e.close ? 'тісна' : `далека (${f0(e.a2)} відст.)`}`);
+  return `${CLS[S.cls]} ${f0(S.T)} K, L ${f2(S.L)}, R ${f2(S.R)}, M ${f2(S.M)}, активність ${f1(S.act)} · відстань ${f2(S.d)} (${f2(S.a)} а. о.), інсоляція ${f2(S.S)} земної, альбедо ${f2(S.albedo)}${x.length ? ' · ще: ' + x.join(', ') : ''}`;
+}
+// Планета: радіус, густина, тяжіння (база й тут), маса, друга космічна, обертання (доба гри), нахил, широта, рік, сезон
+function planetLine(L, g) {
+  const P = L.planet, Y = L.sky.year, ph = Y && !P.lock ? yearPhase(L, g.clock || 0) : null;
+  return `R ${f0(P.R * 6371)} км, ρ ${f2(P.rho * 5.51)} г/см³, g₀ ${f2(P.g0)} → ${f2(L.grav)} g (відцентрова ${pc(P.cent)}), M ${f2(P.M)} M⊕, v₂ ${f1(P.vEsc)} км/с`
+    + ` · обертання ${f1(P.rot)} год (мін. ${f1(P.Pmin)}), нахил ${f0(P.obliq)}°, широта ${f0(P.lat)}°`
+    + (P.lock ? ' · припливне захоплення' : ` · рік ${f0(P.year)} хв${ph !== null ? `, фаза ${f2(ph)}` : ''}`);
+}
+// Повітря: тиск, склад, μ, густина, висота однорідної атмосфери, парникова товща, температури, градієнт
+function airLine(L) {
+  const A = L.air, C = L.clim;
+  if (A.vacuum) return `майже немає (${atm(A.pressure)} атм; утримання ${f2(A.keep)}) · T рівноважна ${f0(C.Teq - 273.15)} °C`;
+  const cmp = Object.entries(A.comp).filter(([, v]) => v >= 0.0005).map(([k, v]) => `${k} ${pc(v)}`).join(' ');
+  return `${atm(A.pressure)} атм (утримання ${f2(A.keep)}), ${cmp}, μ ${f1(A.mu)}, ρ ${f2(A.rho)} кг/м³, H ${f0(A.H)} м, τ ${f2(A.tau)}`
+    + ` · T рівн. ${f0(C.Teq - 273.15)} / поверхні ${f0(C.Ts - 273.15)} / ділянки ${f0(C.Tpatch - 273.15)} °C, ${f0(C.lapse * 1000)} °C/км, доба ±${f0(C.Ad)}, сезон ±${f0(C.As)}`
+    + ` · ${A.gasName}${A.ox ? ', горить' : ''} · серпанок τ ${f2(A.tauA)} (${['водяний', 'сірчаний', 'органічний', 'пиловий'][A.hazeKind]})`;
+}
+// Поле, радіація, буря, аномалії
+function fieldLine(L, E) {
+  const A = L.anom, T = L.tanom;
+  return `B ${f2(L.mag.B)} (сяйва ${pc(L.mag.k)}), нахил ${dg(L.mag.tilt)} · радіація ${pc(L.air.rad)}${E ? `, зараз ${pc(E.rad)}${E.storm > 0.01 ? ` (буря зорі ${f2(E.storm)})` : ''}` : ''}`
+    + ` · аномалії гравітації ${pc(A.freq)}${A.tilt ? ' з нахилом' : ''}${A.rev ? `, зворотні (k₀ ${f2(A.rev.k0)}, до ${f0(A.rev.Ha)} м)` : ''}`
+    + (T ? ` · часові ${pc(T.freq)}: ×${f2(T.ks)} / ×${f2(T.kf)}` : '');
+}
+// Середовище тут і зараз (envHere у main.js)
+function envLine(E) {
+  const T = E.T, w = E.wind;
+  return `${f0(T.T)} °C (ділянка ${f0(T.patch)} ${sg(T.biome, 0)} біом ${sg(T.height, 0)} висота ${sg(T.day, 0)} доба ${sg(T.season, 0)} сезон ${sg(T.weather, 0)} погода)`
+    + ` · ${atm(E.P)} атм, ${f2(E.rho)} кг/м³ · g ${f2(E.g)}${E.tide ? ` (приплив ${sg(E.tide * 100, 1)} %)` : ''}${E.rev ? ' зворотна' : E.anom ? ` ×${f2(E.anom)}` : ''}${E.time !== 1 ? ` · час ×${f2(E.time)}` : ''}`
+    + ` · вітер ${f1(w.here)} м/с (база ${f1(w.base)}, висота ×${f2(w.hk)}${w.lee < 1 ? `, затишок ×${f2(w.lee)}` : ''}${w.push ? ', зносить' : ''})`;
+}
+// Місяці й компаньйон
+function moonsLine(L) {
+  const M = L.sky.moons.map((m) => `${f0(m.Rkm)} км на ${f0(m.D)} R (${f1(m.period)} діб)`), C = L.comp;
+  return `${M.length ? M.join(', ') : 'немає'}${C ? ` · компаньйон: ${COMP[C.type]}, приплив ${pc(C.f)} g, ρ ×${f2(C.rhoR)}, R ×${f2(C.Rr)}` : ''}${L.sky.rings ? ' · кільця' : ''}`;
+}
 export function debugText(g, perf, meshCount, cam, R, lod) {
   const { world, rec, me } = g, L = world.laws(g.d, g.n);
   const tx = Math.floor(me.x), ty = Math.floor(me.y), c = world.column(g.d, g.n, tx, ty);
   const kf = Math.floor((me.z ?? 0) / LEVEL + 1e-4), under = me.floorB ?? -1;
-  const cx = Math.floor(tx / CS), cy = Math.floor(ty / CS), C = world.col(g.d, g.n, cx, cy), st = world.stats(), ph = physOf(L);
+  const cx = Math.floor(tx / CS), cy = Math.floor(ty / CS), C = world.col(g.d, g.n, cx, cy), st = world.stats(), ph = physOf(L), E = g.envHere ? g.envHere() : null;
   return [
     `зерно      «${rec.seedText}» (${rec.seed})  генератор v${rec.gen}`,
     `адреса     глибина ${g.d}, всесвіт ${fmtN(g.n)}`,
     `позиція    ${me.x.toFixed(2)}, ${me.y.toFixed(2)}  z ${me.z.toFixed(2)}${me.air ? '  у повітрі' : ''}`,
-    `гравітація ${L.grav.toFixed(L.grav < 0.1 ? 3 : 2)} g: стрибок ${jumpHeight(L.grav).toFixed(2)} м, крок угору ${ph.up}, хода ×${ph.speed.toFixed(2)}`,
+    `гравітація ${L.grav.toFixed(L.grav < 0.1 ? 3 : 2).replace('.', ',')} g: стрибок ${f2(jumpHeight(L.grav))} м, крок угору ${ph.up}, хода ×${f2(ph.speed)}`,
+    `зоря       ${starLine(L)}`,
+    `планета    ${planetLine(L, g)}`,
+    `повітря    ${airLine(L)}`,
+    `поле       ${fieldLine(L, E)}`,
+    `середовище ${E ? envLine(E) : '—'}`,
+    `місяці     ${moonsLine(L)}`,
     `клітинка   ${c ? `поверхня ${c.h}, ${TYPE_NAMES[c.t]}; під ногами — ${me.ground && under > 0 ? BLOCK_NAMES[under] : '—'}${me.ground ? '' : me.swim ? ', пливе' : ', у повітрі'}` : '—'}`,
     `чанк       ${cx}, ${cy}, секція ${Math.floor(kf / 16)}  відбиток стовпця ${C ? digest(C) : '—'}`,
     `дивність   ${STRANGE_NAMES[L.strange.cls]} (qs ${L.strange.qs.toFixed(2)})${Object.keys(L.tiers).length ? '; ' + Object.entries(L.tiers).map(([k, t]) => `${k} — ${TIER_NAMES[t]}`).join(', ') : ''}`,
     `закони     море ${L.seaE.toFixed(2)}, рельєф ${L.amp}, t ${L.temp.toFixed(2)}, вологість ${L.wet.toFixed(2)}`,
-    `рідина     ${L.liquid.name}, ${L.liquid.tC} °C, густина ${L.liquid.density}${L.liquid.swim ? ', тримає' : ', не тримає'}${L.liquid.danger ? ' — небезпечна: ' + L.liquid.danger : ''}${me.swim ? '  (пливе)' : ''}`,
+    `рідина     ${L.liquid.name}, ${L.liquid.tC} °C, густина ${L.liquid.density}${L.liquid.swim ? ', тримає' : ', не тримає'}${L.liquid.danger ? ' — небезпечна: ' + L.liquid.danger : ''}${me.swim ? '  (пливе)' : ''}, в'язкість ${L.liquid.visc.toFixed(1)}${L.liquid.tension ? ', поверхневий натяг' : ''}`,
     `біом       ${c ? BIOMES[c.bm].name : '—'}  (у всесвіті: ${L.biomes.flat().map(([id]) => BIOMES[id].name).filter((v, i, a) => a.indexOf(v) === i).length} біомів)`,
     `види       ${c && c.bm ? speciesLine(L, tx, ty, c.bm) : '—'}`,
     `рослини    густота ${(L.flora * 100).toFixed(1)} %, розмір ×${L.treeH.toFixed(2)}, каміння ${(L.rocks * 100).toFixed(1)} %`,
     `рельєф     річки ${(L.relief.rivers * 100).toFixed(0)} %, каньйони ${(L.relief.canyons * 100).toFixed(0)} %, кратери ${(L.relief.craters * 100).toFixed(0)} %, вулкани ${(L.relief.volcano * 100).toFixed(0)} %${L.relief.volcanoLava ? ' (з лавою)' : ''}, шпилі ${(L.relief.spires * 100).toFixed(0)} %, тераси ${(L.relief.terrace * 100).toFixed(0)} %, дюни ${(L.relief.dunes * 100).toFixed(0)} %`,
     `рельєф 3.1 ${land3(L)}`,
-    `тут        ${((t) => (t.fam >= 0 ? FAM_NAMES[t.fam] : 'плавна') + (t.fx ? `, скелі до ${t.fx.toFixed(0)} бл.` : ''))(tile(L, tx, ty))}`,
+    `рельєф тут ${((t) => (t.fam >= 0 ? FAM_NAMES[t.fam] : 'плавна') + (t.fx ? `, скелі до ${t.fx.toFixed(0)} бл.` : ''))(tile(L, tx, ty))}`,
     `породи     ${L.stones.length ? L.stones.map((st) => `${['завжди', 'g < ' + st.thr.toFixed(2), 'g > ' + st.thr.toFixed(2), 'поле > ' + st.thr.toFixed(2)][st.cond]}, підйом ${st.lift.toFixed(2)}${st.active ? (st.lift > 1 ? ' — ширяє' : ' — легша') : ' — ні'}${st.islands ? ', острови' : ''}`).join('; ') : 'левітуючих немає'}`,
-    `поле       магнітне ${(L.mag.k * 100).toFixed(0)} %, аномалії гравітації ${(L.anom.freq * 100).toFixed(0)} %${L.anom.tilt ? ' (з нахилом)' : ''}, тут ×${(g.ph && g.ph.anom || 1).toFixed(2)}; рідина: в'язкість ${L.liquid.visc.toFixed(1)}${L.liquid.tension ? ', поверхневий натяг' : ''}`,
-    `фізика     тертя ${L.phys.friction.toFixed(2)}${L.phys.friction < 1 ? ' (ковзко)' : ''}, пружність ${L.phys.bounce.toFixed(2)}, падіння до ${ph.vT.toFixed(1)} м/с, плин часу ×${L.phys.time.toFixed(2)}, радіус планети ${L.phys.planetR.toFixed(0)} км`,
-    `небо       доба ${L.sky.lock ? 'вічна (припливне захоплення)' : (L.sky.dayMin / L.phys.time).toFixed(1) + ' хв'}, ${clockStr(dayPhase(L, g.clock || 0))}, сонць ${L.sky.suns.length}, місяців ${L.sky.moons.length}${L.sky.rings ? ', кільця' : ''}, широта ${(L.sky.lat * 180 / Math.PI).toFixed(0)}°`,
-    `повітря    тиск ${L.air.pressure.toFixed(2)} атм, ${L.air.gasName}, радіація ${(L.air.rad * 100).toFixed(0)} %, серпанок ${(L.air.haze * 100).toFixed(0)} %, вітер ${(L.air.wind * 3.6).toFixed(0)} км/год (у грозу ×2,2)`,
+    `фізика     тертя ${L.phys.friction.toFixed(2)}${L.phys.friction < 1 ? ' (ковзко)' : ''}, пружність ${L.phys.bounce.toFixed(2)}, падіння до ${ph.vT.toFixed(1)} м/с, плин часу ×${L.phys.time.toFixed(2)}`,
+    `небо       доба ${L.sky.lock ? 'вічна (припливне захоплення)' : (L.sky.dayMin / L.phys.time).toFixed(1) + ' хв'}, ${clockStr(dayPhase(L, g.clock || 0))}, сонць ${L.sky.suns.length}, місяців ${L.sky.moons.length}${L.comp ? ' і компаньйон' : ''}${L.sky.rings ? ', кільця' : ''} · вітер у ясну ${f1(L.air.wind)} м/с`,
     `погода     ${WEATHER_NAMES[(g.wPrev || weatherAt(L, g.clock || 0, me.x, me.y)).kind]} (плями ${(L.air.cS / 1000).toFixed(1)} км, зміна ${(L.air.cT / 60).toFixed(0)} хв; ${Object.entries(L.air.w).filter(([, v]) => v > 0.05).map(([k, v]) => k + ' ' + v.toFixed(1)).join(', ')})`,
     `камера     ${cam.mode === 'iso' ? `згори, масштаб ${cam.zoom.toFixed(2)}` : cam.mode === 'first' ? `перша особа, око ${f2(g.eyeZ ?? 0)}` : `третя особа, відстань ${f1(g.camDist ?? cam.dist)} з ${f1(cam.dist)}`}${g.under ? ' · під рідиною' : ''}, азимут ${Math.round(cam.yaw * 180 / Math.PI) % 360}°, видно стовпців ${g.visible || 0}`,
     `зіткнення  секцій ${CST.secs}, трикутників ${(CST.tris / 1000).toFixed(1).replace('.', ',')} тис., побудов ${CST.builds} (${f1(CST.buildMs)} мс) · крок ${f1(g.stepUs || 0)} мкс${me.ground ? ` · підлога ${me.floorN ? (Math.acos(Math.min(1, me.floorN[2])) * 180 / Math.PI).toFixed(0) + '°' : '—'}` : ''}`,

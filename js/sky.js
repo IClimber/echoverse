@@ -105,7 +105,10 @@ const angle = (a, b) => Math.acos(Math.max(-1, Math.min(1, a[0] * b[0] + a[1] * 
 
 // Буря зорі (п. 4, М5): відрізки по ¼ доби (захоплена — 5 хв), імовірність 0,02 × активність / 0,3 (червоні карлики —
 // частіше), сила 0,3…1: швидкий підйом, повільний спад. Та сама мить — та сама буря
+let stormOver = null;
+export const setStormOverride = (I) => { stormOver = I; };   // ?dev eco.starStorm(I): null — як за законами
 export function stormAt(L, clock) {
+  if (stormOver !== null) return stormOver;
   const len = L.sky.lock ? 300 : L.sky.dayMin * 15, t = localTime(L, clock) / len, seg = Math.floor(t), u = t - seg;
   const h = hash3(L.seed, seg, 0x5703);
   if (unit(h) >= 0.02 * (L.star ? L.star.act : 0.3) / 0.3) return 0;

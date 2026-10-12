@@ -15,12 +15,12 @@ import { listWorlds, putWorld, deleteWorld, serialize, deserialize, newId } from
 import { hashStr } from './rng.js';
 import { GEN, SEA, physOf, gravityAt } from './universe.js';
 import { physAt3, timeK } from './worldphys.js';
-import { tempAt, snowy } from './climate.js';
+import { tempAt, tempParts, snowy, radNow, airAt } from './climate.js';
 import { CS, SEC, B_LIQ, B_MAGMA, solidB, BLOCK_NAMES } from './gen/chunk.js';
 import { LEVEL } from './iso.js';
 import { debugText, fmtN } from './debug.js';
 import { animate, VIEW_KEYS } from './anim.js';
-import { clockStr, skyState, lightsOf, lightSlots } from './sky.js';
+import { clockStr, skyState, lightsOf, lightSlots, stormAt, setStormOverride } from './sky.js';
 import { weatherAt, localWeather, areaClimate, reliefAt, windHeightK, lightningNear, meteorsAt } from './weather.js';
 import { createCamera, rotate, wheel, smooth, moveBasis, camHead, camCollide, camDist, facing, setYaw, basis, pitchOf, setViewChunks, setLod, setFloraNear, ISO, THIRD, FIRST, NEXT, LIMITS, HEAD, EYE, EYE_OF, HEAD_OF, VIEW_R } from './camera.js';
 import { createStreamer, visibleMissing } from './stream.js';
@@ -41,6 +41,7 @@ const QS = new URLSearchParams(location.search);
 if (QS.has('strip')) import('./strip.js').then((m) => m.runStrip());
 else if (QS.has('flora')) import('./flora-stand.js').then((m) => m.runFlora());
 else if (QS.has('light')) import('./light-stand.js').then((m) => m.runLight()).catch((e) => showErr('Стенд ?light: ' + e.message));
+else if (QS.has('laws')) import('./laws-stand.js').then((m) => m.runLaws()).catch((e) => showErr('Стенд ?laws: ' + e.message));
 else createScene($('gl'), loadSettings(QS)).then(boot).catch(fail);
 const RESUME_KEY = 'echoverse-resume';       // світ, у який повернутися після перезавантаження (зміна графіки)
 
@@ -147,6 +148,16 @@ function boot(renderer) {
     },
     // Погода для замірів: тип опадів ('rain' | 'snow' | 'dust' | 'acid'), сила 1; 'clear' — ясно; null — як є
     weather(type) { wOver = type === undefined ? null : type; return wOver; },
+    // Буря зорі сили I (0…1) зараз; null — як за законами
+    starStorm(I = 1) { setStormOverride(I); return I; },
+    // Удар блискавки поруч (за 150–400 м від камери, у найвищу точку околу) — зараз
+    lightning() {
+      const L = g.world.laws(g.d, g.n), a = Math.random() * 6.283, r = 150 + 250 * Math.random();
+      g.boltForce = { ...forcedBolt(L, g.cam[0] + r * Math.cos(a), g.cam[1] + r * Math.sin(a)), t0: g.clock, k: 1, h: (Math.random() * 2 ** 32) >>> 0 };
+      return g.boltForce;
+    },
+    // Усе про середовище тут (рядок «тут» F3)
+    envAt: () => envHere(),
     // Найближча (до 48 клітинок) точка, де можна стати, з укриттям вище голови ≥ 4 одиниць (печера): гравець — туди
     findCave() {
       const P = g.world.probe(g.d, g.n), me = g.me;
@@ -415,6 +426,7 @@ function boot(renderer) {
       d: p.d, n: p.n, me: { x: p.x, y: p.y, z: p.z, vz: 0, air: false, ground: true, yaw: Math.PI * 0.75, moving: false, placed: false },
       cam: [p.x, p.y, p.z || 0], lastSave: performance.now(), view: null, clock: rec.clock || 0,
       stamp: 0, ai: [], aiAt: 0,                 // крок фізики (інтерполяція тіл); системи світу (моби, NPC) — (dt, g)
+      envHere: () => envHere(),                  // середовище тут (F3)
     };
     // сутності: зона симуляції 5×5 чанків навколо гравця (поточний всесвіт; інші сплять і дорахуються при поверненні)
     g.ai.push((dt, G) => G.world.ents(G.d, G.n).update(Math.floor(G.me.x / CS), Math.floor(G.me.y / CS), G.clock * 1000));
@@ -482,6 +494,10 @@ function boot(renderer) {
     return landing(P, x, y, z, ph);
   }
   const gStr = (L) => L.grav.toFixed(2).replace('.', ',') + ' g';
+  const OVER_NAMES = { clear: 'ясно', rain: 'дощ', snow: 'сніг', acid: 'кислотний дощ', dust: 'пилова буря' };
+  const STAR_CLS = ['червоний карлик (M)', 'помаранчева зоря (K)', 'жовта зоря (G)', 'жовто-біла зоря (F)', 'біла зоря (A)', 'блакитна зоря (B)'];
+  const num = (v, d = 1) => v.toFixed(d).replace('.', ',').replace('-', '−');
+  const atmStr = (P) => (P < 0.01 ? P.toPrecision(1) : P < 0.1 ? P.toFixed(3) : P < 10 ? P.toFixed(2) : P.toFixed(0)).replace('.', ',') + ' атм';
   const liqStr = (lq) => lq.name + (lq.danger ? ` (${lq.danger})` : '');
   const addrStr = (d, n) => d === g.d ? `всесвіт ${fmtN(n)}` : `глибина ${d}, всесвіт ${fmtN(n)}`;
 
@@ -513,6 +529,16 @@ function boot(renderer) {
     if (!L.air.breath && (P.air.breath || L.air.gas !== P.air.gas)) msg.push(`повітря ${L.air.gasName}`);
     if (L.phys.friction < 1 && P.phys.friction === 1) msg.push('ковзкий ґрунт');
     if (L.phys.bounce > 0 && !P.phys.bounce) msg.push('пружний ґрунт');
+    const dT = L.clim.Tpatch - P.clim.Tpatch;
+    if (Math.abs(dT) >= 15) msg.push(`${dT > 0 ? 'тепліше' : 'холодніше'}: ${Math.round(L.clim.Tpatch - 273.15)} °C`);
+    const pr = (L.air.pressure + 1e-4) / (P.air.pressure + 1e-4);
+    if (L.air.vacuum && !P.air.vacuum) msg.push('повітря майже немає');
+    else if (!L.air.vacuum && (pr > 1.6 || pr < 1 / 1.6)) msg.push(`тиск ${atmStr(L.air.pressure)}`);
+    if (L.star.cls !== P.star.cls || L.star.n !== P.star.n) msg.push(STAR_CLS[L.star.cls] + (L.star.n > 1 ? ` (зір ${L.star.n})` : ''));
+    if (L.comp && !P.comp) msg.push('на небі — планета-компаньйон');
+    if (L.sky.lock && !P.sky.lock) msg.push('вічний день');
+    if (L.tanom && !P.tanom) msg.push('часові аномалії');
+    if (L.anom.rev && !P.anom.rev) msg.push('зворотна гравітація');
     if (Math.abs(L.phys.time / P.phys.time - 1) > 0.3) msg.push(`час тече ${L.phys.time > P.phys.time ? 'швидше' : 'повільніше'} (×${L.phys.time.toFixed(1).replace('.', ',')})`);
     if (msg.length) toast(msg.join(' · ').replace(/^./, (c) => c.toUpperCase()));
     $('flash').classList.add('on');
@@ -721,6 +747,7 @@ function boot(renderer) {
       g.jumpLatch = g.jumpLatch || jump;
       for (let s = physT.advance(dt); s > 0; s--) {
         const L = g.world.laws(g.d, g.n), W = windHere(L);   // вітер — сила опору (густина повітря — у vT)
+        g.windK = W.windK; g.windHk = W.hk;
         me.px = me.visX ?? me.x; me.py = me.visY ?? me.y; me.pv = me.vis ?? me.z; g.stamp++;
         g.ph = physAt3(L, me.x, me.y, me.z, g.clock, groundZ);
         const probe = g.world.probe(g.d, g.n);
@@ -812,20 +839,43 @@ function boot(renderer) {
 
   // Клімат місця для погоди (пустеля, пил) — за околом з гістерезисом (areaClimate); сніг — за температурою (climate.js)
   let clim = null;
+  // Ціль примусової блискавки: найвища точка в радіусі 30 м (як lightningNear)
+  function forcedBolt(L, x, y) {
+    let hz = -1e9, tx = x, ty = y;
+    for (let dy = -30; dy <= 30; dy += 6) for (let dx = -30; dx <= 30; dx += 6) {
+      if (dx * dx + dy * dy > 900) continue;
+      const h = g.world.topAt(g.d, g.n, Math.floor(x + dx), Math.floor(y + dy));
+      if (h !== null && h !== undefined && h > hz) { hz = h; tx = x + dx; ty = y + dy; }
+    }
+    return { x: Math.floor(tx) + 0.5, y: Math.floor(ty) + 0.5, z: hz > -1e9 ? hz : g.me.z, cx: tx, cy: ty };
+  }
+  // Середовище тут і зараз (HUD, F3 «тут», ?dev envAt): температура з розкладом, тиск і густина на висоті, тяжіння
+  // (приплив, аномалія, зворотна), плин часу плями, вітер (база, тут, пориви й висота, затишок), радіація з бурею зорі
+  function envHere() {
+    const L = g.world.laws(g.d, g.n), me = g.me, ph = g.ph, W = g.wPrev || weatherAt(L, g.clock, me.x, me.y), I = stormAt(L, g.clock);
+    const ai = airAt(L, me.z), tk = timeK(L, me.x, me.y);
+    return {
+      T: tempParts(L, me.x, me.y, me.z, g.clock, W), P: ai.P, rho: ai.rho,
+      g: ph ? ph.g : L.grav, g0: L.grav, tide: ph ? ph.tide : 0, anom: ph ? ph.anom : null, rev: !!(ph && ph.rev), tilt: ph ? ph.tilt : null,
+      time: tk.k, wind: { base: L.air.wind, here: g.windK ?? 0, dir: W.wind, hk: g.windHk ?? 1, lee: g.lee ?? 1, push: !!me.windPush },
+      rad: radNow(L, I), storm: I,
+    };
+  }
 
   function draw(dt, now) {
     const ch = g.dev.charge, me = g.me, L = g.world.laws(g.d, g.n);
     let W = me.placed ? windHere(L) : weatherAt(L, g.clock, me.x, me.y);
     if (wOver === 'clear') W = { ...W, kind: 0, clouds: 0, vis: 1, precip: 0, dust: 0, dim: 0, flash: 0 };
     // блискавка поблизу (до 3 км від камери): спалах неба 1/(1 + (d/800)²), гасне за 0,25 с; розряд і світло — сцена
-    const bolt = wOver === 'clear' ? null : lightningNear(L, g.clock, g.cam[0], g.cam[1]);
+    if (g.boltForce && (g.clock < g.boltForce.t0 || g.clock > g.boltForce.t0 + 0.25)) g.boltForce = null;
+    const bolt = g.boltForce || (wOver === 'clear' ? null : lightningNear(L, g.clock, g.cam[0], g.cam[1]));
     if (bolt) { const d = Math.hypot(bolt.x - g.cam[0], bolt.y - g.cam[1]); W = { ...W, flash: bolt.k * (1 - (g.clock - bolt.t0) / 0.25) / (1 + (d / 800) ** 2) }; }
     g.bolt = bolt;
     if (me.placed) clim = areaClimate(L, me.x, me.y, clim);
     const C = me.placed && clim;
     if (me.placed) { g.temp = tempAt(L, me.x, me.y, me.z, g.clock, W); g.snow = snowy(g.temp, g.snow); }   // сніг чи дощ — за температурою тут
     let loc = localWeather(L, W, !!g.snow, !!C && C.desert, !!C && C.arid);
-    if (wOver !== null) loc = { ...loc, type: wOver === 'clear' ? null : wOver || null, k: wOver === 'clear' ? 0 : 1 };
+    if (wOver !== null) loc = { ...loc, type: wOver === 'clear' ? null : wOver || null, k: wOver === 'clear' ? 0 : 1, name: OVER_NAMES[wOver] || loc.name };
     g.loc = loc;                                     // опади тут (мокра стіна — лазіння)
     // голова — туди, куди погляд: перша й третя особа — камера (на стіні тіло дивиться в стіну), згори — на ціль під курсором
     me.carry = !!g.carry;
@@ -854,10 +904,16 @@ function boot(renderer) {
     });
     setText('addr', g.rec.stand ? `Стенд руху · g ${gStr(L)} · тертя ${String(+L.phys.friction.toFixed(2)).replace('.', ',')}${wOver === 'rain' ? ' · дощ' : ''}`
       : `Глибина ${g.d} · всесвіт ${fmtN(g.n)} · ${clockStr(sk.phase)}${L.sky.lock ? ' (вічно)' : ''}`);
-    const an = g.ph && g.ph.anom ? ` · аномалія ×${g.ph.anom.toFixed(1).replace('.', ',')}` : '';
-    setText('coords', `x ${Math.floor(me.x)} · y ${Math.floor(me.y)} · висота ${Math.round(me.z - SEA * LEVEL)} м · гравітація ${gStr(L)}${an}${me.wet ? ` · у рідині: ${liqStr(L.liquid)}${L.liquid.danger ? ' — небезпечно' : ''}` : ''}`);
+    // тяжіння тут: база × аномалія плями (зворотна — окремо) − приплив компаньйона; плин часу плями
+    const ph = g.ph, gl = ph ? ph.g : L.grav, tk = me.placed ? timeK(L, me.x, me.y).k : 1;
+    const an = (ph && ph.tide && Math.abs(ph.tide) > 0.01 ? ` (приплив ${ph.tide > 0 ? '+' : '−'}${Math.round(Math.abs(ph.tide) * 100)} %)` : '')
+      + (ph && ph.rev ? ' · зворотна гравітація' : ph && ph.anom ? ` · аномалія ×${num(ph.anom)}` : '') + (Math.abs(tk - 1) > 0.05 ? ` · час ×${num(tk)}` : '');
+    setText('coords', `x ${Math.floor(me.x)} · y ${Math.floor(me.y)} · висота ${Math.round(me.z - SEA * LEVEL)} м · гравітація ${num(gl, 2)} g${an}${me.wet ? ` · у рідині: ${liqStr(L.liquid)}${L.liquid.danger ? ' — небезпечно' : ''}` : ''}`);
     const A = L.air;
-    setText('env', `${loc.name}${W.windK > 0.3 ? ` · вітер ${W.windK.toFixed(0)} м/с${g.lee < 0.5 ? ' (затишок)' : g.me.windPush ? ' (зносить)' : ''}` : ''}${A.breath ? '' : ` · повітря ${A.gasName}`}${A.rad > 0.3 ? ` · радіація ${A.rad > 0.65 ? 'висока' : 'помірна'}` : ''}`);
+    const I = stormAt(L, g.clock), rad = radNow(L, I), Pz = A.vacuum ? 0 : airAt(L, me.z).P;
+    setText('env', `${loc.name}${g.temp !== undefined ? ` · ${Math.round(g.temp)} °C` : ''}${W.windK > 0.3 ? ` · вітер ${W.windK.toFixed(0)} м/с${g.lee < 0.5 ? ' (затишок)' : g.me.windPush ? ' (зносить)' : ''}` : ''}`
+      + `${!A.vacuum && (Pz < 0.85 || Pz > 1.2) ? ` · тиск ${atmStr(Pz)}` : ''}${A.breath ? '' : ` · повітря ${A.gasName}`}`
+      + `${rad > 0.3 ? ` · радіація ${rad > 0.65 ? 'висока' : 'помірна'}` : ''}${I > 0.05 ? ' · буря зорі' : ''}`);
     $('charge').hidden = !ch;
     if (ch) {
       setText('chargeTxt', ch.t < CHARGE ? `Стрибок → ${addrStr(ch.to[0], ch.to[1])}` : 'Стабілізація…');
