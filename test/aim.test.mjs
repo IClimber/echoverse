@@ -53,10 +53,9 @@ test('ціль: тіло перед стіною — тіло; рослина п
   // без рослини — земля далі
   const c = aimRay(P, null, [2, 0.5, 1.2], d, REACH);
   assert.ok(c && c.kind === 'block' && c.t > b.t);
-  // стіна за 4 (досяжність 4,5) — так; за 5 — далі досяжності
-  assert.ok(aimRay(P, null, [5.0, 0.5, 3], [1, 0, 0], REACH).kind === 'block');
-  assert.equal(aimRay(P, null, [4.0, 0.5, 3], [1, 0, 0], REACH), null);
-  assert.ok(aimRay(P, null, [4.0, 0.5, 3], [1, 0, 0], 5.5).kind === 'block');
+  // стіна за 4 — далі досяжності
+  assert.equal(aimRay(P, null, [5.0, 0.5, 3], [1, 0, 0], REACH), null);
+  assert.ok(aimRay(P, null, [5.0, 0.5, 3], [1, 0, 0], 5).kind === 'block');
 });
 
 test('промінь з курсора — той самий, що малюється (згори при 30°, 45°, 135°; третя особа); згори ціль — як перебором', () => {
@@ -115,14 +114,14 @@ test('тіло в руках: чи піднімеш — від ваги (мас�
   assert.ok(canLift(stone(250, 1.3), 1).ok, 'левітуюче — вага 0');
   assert.ok(!canLift(stone(400, 1.3), 1).ok, 'і левітуюче — не більше M_MAX');
   // утримання: held — без тяжіння, тримається біля точки перед грудьми; без held — падає
-  const P = world((x, y, k) => (k < 2 ? B_STONE : B_AIR)), env = { g: 1, vT: 35, bounce: 0, friction: 1, wind: [0, 0] };
-  const me = { x: 0.5, y: 0.5, z: 1, h: 1.8, yaw: 0 }, b = stone(20), free = stone(20);
+  const P = world((x, y, k) => (k < 2 ? B_STONE : B_AIR)), env = { g: 1, vT: 18, bounce: 0, friction: 1, wind: [0, 0] };
+  const me = { x: 0.5, y: 0.5, z: 1, h: 0.98, yaw: 0 }, b = stone(20), free = stone(20);
   b.held = true; b.sleep = free.sleep = false; b.z = free.z = 2;
   for (let i = 0; i < 240; i++) {
     assert.ok(holdBody(b, me, [1, 0, 0], false));
     stepBody(b, 1 / 120, P, env); stepBody(free, 1 / 120, P, env);
   }
-  assert.ok(Math.abs(b.z - (1 + 0.55 * 1.8)) < 0.02 && b.x > 0.9, `тримається: ${b.x} ${b.z}`);
+  assert.ok(Math.abs(b.z - (1 + 0.55 * 0.98)) < 0.02 && b.x > 0.9, `тримається: ${b.x} ${b.z}`);
   assert.ok(free.z < 1.2, `без рук падає: ${free.z}`);
   // далі 1,5 від точки — випадає
   me.x = 5;

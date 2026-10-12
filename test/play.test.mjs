@@ -107,22 +107,22 @@ test('рух: між двома деревами по діагоналі мож�
   assert.ok(p.x > 3.2 && p.y < 0.8, `застряг у (${p.x.toFixed(2)}, ${p.y.toFixed(2)})`);
 });
 
-test('печера (гравець 1,8 м): широка (3 клітинки) заввишки 4 рівні (2 м) — проходиш; 3 рівні — ні; вузька (1 клітинка) у 4 рівні (видимо 1,75) — ні (лише присівши, п. 3)', () => {
-  // зала x < 3 (6 рівнів заввишки), далі хід: y — ws…we, заввишки hc рівнів, з x ≥ 7 — lo рівнів; підлога — верх k = 1
+test('печера: широка (3 клітинки) заввишки 2 блоки — проходиш; лаз в 1 блок — ні; вузька (1 клітинка) у 2 блоки — ні (до присідання, п. 3)', () => {
+  // зала x < 3 (4 блоки заввишки), далі хід: y — ws…we, заввишки hc блоків, з x ≥ 7 — lo блоків; підлога — верх k = 1
   const cave = (ws, we, hc, lo) => ({
     liquid: { swim: true }, obj: () => null,
     block(x, y, k) {
       if (x < -6 || x > 20 || y < -6 || y > 8) return -1;
       if (k < 2) return B_STONE;
-      if (x < 3) return y >= -3 && y <= 5 && k < 8 ? B_AIR : B_STONE;
+      if (x < 3) return y >= -3 && y <= 5 && k < 6 ? B_AIR : B_STONE;
       return y >= ws && y <= we && k < 2 + (x >= 7 ? lo : hc) ? B_AIR : B_STONE;
     },
   });
   const go = (P) => { const p = { x: 1.5, y: 1.5, z: 2 * LEVEL, vz: 0, ground: true }; run(p, 1, 0, 200, P, PH1, false, [[1, 0], [0, 1]]); return p; };
-  const a = go(cave(0, 2, 4, 4)), b = go(cave(0, 2, 4, 3)), c = go(cave(1, 1, 4, 4));
+  const a = go(cave(0, 2, 2, 2)), b = go(cave(0, 2, 2, 1)), c = go(cave(1, 1, 2, 2));
   assert.ok(a.x > 10 && a.z === 2 * LEVEL, `широка: ${a.x} ${a.z}`);
-  assert.ok(b.x > 5.6 && b.x < 7.3 && b.z === 2 * LEVEL, `3 рівні: ${b.x} ${b.z}`);
-  assert.ok(c.x < 4.5, `вузька: ${c.x}`);
+  assert.ok(b.x > 5.8 && b.x < 6.6 && b.z === 2 * LEVEL, `лаз: ${b.x} ${b.z}`);
+  assert.ok(c.x < 3.3, `вузька: ${c.x}`);
 });
 
 test('легка гравітація: пішки на 2 блоки; приземлення шукає місце з виходом', () => {
@@ -673,12 +673,12 @@ test('камера третьої особи — куля: стіна, стов�
   // стовбур (r 0,18) і тіло позаду
   const t = at(world(Array(9).fill('2'.repeat(16)).map((r, i) => i === 4 ? '222T222222222222' : r)), 8.5, 4.5, 1);
   assert.ok(Math.abs(t.dist - (8.5 - 3.5 - 0.18 - CAM_R)) < 0.03, `стовбур: ${t.dist}`);
-  const flat = world(Array(9).fill("4".repeat(16))), box = { x: 4.5, y: 4.5, z: 3.7, hx: 0.3, hy: 0.3, hz: 0.3 };
+  const flat = world(Array(9).fill('4'.repeat(16))), box = { x: 4.5, y: 4.5, z: 3, hx: 0.3, hy: 0.3, hz: 0.3 };
   const b = at({ ...flat, bodies: () => [box] }, 8.5, 4.5, 2);
   assert.ok(Math.abs(b.dist - (8.5 - 4.8 - CAM_R)) < 0.02, `тіло: ${b.dist}`);
   // схил позаду (угору в бік −x): центр ока над поверхнею щонайменше на радіус кулі
   const S = world(Array(9).fill('ihgfedcba9876544')), saved = cam.pitch3;
-  cam.pitch3 = 0.15;
+  cam.pitch3 = 0.35;
   const s = at(S, 13.5, 4.5, 2), e = eyeDir(cam), eye = [s.target[0] + e[0] * s.dist, s.target[1] + e[1] * s.dist, s.target[2] + e[2] * s.dist];
   const zs = await surfAt(S, eye[0], eye[1]);
   assert.ok(s.dist < 7 && eye[2] - zs > CAM_R - 0.02, `схил: око ${eye[2]}, поверхня ${zs}`);
@@ -698,8 +698,7 @@ test('камера третьої особи — куля: стіна, стов�
 test('перша особа: цикл V, погляд — куди обернений гравець, кут огляду 70°, без згладжування; руки — у кутах кадру', async () => {
   const { createCamera, viewProj, project, basis, rotate, smooth, facing, setYaw, NEXT, FIRST, THIRD, ISO, FOV1, LIMITS } = await import('../js/camera.js');
   const { viewArms } = await import('../js/anim.js');
-  const { PIVOT, HAND_Z } = await import('../js/gen/mesh.js');
-  assert.deepEqual([NEXT[FIRST], NEXT[THIRD], NEXT[ISO]], [THIRD, ISO, FIRST]);
+    assert.deepEqual([NEXT[FIRST], NEXT[THIRD], NEXT[ISO]], [THIRD, ISO, FIRST]);
   const c = createCamera(FIRST);
   setYaw(c, 1.2 + Math.PI);
   const f = facing(c), u = basis(c).u;
@@ -719,7 +718,7 @@ test('перша особа: цикл V, погляд — куди оберне�
   c.pitch1 = c.pitch1T = 0.3;
   const vp = viewProj(c, W, H), b = basis(c), A = viewArms({ arm: 0, punch: 0 }, {}, b, [0, 0, 0], W / H, FOV1);
   for (const [p, s] of [['armR', 1], ['armL', -1]]) {
-    const M = A[p], py = p === 'armR' ? -PIVOT.armY : PIVOT.armY, hz = HAND_Z;
+    const M = A[p], py = p === 'armR' ? -0.2625 : 0.2625, hz = 0.375;
     const hand = [M[4] * py + M[8] * hz + M[12], M[5] * py + M[9] * hz + M[13], M[6] * py + M[10] * hz + M[14]];
     const q = project(vp.m, hand, W, H);
     assert.ok(Math.abs((q[0] / W * 2 - 1) - 0.6 * s) < 1e-6 && Math.abs((1 - q[1] / H * 2) + 0.75) < 1e-6, `${p}: ${q}`);

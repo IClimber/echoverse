@@ -14,13 +14,13 @@ import { capsule, overlap, sweep, findFloor, floorNormal, stands, moveH, moveAir
 
 export const SPEED = 4.2;            // м/с (при 1 g; хода в Minecraft — 4,3)
 export const FOOT = 0.24;            // півширина габариту
-export const BODY = 1.8;             // зріст, м (рішення 12.10.2026: світ у СІ — клітинка 1 м, рівень 0,5 м)
+export const BODY = 0.98;            // зріст, м (2 блоки; 12.10.2026: одиниця гри — 1 м, розміри як були)
 export const PLAYER_MASS = 70;                // маса гравця (тисне тіло, на якому стоїть; штовхає)
-export const PLAYER_AREA = 0.9;               // опір гравця Cd·A, м² (стоячи: 0,48 × 1,8 × Cd ≈ 1): межа падіння ≈ 35 м/с при 1 g, 1 атм
+export const PLAYER_AREA = 0.9;               // опір гравця Cd·A, м² (закон п. 4): межа падіння ≈ 35 м/с при 1 g, 1 атм
 export const HIT_IMPULSE = 150;               // удар гравця (маса × швидкість): камінчик — ~6 од/с, брила — ледь
 export const GRAVITY = 9.81;         // прискорення при 1 g, м/с² (рішення 12.10.2026: справжнє)
 export const JUMP_V = 4.75;          // поштовх стрибка, м/с: при 1 g — 1,15 м (на уступ 1 м) і 0,97 с у повітрі
-export const FLOAT_Z = 1.35;         // той, хто пливе у воді, тримається ногами на стільки нижче поверхні (голова над водою; густіша — вище)
+export const FLOAT_Z = 0.6;          // той, хто пливе у воді, тримається ногами на стільки нижче поверхні (густіша — вище)
 export const SPRINT = 1.6;           // біг (Shift): множник швидкості пішки (у воді — половина надбавки)
 // Політ: клітинок за секунду по горизонталі, з Shift. ТИМЧАСОВО на час розробки (користувач, 11.10.2026) — 48 / 120;
 // у грі повернути 12 / 24 (×2, як у Minecraft) — docs/roadmap.md, «Інше»
@@ -36,12 +36,12 @@ const WALK_Z = [Math.cos(50 * Math.PI / 180), Math.cos(65 * Math.PI / 180)];   /
                                      // видимо ≤ 45°) і до 65° (up 2: у 2 блоки — 56°)
 export const STAND_Z = 0.17;         // стояти — до 80° (круче — падаєш); між межею ходи й цією — сповзаєш (slideZ)
 const SNAP = STEP;                   // схилом униз ноги прилипають до підлоги не глибше за крок
-export const SHAPE = capsule(FOOT, BODY, 8);   // 8 куль: «талія» між сусідніми ≥ 0,92 R
-// Пози (п. 3 roadmap; зріст 1,8 м — 12.10.2026): присів — 1,2 (пройти видимі 1,25 ходу 1 × 3 рівні, 1,5 м); лежить і
-// пливе під рідиною (біг) — 0,6 × радіус 0,2 (хід 1 × 2 рівні видимо 0,75; лаз у 0,5 м — видимо ≤ 0,483 — непрохідний).
-// Ноги на місці, форма росте вгору; підвестися — лише якщо вільно. Форма не обертається з гравцем (як коробка в Minecraft)
-export const CROUCH_H = 1.2, CRAWL_R = 0.2, CRAWL_H = 0.6;
-export const SHAPE_C = capsule(FOOT, CROUCH_H, 5), SHAPE_L = capsule(CRAWL_R, CRAWL_H, 3);
+export const SHAPE = capsule(FOOT, BODY);
+// Пози (п. 3 roadmap): присів — 0,72 (пройти видимі 0,75 коридору 1 × 2); лежить і пливе під рідиною (біг) —
+// 0,42 × радіус 0,2 (у лаз 2 × 1 видимо до 0,483 заввишки). Ноги на місці, форма росте вгору; підвестися — лише якщо
+// вільно. Форма не обертається з гравцем (як коробка в Minecraft)
+export const CROUCH_H = 0.72, CRAWL_R = 0.2, CRAWL_H = 0.42;
+export const SHAPE_C = capsule(FOOT, CROUCH_H, 3), SHAPE_L = capsule(CRAWL_R, CRAWL_H, 2);
 export const SHAPES = { stand: SHAPE, crouch: SHAPE_C, crawl: SHAPE_L, swim: SHAPE_L };
 export const shapeOf = (p) => SHAPES[p.pose || 'stand'];
 const RANK = { crawl: 0, swim: 0, crouch: 1, stand: 2 };
@@ -491,7 +491,7 @@ function climbStep(p, ix, iy, jump, dt, P, C, ph, ctl) {
   let grip = 1;
   if (wall) {
     const bx = Math.floor(p.x - cl.nx * (sh.R + 0.3)), by = Math.floor(p.y - cl.ny * (sh.R + 0.3));
-    const ice = P.block(bx, by, Math.floor((p.z + 0.9) / LEVEL)) === B_ICE;
+    const ice = P.block(bx, by, Math.floor((p.z + 0.5) / LEVEL)) === B_ICE;
     grip = (ice ? 0.15 : ph.friction ?? 1) * (ctl.wet ? WET_GRIP : 1);
   }
   p.grip = grip;
@@ -676,13 +676,13 @@ export function windShelter(P, x, y, z, wind) {
   if (w < 1e-6) return 1;
   const ux = -wind[0] / w, uy = -wind[1] / w, k0 = Math.floor(z / LEVEL + EPS);
   let roof = false;
-  for (let k = k0 + 4; k <= k0 + ROOF; k++) { const b = P.block(Math.floor(x), Math.floor(y), k); if (b !== -1 && solidB(b)) { roof = true; break; } }
+  for (let k = k0 + 2; k <= k0 + ROOF; k++) { const b = P.block(Math.floor(x), Math.floor(y), k); if (b !== -1 && solidB(b)) { roof = true; break; } }
   const R = roof ? CAVE_LEE : LEE + LEE_FADE;
   for (let d = 0.4; d <= R; d += 0.25) {
     const px = x + ux * d, py = y + uy * d, tx = Math.floor(px), ty = Math.floor(py);
     let hit = false;
-    for (const dz of [1.0, 1.6]) { const b = P.block(tx, ty, Math.floor((z + dz) / LEVEL)); if (b !== -1 && solidB(b)) { hit = true; break; } }   // вище за пояс: уступ — не стіна
-    if (!hit) hit = objsNear(P, px, py, (o) => Math.abs(px - o.cx) < o.r + 0.1 && Math.abs(py - o.cy) < o.r + 0.1 && z + 1.0 < o.z1 && z + 1.6 > o.z0);
+    for (const dz of [0.55, 0.9]) { const b = P.block(tx, ty, Math.floor((z + dz) / LEVEL)); if (b !== -1 && solidB(b)) { hit = true; break; } }   // вище за пояс: уступ — не стіна
+    if (!hit) hit = objsNear(P, px, py, (o) => Math.abs(px - o.cx) < o.r + 0.1 && Math.abs(py - o.cy) < o.r + 0.1 && z + 0.55 < o.z1 && z + 0.9 > o.z0);
     if (hit) return roof || d <= LEE ? 0 : (d - LEE) / LEE_FADE;
   }
   return 1;

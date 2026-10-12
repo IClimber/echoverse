@@ -8,14 +8,14 @@
 // Стан — у me.anim; кути плавно наздоганяють ціль, тож переходи без ривків. Ступні на землі: тіло опускається на стільки,
 // на скільки зігнуті ноги (висота кульша — стегно й гомілка)
 import { chain, translate, rotZ, rotY, rotX, scale } from './engine/core/mat.js';
-import { PIVOT, SHIN_F, SHIN_B, HAND_Z } from './gen/mesh.js';
+import { PIVOT, FIG_K } from './gen/mesh.js';
 
 const RATE = 14;                     // як швидко кути наздоганяють ціль, 1/с
 const STRIDE = 11;                   // кроків (радіан фази) на секунду при звичайній швидкості
 const SEG = PIVOT.hip - PIVOT.knee;  // довжина стегна й гомілки (однакові)
 // висота кульша над найнижчою точкою гомілки: стегно під кутом a вперед від вертикалі, коліно зігнуте на b (гомілка —
 // брусок: нахилена, вона спирається на ребро — переднє, коли ступня позаду, заднє — коли попереду)
-export const hipH = (a, b) => SEG * (Math.cos(a) + Math.cos(a - b)) + (a - b < 0 ? SHIN_F : SHIN_B) * Math.abs(Math.sin(a - b));
+export const hipH = (a, b) => SEG * (Math.cos(a) + Math.cos(a - b)) + (a - b < 0 ? 0.055 : 0.075) * FIG_K * Math.abs(Math.sin(a - b));
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const KEYS = ['legL', 'legR', 'kneeL', 'kneeR', 'armL', 'armR', 'up', 'tuck', 'bob', 'lean', 'waist', 'spread', 'drop', 'shift', 'lookP', 'lookY'];
 
@@ -37,7 +37,7 @@ export function animate(me, dt, now, speedK = 1) {
   } else if (pose === 'crawl') {                                // лежить: горизонтально, руки вперед поперемінно
     if (me.moving) a.phase += dt * 6 * speedK;
     const s = Math.sin(a.phase);
-    T.lean = 1.5; T.shift = -1.3; lift = 0.12;
+    T.lean = 1.5; T.shift = -0.62; lift = 0.115;
     T.armL = 2.95 + 0.3 * s; T.armR = 2.95 - 0.3 * s; T.spread = 0.2;
     T.kneeL = 0.4 + 0.4 * s; T.kneeR = 0.4 - 0.4 * s; T.legL = -0.1 * s; T.legR = 0.1 * s;
   } else if (me.swim && me.moving || pose === 'swim' || (me.dive && me.moving)) {   // пливе: горизонтально, руки брасом, ноги б'ють
@@ -49,8 +49,7 @@ export function animate(me, dt, now, speedK = 1) {
     const kick = 0.3 * Math.sin(t * 3);
     // під рідиною — за напрямком руху (униз — головою вниз)
     const vh = Math.hypot(me.vx || 0, me.vy || 0), tilt = me.dive || pose === 'swim' ? Math.atan2(-(me.vz || 0), Math.max(0.3, vh)) : 0;
-    T.lean = clamp(1.35 + tilt, 0.3, 2.6); lift = me.dive || pose === 'swim' ? 0.3 : 1.1; T.bob = 0.04 * Math.sin(t);
-    T.shift = -0.85 * Math.sin(Math.min(T.lean, Math.PI - T.lean, 1.57));   // центр тіла — над формою, не голова в стіні
+    T.lean = clamp(1.35 + tilt, 0.3, 2.6); lift = me.dive || pose === 'swim' ? 0.2 : 0.38; T.bob = 0.03 * Math.sin(t);
     T.legL = kick; T.legR = -kick;
   } else if (me.swim || me.dive) {                              // на місці: тримається вертикально
     a.phase += dt * 3;
@@ -79,8 +78,8 @@ export function animate(me, dt, now, speedK = 1) {
     T.legL = 0.65 * s; T.legR = -0.65 * s; T.armL = -0.55 * s; T.armR = 0.55 * s;
     // коліно згинається в маху (нога йде вперед)
     T.kneeL = 0.6 * Math.max(0, c); T.kneeR = 0.6 * Math.max(0, -c);
-    T.bob = 0.06 * Math.abs(c); T.lean = 0.1;
-  } else T.bob = 0.012 * (1 + Math.sin(now / 520));
+    T.bob = 0.045 * Math.abs(c); T.lean = 0.1;
+  } else T.bob = 0.008 * (1 + Math.sin(now / 520));
   // тіло в руках — обидві руки вперед
   if (me.carry && !cl) { T.armL = T.armR = 1.35 - (T.waist || 0); T.up = 0; T.spread = -0.15; }
   // ступні на землі: тіло опускається на стільки, на скільки зігнута опорна нога
@@ -138,7 +137,7 @@ export function poseMatrices(a, ox, oy, oz, yaw) {
 const ARM_D = 0.45;
 // у рідині: довжина руки, плече відносно ока (праворуч, угору, уперед — винесено в кадр, як руки першої особи в іграх),
 // стиснення вертикалі й нахил уперед напрямку руки — щоб гребок фігури йшов у кадрі (видно ~75 % циклу замість ~30 %)
-const ARM_L = PIVOT.shoulder - HAND_Z, SH_R = 0.2, SH_UP = -0.15, SH_F = 0.25, SQ_UP = 0.35, FWD_B = 1.0;
+const ARM_L = 0.3 * FIG_K, SH_R = 0.2, SH_UP = -0.15, SH_F = 0.25, SQ_UP = 0.35, FWD_B = 1.0;
 // Поля стану гравця, які читає viewArms: сцена отримує знімок гравця (main.js) — саме з цими полями (тест — play.test)
 export const VIEW_KEYS = ['yaw', 'swim', 'dive', 'wet', 'fly', 'pose', 'climb', 'climbD', 'carry'];
 export function viewArms(a, me, b, eye, aspect, fovY) {
@@ -176,7 +175,7 @@ export function viewArms(a, me, b, eye, aspect, fovY) {
     let X = [0, 1, 2].map((i) => -u[i] - fa * A[i]);
     const xl = Math.hypot(...X); X = X.map((v) => v / xl);
     const Y = [A[1] * X[2] - A[2] * X[1], A[2] * X[0] - A[0] * X[2], A[0] * X[1] - A[1] * X[0]];
-    const hz = HAND_Z, T = [0, 1, 2].map((i) => H[i] - py * Y[i] - hz * A[i]);
+    const hz = 0.3 * FIG_K, T = [0, 1, 2].map((i) => H[i] - py * Y[i] - hz * A[i]);
     out[part] = [X[0], X[1], X[2], 0, Y[0], Y[1], Y[2], 0, A[0], A[1], A[2], 0, T[0], T[1], T[2], 1];
   }
   return out;
