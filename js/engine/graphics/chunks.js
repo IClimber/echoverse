@@ -25,6 +25,9 @@ export const MAT_N = 32;
 // ---------------- GLSL ----------------
 const DECL_VS = `
 uniform vec4 eco_wind;
+uniform vec4 eco_tanom;
+uniform vec2 eco_tanomO;
+uniform sampler2D eco_tanomMap;
 uniform float eco_curve;
 uniform vec3 eco_target;
 uniform vec4 eco_mat[${MAT_N}];
@@ -58,7 +61,14 @@ const MAIN_END_VS = `
 const TRANSFORM_ADD = `
 	#ifdef ECO_WIND
 		float eco_wm = mod(floor(vertex_position.w * 65535.0 + 0.5), 32.0);
-		if (eco_mat[int(eco_wm)].y > 0.5) posW.xz += eco_wind.xy * (0.55 + 0.45 * sin(eco_wind.z * 1.9 + posW.x * 0.9 + posW.z * 1.3 + posW.y * 0.7));
+		if (eco_mat[int(eco_wm)].y > 0.5) {
+			float eco_ph = posW.x * 0.9 + posW.z * 1.3 + posW.y * 0.7, eco_s = sin(eco_wind.z * 1.9 + eco_ph);
+			if (eco_tanom.z > 0.5) {   // часові аномалії: суміш трьох часів (t, t·k_п, t·k_ш) з вагами плям
+				vec2 eco_tw = textureLod(eco_tanomMap, (posW.xz - eco_tanomO) / eco_tanom.w, 0.0).rg;
+				eco_s = eco_s * (1.0 - eco_tw.r - eco_tw.g) + eco_tw.r * sin(eco_wind.z * eco_tanom.x * 1.9 + eco_ph) + eco_tw.g * sin(eco_wind.z * eco_tanom.y * 1.9 + eco_ph);
+			}
+			posW.xz += eco_wind.xy * (0.55 + 0.45 * eco_s);
+		}
 	#endif
 	#ifdef ECO_CURVE
 		vec2 eco_dc = posW.xz - eco_target.xz;
@@ -67,6 +77,9 @@ const TRANSFORM_ADD = `
 `;
 const DECL_PS = `
 uniform sampler2DArray uTexArr;
+uniform vec4 eco_tanom;
+uniform vec2 eco_tanomO;
+uniform sampler2D eco_tanomMap;
 uniform vec3 eco_target;
 uniform float eco_seam;
 uniform float eco_time;
@@ -111,6 +124,14 @@ void getAlbedo() {
     f = Rm * f; g1 = Rm * g1; g2 = Rm * g2;
   }
   eco_col = vVertexColor.rgb * textureGrad(uTexArr, vec3(f + 0.5, eco_m), g1, g2).rgb * 4.595;
+  if (eco_tanom.z > 0.5 && eco_p.w > 0.0 && eco_p.z > 1.5) {   // плин у плямі часової аномалії: друга вибірка в часі t·k
+    vec2 eco_tw = textureLod(eco_tanomMap, (vPositionW.xz - eco_tanomO) / eco_tanom.w, 0.0).rg;
+    float eco_w = eco_tw.r + eco_tw.g;
+    if (eco_w > 0.002) {
+      vec2 uv2 = uv + eco_time * ((eco_tw.r > eco_tw.g ? eco_tanom.x : eco_tanom.y) - 1.0) * eco_p.w * vec2(0.05, 0.03);
+      eco_col = mix(eco_col, vVertexColor.rgb * textureGrad(uTexArr, vec3(fract(uv2), eco_m), g1, g2).rgb * 4.595, eco_w);
+    }
+  }
   dAlbedo = eco_col * (1.0 - eco_p.x);
 }
 `;
@@ -180,6 +201,10 @@ mat4 getModelMatrix() {
 // ---------------- WGSL: уніформи — uniform.ім'я, текстура — пара ім'я + ім'яSampler, варіації в PS — глобальні ----------------
 const DECL_VS_W = `
 uniform eco_wind: vec4f;
+uniform eco_tanom: vec4f;
+uniform eco_tanomO: vec2f;
+var eco_tanomMap: texture_2d<f32>;
+var eco_tanomMapSampler: sampler;
 uniform eco_curve: f32;
 uniform eco_target: vec3f;
 uniform eco_mat: array<vec4f, ${MAT_N}>;
@@ -216,7 +241,13 @@ const TRANSFORM_ADD_W = `
 		let eco_wr: f32 = floor(vertex_position.w * 65535.0 + 0.5);
 		let eco_wm: f32 = eco_wr - floor(eco_wr / 32.0) * 32.0;
 		if (uniform.eco_mat[i32(eco_wm)].y > 0.5) {
-			let eco_s: f32 = 0.55 + 0.45 * sin(uniform.eco_wind.z * 1.9 + posW.x * 0.9 + posW.z * 1.3 + posW.y * 0.7);
+			let eco_ph: f32 = posW.x * 0.9 + posW.z * 1.3 + posW.y * 0.7;
+			var eco_s: f32 = sin(uniform.eco_wind.z * 1.9 + eco_ph);
+			if (uniform.eco_tanom.z > 0.5) {
+				let eco_tw: vec2f = textureSampleLevel(eco_tanomMap, eco_tanomMapSampler, (posW.xz - uniform.eco_tanomO) / uniform.eco_tanom.w, 0.0).rg;
+				eco_s = eco_s * (1.0 - eco_tw.r - eco_tw.g) + eco_tw.r * sin(uniform.eco_wind.z * uniform.eco_tanom.x * 1.9 + eco_ph) + eco_tw.g * sin(uniform.eco_wind.z * uniform.eco_tanom.y * 1.9 + eco_ph);
+			}
+			eco_s = 0.55 + 0.45 * eco_s;
 			posW.x = posW.x + uniform.eco_wind.x * eco_s;
 			posW.z = posW.z + uniform.eco_wind.y * eco_s;
 		}
@@ -229,6 +260,10 @@ const TRANSFORM_ADD_W = `
 const DECL_PS_W = `
 var uTexArr: texture_2d_array<f32>;
 var uTexArrSampler: sampler;
+uniform eco_tanom: vec4f;
+uniform eco_tanomO: vec2f;
+var eco_tanomMap: texture_2d<f32>;
+var eco_tanomMapSampler: sampler;
 uniform eco_target: vec3f;
 uniform eco_seam: f32;
 uniform eco_time: f32;
@@ -271,6 +306,14 @@ fn getAlbedo() {
     f = Rm * f; g1 = Rm * g1; g2 = Rm * g2;
   }
   eco_col = vVertexColor.rgb * textureSampleGrad(uTexArr, uTexArrSampler, f + 0.5, i32(eco_m), g1, g2).rgb * 4.595;
+  if (uniform.eco_tanom.z > 0.5 && eco_p.w > 0.0 && eco_p.z > 1.5) {
+    let eco_tw: vec2f = textureSampleLevel(eco_tanomMap, eco_tanomMapSampler, (vPositionW.xz - uniform.eco_tanomO) / uniform.eco_tanom.w, 0.0).rg;
+    let eco_w: f32 = eco_tw.r + eco_tw.g;
+    if (eco_w > 0.002) {
+      let uv2: vec2f = uv + uniform.eco_time * (select(uniform.eco_tanom.y, uniform.eco_tanom.x, eco_tw.r > eco_tw.g) - 1.0) * eco_p.w * vec2f(0.05, 0.03);
+      eco_col = mix(eco_col, vVertexColor.rgb * textureSampleGrad(uTexArr, uTexArrSampler, fract(uv2), i32(eco_m), g1, g2).rgb * 4.595, eco_w);
+    }
+  }
   dAlbedo = eco_col * (1.0 - eco_p.x);
   #ifdef ECO_RING_IN
     if (length(vPositionW.xz - uniform.eco_target.xz) > uniform.eco_seam) { discard; }

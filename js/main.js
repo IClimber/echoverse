@@ -14,7 +14,7 @@ import { initInput, moveAxis, turnAxis, sprintHeld, crouchHeld, vertAxis, takeAc
 import { listWorlds, putWorld, deleteWorld, serialize, deserialize, newId } from './save.js';
 import { hashStr } from './rng.js';
 import { GEN, SEA, physOf, gravityAt } from './universe.js';
-import { physAt3 } from './worldphys.js';
+import { physAt3, timeK } from './worldphys.js';
 import { tempAt, snowy } from './climate.js';
 import { CS, SEC, B_LIQ, B_MAGMA, solidB, BLOCK_NAMES } from './gen/chunk.js';
 import { LEVEL } from './iso.js';
@@ -114,12 +114,13 @@ function boot(renderer) {
       }
       return null;
     },
-    // Найближча пляма аномалії ('rev' — зворотна гравітація, 'grav' — інша сила тяжіння) до 3000 м: гравець — туди, на ґрунт
+    // Найближча пляма аномалії до 3000 м ('grav' — інша сила тяжіння, 'rev' — зворотна, 'time' — часова: повільна чи швидка):
+    // гравець — туди, на ґрунт
     findAnom(kind = 'grav') {
       const L = g.world.laws(g.d, g.n), me = g.me;
       for (let r = 0; r <= 3000; r += 16) for (let a = 0; a < 6.283; a += Math.max(0.05, 16 / Math.max(r, 1))) {
-        const x = Math.floor(me.x + r * Math.cos(a)) + 0.5, y = Math.floor(me.y + r * Math.sin(a)) + 0.5, q = gravityAt(L, x, y);
-        if (kind === 'rev' ? q.rev && q.k < -0.2 : !q.rev && Math.abs(q.k - 1) > 0.4) {
+        const x = Math.floor(me.x + r * Math.cos(a)) + 0.5, y = Math.floor(me.y + r * Math.sin(a)) + 0.5, q = kind === 'time' ? timeK(L, x, y) : gravityAt(L, x, y);
+        if (kind === 'time' ? q.ws > 0.9 || q.wf > 0.9 : kind === 'rev' ? q.rev && q.k < -0.2 : !q.rev && Math.abs(q.k - 1) > 0.4) {
           me.x = x; me.y = y; me.z += 200; me.vz = 0; me.fly = true; me.visX = me.px = x; me.visY = me.py = y; me.vis = me.pv = me.z;
           g.cam = [x, y, me.z]; streamer.force();
           return [x, y, q.k];
@@ -552,7 +553,7 @@ function boot(renderer) {
       if (b.sleep && !windMoves(b, env)) continue;                // спить і вітер не зрушить — не рахуємо
       const lee = windShelter(P, b.x, b.y, b.z - b.hz, W.wind) * windHeightK(b.z - b.hz, g.zbar ?? b.z) / (W.hk || 1);
       env.wind = [W.wind[0] * lee, W.wind[1] * lee];
-      stepBody(b, dt, P, env);
+      stepBody(b, dt * timeK(L, b.x, b.y).k, P, env);           // часова аномалія: тіло живе у своєму часі
     }
     collideBodies(near, P, { bounce: L.phys.bounce, friction: L.phys.friction });   // між собою (сплячі — перешкоди)
     // зрушене далі за 0,1 від місця появи — змінене (переживе вивантаження); інший чанк — інший власник

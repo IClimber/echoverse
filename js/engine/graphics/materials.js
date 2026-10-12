@@ -54,6 +54,12 @@ export function createMaterials(G) {
   const uMin = U('eco_minLight'), uEye = U('eco_eye'), uFade = U('eco_fade'), uCut = U('eco_cut'), uCut2 = U('eco_cut2'), uCut3 = U('eco_cut3'), uThin = U('eco_thin'), uXf = U('eco_xfade');
   const f2 = new Float32Array(2), f3 = new Float32Array(3), f3e = new Float32Array(3), f4w = new Float32Array(4), c1 = new Float32Array(4), c2 = new Float32Array(4), c3 = new Float32Array(2), f2t = new Float32Array(2), f2x = new Float32Array(2);
   const set = (u, a, v) => { if (v) { a.set(v); u.setValue(a); } };
+  // Часові аномалії (chunks.js): eco_tanom [k_п, k_ш, увімкнено, розмір карти], eco_tanomO — кут карти (PlayCanvas x, z),
+  // eco_tanomMap — ваги (w_п, w_ш) навколо камери; поза картою — нулі (край текстури)
+  const TM = 64, uTa = U('eco_tanom'), uTaO = U('eco_tanomO'), ta4 = new Float32Array([1, 1, 0, 256]), taO = new Float32Array(2);
+  const taTex = new pc.Texture(dev, { name: 'eco_tanomMap', width: TM, height: TM, format: pc.PIXELFORMAT_RG8, mipmaps: false, minFilter: pc.FILTER_LINEAR, magFilter: pc.FILTER_LINEAR, addressU: pc.ADDRESS_CLAMP_TO_EDGE, addressV: pc.ADDRESS_CLAMP_TO_EDGE });
+  { const a = taTex.lock(); a.fill(0); taTex.unlock(); }
+  U('eco_tanomMap').setValue(taTex); uTa.setValue(ta4); uTaO.setValue(taO);
   const frame = { table };
 
   return {
@@ -78,8 +84,12 @@ export function createMaterials(G) {
       set(uTarget, f3, o.target); if (o.seam !== undefined) uSeam.setValue(o.seam);
       if (o.time !== undefined) uTime.setValue(o.time); if (o.minLight !== undefined) uMin.setValue(o.minLight);
       set(uEye, f3e, o.eye); set(uFade, f2, o.fade);
+      set(uTa, ta4, o.tanom); set(uTaO, taO, o.tanomO);
       set(uCut, c1, o.cut); set(uCut2, c2, o.cut2); set(uCut3, c3, o.cut3); set(uThin, f2t, o.thin); set(uXf, f2x, o.xfade);
     },
+    // ваги часових аномалій: Uint8Array(64·64·2) (рядок — z PlayCanvas) чи null (вимкнено)
+    TANOM_N: TM,
+    setTanomMap(buf) { if (buf) { const a = taTex.lock(); a.set(buf); taTex.unlock(); } },
     frame,
   };
 }

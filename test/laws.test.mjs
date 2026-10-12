@@ -263,9 +263,9 @@ test('погода в просторі: стан триває хвилини, с
   assert.ok(dMove < dStay, `за вітром ${dMove}, на місці ${dStay}`);
 });
 
-test('блискавки — лише в грозу, у найвищу точку околу; метеори — лише з повітрям', async () => {
+test('блискавки — у грозу й рідко в пиловій бурі над пустелею, у найвищу точку околу; метеори — лише з повітрям', async () => {
   const { weatherAt, lightningNear, meteorsAt } = await import('../js/weather.js');
-  const { tile } = await import('../js/gen/chunk.js');
+  const { tile, T_DESERT, T_DRY } = await import('../js/gen/chunk.js');
   let L = null;
   for (let n = 100; n < 5000 && !L; n++) { const V = lawsOf(hashStr('1hsb1wu'), 0, n); if (V.air.w.storm > 0.3) L = V; }
   let hits = 0;
@@ -274,13 +274,46 @@ test('блискавки — лише в грозу, у найвищу точк�
     if (!B || Math.abs(t - B.t0) > 0.05) continue;
     hits++;
     const W = weatherAt(L, Math.floor(B.t0 * 2) / 2, B.cx, B.cy);
-    assert.ok(W.precip > 0.7 && W.dim > 0.3, `не гроза: опади ${W.precip}, темніше ${W.dim}`);
+    const tt = tile(L, Math.floor(B.cx), Math.floor(B.cy)).t;
+    assert.ok(W.precip > 0.7 && W.dim > 0.3 || W.dust > 0.6 && (tt === T_DESERT || tt === T_DRY), `не гроза й не пилова буря: опади ${W.precip}, темніше ${W.dim}, пил ${W.dust}`);
     const o = {}; tile(L, Math.floor(B.x), Math.floor(B.y), o);
     assert.ok(Math.abs((o.h + 1) * 0.5 - B.z) < 1e-9, 'ціль — верх клітинки');
   }
   assert.ok(hits > 0, 'блискавок немає');
+  // суха блискавка в пиловій бурі (всесвіт з частими бурями, пустеля; розряд о 209,25 с — пошуком, dustbolt)
+  const D = lawsOf(hashStr('1hsb1wu'), 0, 219), Bd = lightningNear(D, 209.3, 7500, 1000, 1500);
+  assert.ok(Bd, 'сухої блискавки немає');
+  const Wd = weatherAt(D, Math.floor(Bd.t0 * 2) / 2, Bd.cx, Bd.cy);
+  assert.ok(Wd.dust > 0.6 && Wd.precip < 0.05, `не пилова буря: пил ${Wd.dust}, опади ${Wd.precip}`);
   for (let n = 300; n < 300000; n += 13) { const V = lawsOf(hashStr('test'), 3, n); if (V.air.vacuum) { for (let t = 0; t < 3600; t += 1) assert.equal(meteorsAt(V, t, 1).length, 0); break; } }
   const E = lawsOf(hashStr('test'), 0, 0);
   let m = 0; for (let t = 0; t < 3600; t += 0.35) m += meteorsAt(E, t, 1).length > 0;
   assert.ok(m > 0, 'метеорів немає');
+});
+
+test('часові аномалії: повільні й швидкі плями не стикаються; тіло в повільній падає в 1/k разів довше', async () => {
+  const { timeK } = await import('../js/worldphys.js');
+  const { makeBody, stepBody, configureBodies } = await import('../js/engine/physics/bodies.js');
+  const { GRAVITY, PLAYER_MASS, PLAYER_AREA } = await import('../js/player.js');
+  const { solidB } = await import('../js/gen/chunk.js');
+  configureBodies({ level: 0.5, solid: solidB, gravity: GRAVITY, refMass: PLAYER_MASS, refArea: PLAYER_AREA });
+  let L = null;
+  for (let d = 6; d <= 12 && !L; d++) for (let n = 100; n < 40000 && !L; n += 7) { const V = lawsOf(hashStr('test'), d, n); if (V.tanom) L = V; }
+  assert.ok(L, 'всесвіту з часовими аномаліями немає');
+  assert.ok(lawsOf(hashStr('test'), 0, 0).tanom === null || !lawsOf(hashStr('test'), 0, 0).tanom, 'біля старту — немає');
+  let slow = null, fast = 0, both = 0, plain = 0;
+  for (let y = 0; y < 6000; y += 7) for (let x = 0; x < 6000; x += 7) {
+    const T = timeK(L, x, y);
+    if (T.ws > 0 && T.wf > 0) both++;
+    if (T.ws > 0.999 && !slow) slow = [x, y, T.k];
+    fast += T.wf > 0.999; plain += T.k === 1;
+    assert.ok(T.k >= Math.min(L.tanom.ks, 1) - 1e-9 && T.k <= L.tanom.kf + 1e-9);
+  }
+  assert.equal(both, 0, 'повільна й швидка стикаються');
+  assert.ok(slow && fast > 0 && plain > 0, `повільна ${slow}, швидка ${fast}, звичайних ${plain}`);
+  near(slow[2], L.tanom.ks, 0.01, 'k у ядрі повільної плями');
+  // падіння з 20 м: у плямі (крок × k) — у 1/k разів довше (тіло живе у своєму часі)
+  const FLOOR = { block: (x, y, k) => k < 0 ? 8 : 0 }, env = { g: 1, vT: 1e3, bounce: 0, friction: 1, wind: [0, 0] };
+  const fall = (k) => { const b = makeBody({ x: 0, y: 0, z: 20, hx: 0.25, hy: 0.25, hz: 0.25 }); b.sleep = false; let t = 0; while (b.z - b.hz > 0.05 && b.vz <= 0 && t < 60) { stepBody(b, k / 120, FLOOR, env); t += 1 / 120; } return t; };
+  near(fall(slow[2]) / fall(1), 1 / slow[2], 0.05 / slow[2], 'падіння в повільній плямі');
 });

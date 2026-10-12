@@ -126,8 +126,10 @@ export function windHeightK(z, zbar) {
   return Math.min(1.6, Math.max(0.6, 1 + 0.35 * (z - zbar) / 32)) * (1 + Math.max(0, z - SEA * LEVEL) / 2000);
 }
 
-// Блискавка в мить clock біля (x, y): клітини 1 км × відрізки 0,5 с, імовірність 0,005 × сила грози в клітині; ціль —
+// Блискавка в мить clock біля (x, y): клітини 1 км × відрізки 0,5 с, імовірність 0,005 × сила грози в клітині (у пиловій
+// бурі — × DUST_BOLT); ціль —
 // найвища точка в радіусі 30 м (висоти tile) — {x, y, t0 (початок), k (сила 0…1)} найближча в радіусі R чи null
+const DUST_BOLT = 0.04;
 export function lightningNear(L, clock, x, y, R = 3000) {
   if (L.air.vacuum) return null;
   const seg = Math.floor(clock * 2), cx0 = Math.floor((x - R) / 1000), cx1 = Math.floor((x + R) / 1000), cy0 = Math.floor((y - R) / 1000), cy1 = Math.floor((y + R) / 1000);
@@ -136,7 +138,10 @@ export function lightningNear(L, clock, x, y, R = 3000) {
     const h = hash3(L.ds ^ 0x1f1a, s * 4099 + i, j);
     if (unit(h) > 0.005) continue;
     const px = (i + unit(hash3(h, 1, 0))) * 1000, py = (j + unit(hash3(h, 2, 0))) * 1000, W = weatherAt(L, s / 2, px, py);
-    const storm = clamp01((W.precip - 0.7) / 0.3) * clamp01((W.dim - 0.3) / 0.15);
+    let storm = clamp01((W.precip - 0.7) / 0.3) * clamp01((W.dim - 0.3) / 0.15);
+    // суха блискавка: у пиловій бурі частинки електризуються тертям (як у вулканічній хмарі) — над пустелею й степом,
+    // у DUST_BOLT разів рідше, ніж у грозі (рішення користувача 12.10.2026)
+    if (storm <= 0 && W.dust > 0.6) { const t = tile(L, Math.floor(px), Math.floor(py)).t; if (t === T_DESERT || t === T_DRY) storm = DUST_BOLT * clamp01((W.dust - 0.6) / 0.3); }
     if (unit(hash3(h, 5, 0)) >= storm) continue;
     const t0 = (s + unit(hash3(h, 3, 0)) * 0.5) / 2;
     if (clock < t0 || clock > t0 + 0.25) continue;

@@ -14,6 +14,7 @@ import { createInstances } from './engine/graphics/instances.js';
 import { createParticleVolume, setShelter } from './engine/graphics/particles.js';
 import { createBolts } from './engine/graphics/bolts.js';
 import { cloudsAt, meteorsAt, boltSegs } from './weather.js';
+import { timeK } from './worldphys.js';
 import { SKY_GLSL, SKY_WGSL } from './sky-shader.js';
 import { LEVEL, S } from './iso.js';
 import { CS } from './gen/chunk.js';
@@ -430,6 +431,27 @@ export async function createScene(canvas, settings = {}) {
     SU.uAur.setValue([au.dir[0], au.dir[1], au.k, au.t % 25600]); SU.uAurCol.setValue(c3(au.col)); SU.uAurE.setValue(au.e0 ?? 0.4);   // час: ×0,01 / 0,02 / 0,05 — кратні періоду шуму 256
     SU.eco_bakeK.setValue(bakeK);
   }
+  // Карта часових аномалій (М10): ваги (повільна, швидка) 64×64 на 256 м навколо цілі, кут — на ґратці 4 м (зсув не
+  // міняє вибірки); перерахунок після зсуву > 16 м чи нового всесвіту; без аномалій — вимкнено (eco_tanom.z = 0)
+  const TMN = M.TANOM_N, TMS = 256, TMC = TMS / TMN, tmBuf = new Uint8Array(TMN * TMN * 2), ta4 = new Float32Array([1, 1, 0, TMS]), taO = new Float32Array(2);
+  let tmAt = { L: null, x0: 0, y0: 0 };
+  function tanomMap(L, x, y) {
+    const A = L.tanom;
+    ta4[2] = A ? 1 : 0;
+    if (!A) return;
+    const x0 = Math.floor((x - TMS / 2) / TMC) * TMC, y0 = Math.floor((y - TMS / 2) / TMC) * TMC;
+    if (L !== tmAt.L || Math.abs(x0 - tmAt.x0) > 16 || Math.abs(y0 - tmAt.y0) > 16) {
+      for (let j = 0; j < TMN; j++) for (let i = 0; i < TMN; i++) {
+        const o = (j * TMN + i) * 2;
+        if (i === 0 || j === 0 || i === TMN - 1 || j === TMN - 1) { tmBuf[o] = tmBuf[o + 1] = 0; continue; }
+        const T = timeK(L, x0 + (i + 0.5) * TMC, y0 + (j + 0.5) * TMC);
+        tmBuf[o] = Math.round(255 * T.ws); tmBuf[o + 1] = Math.round(255 * T.wf);
+      }
+      M.setTanomMap(tmBuf); tmAt = { L, x0, y0 };
+    }
+    ta4[0] = A.ks; ta4[1] = A.kf;
+    taO[0] = tmAt.x0 - G.O[0]; taO[1] = tmAt.y0 - G.O[1];
+  }
   // Карта хмар неба (М8): хмарність погоди 64×64 клітинки на ±6 км навколо камери, оновлюється частинами (2 рядки за
   // кадр) не частіше разу на секунду чи після зсуву > 200 м; новий всесвіт — одразу вся
   const CM = 64, CMS = 12000, CMH = 800, cmBuf = new Uint8Array(CM * CM);
@@ -660,7 +682,8 @@ export async function createScene(canvas, settings = {}) {
         const q = p && project(m, [pt[0] + b.r[0] * 0.7, pt[1] + b.r[1] * 0.7, pt[2]], G.width, G.height);
         if (p && q) cut = { x: p[0], y: p[1], r: Math.hypot(q[0] - p[0], q[1] - p[1]) * (iso ? 1.6 : 2.4), depth: p[2] };
       }
-      M.setFrame({ wind: wind4, curve: laws.phys ? 0.5 / laws.phys.planetR : 0, target: tgtPC, seam: SEAM, time: lt, minLight: Lt.min, eye: eyePC, fade: fade2, cut: cutF, cut2, cut3, thin: thin2, xfade: xfade2 });
+      tanomMap(laws, t[0], t[1]);
+      M.setFrame({ tanom: ta4, tanomO: taO, wind: wind4, curve: laws.phys ? 0.5 / laws.phys.planetR : 0, target: tgtPC, seam: SEAM, time: lt, minLight: Lt.min, eye: eyePC, fade: fade2, cut: cutF, cut2, cut3, thin: thin2, xfade: xfade2 });
 
       // Видимі регіони й діапазони в них
       const farOn = !!(st.far && st.far.length), rad = view.rad, Un = uni(laws.d, laws.n);
@@ -822,7 +845,8 @@ export async function createScene(canvas, settings = {}) {
         const Qp = PART[want], v = volume(want), lk = 0.3 + 0.7 * Math.min(1, sk.lightK[1]);
         v.setPosition([t[0], t[1], t[2] + Qp.box[1] * 0.15]);
         const dr = loc.type === 'dust' ? 1 : 0.6;
-        v.setVelocity(wt.W.wind[0] * dr, wt.W.wind[1] * dr, -Qp.fall);
+        const tk = timeK(laws, t[0], t[1]).k;                    // у плямі часової аномалії — повільніше чи швидше
+        v.setVelocity(wt.W.wind[0] * dr * tk, wt.W.wind[1] * dr * tk, -Qp.fall * tk);
         v.setColor(loc.type === 'dust' ? [...laws.pal.desert.map((c) => c / 255 * (0.35 + 0.65 * Math.min(1, sk.lightK[1]))), 0.55] : [Qp.col[0] * lk, Qp.col[1] * lk, Qp.col[2] * lk, Qp.col[3]]);
         v.setIntensity(Math.min(1, loc.k));
       }

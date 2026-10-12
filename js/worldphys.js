@@ -3,10 +3,24 @@
 // база всесвіту (L.grav: радіус, густина, відцентрова) × аномалія плями (universe.js gravityAt) × зворотна гравітація
 // за висотою над ґрунтом + нахил плями + приплив компаньйона (з його напряму на небі в мить clock).
 import { physOf, gravityAt } from './universe.js';
+import { noise2 } from './noise.js';
 import { skyState } from './sky.js';
 import { airAt } from './climate.js';
 
 const ss = (t) => { t = t < 0 ? 0 : t > 1 ? 1 : t; return t * t * (3 - 2 * t); };
+// Часова аномалія в (x, y) (М10, легендарний закон L.tanom): плями шуму (як аномалії гравітації); у плямі поле b:
+// < −0,25 — повільна (k_п), > 0,25 — швидка (k_ш), між — k = 1 (повільна й швидка не стикаються); ws, wf — ваги з
+// плавним краєм (суміш анімацій у шейдерах), k — множник плину часу для тіл, плину рідин, гойдання, опадів
+const NO_T = { k: 1, ws: 0, wf: 0 };
+export function timeK(L, x, y) {
+  const A = L.tanom;
+  if (!A) return NO_T;
+  const a = noise2(L.sAn ^ 0x71e0, x / A.S, y / A.S), thr = 0.62 - 0.32 * A.freq;
+  if (a <= thr) return NO_T;
+  const s = Math.min(1, (a - thr) / 0.12), b = noise2(L.sAn ^ 0x71e1, x / (A.S * 2), y / (A.S * 2));
+  const ws = s * ss((-b - 0.25) / 0.15), wf = s * ss((b - 0.25) / 0.15);
+  return { k: 1 + (A.ks - 1) * ws + (A.kf - 1) * wf, ws, wf };
+}
 // Зворотна пляма: множник тяжіння на висоті h (м) над ґрунтом — k₀ біля ґрунту до H_a, далі плавно до 1 за H_f
 export function revK(L, k0, h) { const R = L.anom.rev; return k0 + (1 - k0) * ss((h - R.Ha) / R.Hf); }
 // Висота рівноваги (k = 0) над ґрунтом у зворотній плямі (x, y) чи null (тяжіння тут не зворотне)
