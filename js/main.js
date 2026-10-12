@@ -13,7 +13,8 @@ import { stepBody, windMoves, push, rayBody, collideBodies } from './engine/phys
 import { initInput, moveAxis, turnAxis, sprintHeld, crouchHeld, vertAxis, takeActions, takeWheel, takeDrag, clearInput, lockPointer, unlockPointer, locked, cursor, devKey } from './input.js';
 import { listWorlds, putWorld, deleteWorld, serialize, deserialize, newId } from './save.js';
 import { hashStr } from './rng.js';
-import { GEN, SEA, physOf, physAt } from './universe.js';
+import { GEN, SEA, physOf, gravityAt } from './universe.js';
+import { physAt3 } from './worldphys.js';
 import { CS, SEC, B_LIQ, B_MAGMA, solidB, BLOCK_NAMES } from './gen/chunk.js';
 import { LEVEL } from './iso.js';
 import { debugText, fmtN } from './debug.js';
@@ -109,6 +110,19 @@ function boot(renderer) {
       for (let i = 0; i < count; i++) {
         const n = from + i;
         if (pred(g.world.laws(d, n))) { g.dev.start([d, n], 'jumpNext'); return n; }
+      }
+      return null;
+    },
+    // Найближча пляма аномалії ('rev' — зворотна гравітація, 'grav' — інша сила тяжіння) до 3000 м: гравець — туди, на ґрунт
+    findAnom(kind = 'grav') {
+      const L = g.world.laws(g.d, g.n), me = g.me;
+      for (let r = 0; r <= 3000; r += 16) for (let a = 0; a < 6.283; a += Math.max(0.05, 16 / Math.max(r, 1))) {
+        const x = Math.floor(me.x + r * Math.cos(a)) + 0.5, y = Math.floor(me.y + r * Math.sin(a)) + 0.5, q = gravityAt(L, x, y);
+        if (kind === 'rev' ? q.rev && q.k < -0.2 : !q.rev && Math.abs(q.k - 1) > 0.4) {
+          me.x = x; me.y = y; me.z += 200; me.vz = 0; me.fly = true; me.visX = me.px = x; me.visY = me.py = y; me.vis = me.pv = me.z;
+          g.cam = [x, y, me.z]; streamer.force();
+          return [x, y, q.k];
+        }
       }
       return null;
     },
@@ -507,6 +521,8 @@ function boot(renderer) {
 
   // Тіла біля гравця (ширяюче каміння): крок фізики; гравець, що стоїть на тілі, тисне його вагою й їде разом з ним;
   // тіло, у яке йде гравець, штовхається (легке — відкотиться, важке — ні)
+  // Висота ґрунту (верх стовпця) — для зворотних плям тяжіння (worldphys.js)
+  const groundZ = (x, y) => g.world.topAt(g.d, g.n, Math.floor(x), Math.floor(y));
   function simBodies(dt, L, W) {
     const me = g.me, reg = g.world.ents(g.d, g.n), ob = me.ground ? me.onBody : null;
     let near = reg.awake();
@@ -522,7 +538,7 @@ function boot(renderer) {
     if (g.carry && !near.includes(g.carry.b)) near = [...near, g.carry.b];
     for (const b of near) { b.px = b.x; b.py = b.y; b.pz = b.z; b.ps = g.stamp; }   // стан до кроку — інтерполяція кадру
     for (const b of near) {
-      const ph = physAt(L, b.x, b.y), env = { g: ph.g, vT: ph.vT, bounce: L.phys.bounce, friction: L.phys.friction, wind: W.wind };
+      const ph = physAt3(L, b.x, b.y, b.z - b.hz, g.clock, groundZ), env = { g: ph.g, g0: ph.g0, vT: ph.vT0, tilt: ph.tilt, rev: ph.rev, bounce: L.phys.bounce, friction: L.phys.friction, wind: W.wind };
       if (b.sleep && !windMoves(b, env)) continue;                // спить і вітер не зрушить — не рахуємо
       const lee = windShelter(P, b.x, b.y, b.z - b.hz, W.wind);
       env.wind = [W.wind[0] * lee, W.wind[1] * lee];
@@ -695,7 +711,7 @@ function boot(renderer) {
       for (let s = physT.advance(dt); s > 0; s--) {
         const L = g.world.laws(g.d, g.n), W = weatherAt(L, g.clock);   // вітер — сила опору (густина повітря — у vT)
         me.px = me.visX ?? me.x; me.py = me.visY ?? me.y; me.pv = me.vis ?? me.z; g.stamp++;
-        g.ph = physAt(L, me.x, me.y);
+        g.ph = physAt3(L, me.x, me.y, me.z, g.clock, groundZ);
         const probe = g.world.probe(g.d, g.n);
         g.lee = windShelter(probe, me.x, me.y, me.z, W.wind);       // затишок: стіна, дерево чи камінь з навітряного боку, печера
         const t0 = performance.now();

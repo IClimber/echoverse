@@ -164,3 +164,41 @@ test('оптика: Земля — блакитне небо й помаранч
   const M = skyOptics(air(0.006, 3, 0.5), starColor(5772), 2 * PI / 180);
   assert.ok(M.glow[2] > M.glow[0], 'пиловий захід — блакитний');
 });
+
+test('приплив компаньйона: у зеніті −f, на обрії +f/2, на 45° убік 0,75·f', async () => {
+  const { tideVec } = await import('../js/worldphys.js');
+  const f = 0.05, z = tideVec(f, [0, 0, 1]), h = tideVec(f, [1, 0, 0]), c = Math.SQRT1_2, d = tideVec(f, [c, 0, c]);
+  near(z[2], f, 1e-12, 'зеніт: угору (легше)'); near(h[2], -f / 2, 1e-12, 'обрій: униз (важче)');
+  near(d[0], 0.75 * f, 1e-12, '45°: убік'); near(d[2], 0.25 * f, 1e-12, '45°: угору');
+});
+
+test('зворотна гравітація: тіло піднімається й зупиняється на висоті рівноваги; гравець там ширяє', async () => {
+  const { physAt3, revEq, revK } = await import('../js/worldphys.js');
+  const { gravityAt } = await import('../js/universe.js');
+  const { makeBody, stepBody, configureBodies } = await import('../js/engine/physics/bodies.js');
+  const { step, GRAVITY, PLAYER_MASS, PLAYER_AREA } = await import('../js/player.js');
+  const { solidB, B_STONE, B_AIR } = await import('../js/gen/chunk.js');
+  const { LEVEL } = await import('../js/iso.js');
+  configureBodies({ level: LEVEL, solid: solidB, gravity: GRAVITY, refMass: PLAYER_MASS, refArea: PLAYER_AREA });
+  // всесвіт із зворотною гравітацією й точка в плямі з k₀ < 0
+  let L = null, pt = null;
+  for (let d = 12; d >= 6 && !pt; d--) for (let n = 0; n < 60000 && !pt; n += 3) {
+    const V = lawsOf(hashStr('test'), d, n);
+    if (!V.anom.rev || V.anom.rev.k0 > -0.3) continue;
+    for (let y = 0; y < 3000 && !pt; y += 23) for (let x = 0; x < 3000 && !pt; x += 23) { const a = gravityAt(V, x, y); if (a.rev && a.k < -0.3) { L = V; pt = [x + 0.5, y + 0.5]; } }
+  }
+  assert.ok(pt, 'зворотна пляма не трапилась');
+  const eq = revEq(L, pt[0], pt[1]), g0 = () => 0;
+  assert.ok(eq > L.anom.rev.Ha && Math.abs(revK(L, gravityAt(L, pt[0], pt[1]).k, eq)) < 1e-6, `рівновага ${eq}`);
+  const P = { block: (x, y, k) => k < 0 ? B_STONE : B_AIR };
+  const b = makeBody({ x: pt[0], y: pt[1], z: 0.3, hx: 0.3, hy: 0.3, hz: 0.3, mass: 30 });
+  for (let i = 0; i < 120 * 60; i++) {
+    const ph = physAt3(L, b.x, b.y, b.z - b.hz, 0, g0);
+    stepBody(b, 1 / 120, P, { g: ph.g, g0: ph.g0, vT: ph.vT0, tilt: null, rev: ph.rev, bounce: 0, friction: 1 });
+  }
+  assert.ok(Math.abs(b.z - b.hz - eq) < 0.5, `тіло на ${b.z - b.hz}, рівновага ${eq}`);
+  // гравець: з ґрунту піднімається й ширяє біля рівноваги
+  const me = { x: pt[0], y: pt[1], z: 0, vz: 0, ground: true }, Pp = { liquid: { swim: true, density: 1, visc: 1 }, obj: () => null, block: P.block };
+  for (let i = 0; i < 120 * 40; i++) step(me, 0, 0, false, 1 / 120, Pp, physAt3(L, me.x, me.y, me.z, 0, g0));
+  assert.ok(me.hover && Math.abs(me.z - eq) < 1.5, `гравець на ${me.z}, рівновага ${eq}`);
+});

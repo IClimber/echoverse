@@ -12,6 +12,7 @@ import { floatPose, skyK } from './gen/mesh.js';
 import { footprint } from './gen/plants.js';
 import { makeBody, configureBodies, settle } from './engine/physics/bodies.js';
 import { createEntities } from './engine/world/entities.js';
+import { revEq } from './worldphys.js';
 
 // тіла рушія — зі сталими гри (блок, тверде, тяжіння, еталон маси й площі — гравець)
 configureBodies({ level: LEVEL, solid: solidB, gravity: GRAVITY, refMass: PLAYER_MASS, refArea: PLAYER_AREA });
@@ -47,7 +48,7 @@ export function createWorld(seed, onMesh, opts = {}) {
   const entsOf = (d, n) => {
     const k = `${d}:${n}`;
     let E = ents.get(k);
-    if (!E) ents.set(k, (E = createEntities({ chunk: CS, zone: 2, keyOf: ck, catchUp: (b) => { if (!b.sleep) settle(b, W.probe(d, n)); } })));
+    if (!E) ents.set(k, (E = createEntities({ chunk: CS, zone: 2, keyOf: ck, catchUp: (b) => { if (!b.sleep) settle(b, W.probe(d, n), (x, y) => revEq(W.laws(d, n), x, y)); } })));
     return E;
   };
   let keep = keepFor(256);

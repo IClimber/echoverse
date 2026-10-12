@@ -228,7 +228,8 @@ export function climbAt(P, x, y, z, h) {
 // ctl — {sprint (біг), vert (пробіл − Ctrl: політ і під рідиною — угору / униз), crouch (Ctrl утримується: присісти),
 // crouchPress (Ctrl натиснуто: відпустити стіну), wind [x, y] (вітер, клітинок/с), wet (мокро: дощ чи сніг під відкритим
 // небом — стіна слизька), carry (тіло в руках: вага / межа 0…1 — повільніше, не лізеш), look [x, y, z] (погляд — біг під
-// рідиною)}. p.windPush — вітер зносить на землі. ph.tilt — нахил тяжіння
+// рідиною)}. p.windPush — вітер зносить на землі. ph.g — тяжіння униз у точці (worldphys.js physAt3; нижче HOVER_G —
+// ширяння, hover), ph.tilt — горизонтальне тяжіння (нахил плями, приплив; у g, абсолютне)
 // (аномалія), P.liquid.visc — в'язкість, P.liquid.tension — поверхневий натяг (на бігу рідина тримає). p.fly — летить (як у Minecraft: без гравітації, торкнувся
 // землі — політ скінчився). p.wet — тіло в рідині, p.swim — пливе (рідина тримає, дна немає), p.air — у повітрі,
 // p.vis — висота ніг фігури (видима земля під центром, плавно після кроку), p.visX, p.visY — місце фігури, p.jumped — у повітрі після стрибка (інакше — падає),
@@ -253,6 +254,8 @@ export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
     p.h = shapeOf(p).H;
     return fly(p, ix, iy, dt, P, C, ph, mb, ctl.vert || 0, !!ctl.sprint);
   }
+  if ((ph.g ?? 1) < HOVER_G && liquidAt(P, p.x, p.y, p.z) === null) return hover(p, ix, iy, dt, P, C, ph, mb, ctl);
+  p.hover = false;
   // витривалість відновлюється на землі чи на плаву (після паузи)
   if (!p.climb) {
     if (p.ground || p.swim) { p.stamT = (p.stamT || 0) + dt; if (p.stamT > REGEN_DELAY) p.stam = Math.min(1, p.stam + REGEN * dt); } else p.stamT = 0;
@@ -308,7 +311,7 @@ export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
         p.vx += rx / rl * dv; p.vy += ry / rl * dv;
       }
     }
-    if (ph.tilt) { p.vx += ph.tilt[0] * gA * dt; p.vy += ph.tilt[1] * gA * dt; }
+    if (ph.tilt) { p.vx += ph.tilt[0] * GRAVITY * dt; p.vy += ph.tilt[1] * GRAVITY * dt; }
   } else if (swimFast) {
     // біг під рідиною: уздовж погляду (3D), прискорення 8/с
     const lk = ctl.look && p.dive ? ctl.look : ctl.look ? [ctl.look[0], ctl.look[1], 0] : [dirX, dirY, 0];   // на поверхні — уздовж неї
@@ -337,7 +340,7 @@ export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
       p.windPush = wl > th;
       if (wl > th) { tvx += wind[0] / wl * (wl - th); tvy += wind[1] / wl * (wl - th); }
     } else p.windPush = false;
-    if (ph.tilt) { tvx += ph.tilt[0] * 9 * ph.g; tvy += ph.tilt[1] * 9 * ph.g; }
+    if (ph.tilt) { tvx += ph.tilt[0] * 9; tvy += ph.tilt[1] * 9; }
     if (p.slide) {
       // сповзання: прискорення вниз схилом g·(sin θ − cos θ·tan θs) (тертя ковзання — те саме, що межа), по горизонталі
       // × cos θ; керування — ×0,3
@@ -609,6 +612,53 @@ function fly(p, ix, iy, dt, P, C, ph, mb, vert, fast) {
     else { moveAir(C, sh, p, 0, 0, dz, 2); if (liquidAt(P, p.x, p.y, p.z) !== null) p.fly = false; }   // у рідину — політ скінчився
   } else if (dz > 0 && p.z + dz <= FLY_TOP) moveAir(C, sh, p, 0, 0, dz, 2);
   p.vz = 0;
+  p.stepOff *= Math.exp(-dt * ph.settle);
+  visXY(p, dt, ph);
+  p.footOff *= Math.exp(-dt * 20);
+  p.vis = p.z + p.stepOff + p.footOff;
+  p.swim = false; p.wet = false;
+  p.air = !p.ground;
+}
+
+// Ширяння (п. 4, М11): тяжіння в точці нижче HOVER_G (зворотна пляма, компаньйон над головою, аномалія) — опори немає;
+// керування як під рідиною: WASD — уздовж погляду (HOVER_A — слабкий поштовх, як руками у воді), пробіл / Ctrl — угору /
+// униз; решта тяжіння (униз чи вгору), нахил, опір повітря (від густини, не від тяжіння: межа vT0 бази) і вітер; на
+// рівновазі зворотної плями — зависаєш; під стелею — притиснутий (поштовх ×0,3)
+export const HOVER_G = 0.05;
+const HOVER_A = 2, HOVER_V = 2.5;
+function hover(p, ix, iy, dt, P, C, ph, mb, ctl) {
+  p.climb = null; p.slide = false; p.dive = false; p.fly = false; p.hover = true;
+  if (p.pose !== 'stand') poseTo(p, C, 'stand');
+  const sh = shapeOf(p);
+  p.h = sh.H;
+  if (p.vx === undefined) { p.vx = 0; p.vy = 0; }
+  let tx = 0, ty = 0, tz = (ctl.vert || 0) * HOVER_V;
+  if (ix || iy) {
+    const vx = ix * mb[0][0] + iy * mb[1][0], vy = ix * mb[0][1] + iy * mb[1][1], l = Math.hypot(vx, vy);
+    const lk = ctl.look, ll = lk ? Math.hypot(lk[0], lk[1], lk[2]) || 1 : 1, fw = -iy / Math.hypot(ix, iy);
+    tx = vx / l * HOVER_V; ty = vy / l * HOVER_V;
+    if (lk && iy) tz += fw * lk[2] / ll * HOVER_V;
+    p.yaw = Math.atan2(vy, vx);
+  }
+  const k = Math.min(1, HOVER_A * dt * (p.ceil && ph.g < -HOVER_G ? 0.3 : 1));
+  p.vx += (tx - p.vx) * k; p.vy += (ty - p.vy) * k; p.vz += (tz - p.vz) * k * (ctl.vert || tz ? 1 : 0);
+  p.vz -= GRAVITY * ph.g * dt;
+  if (ph.tilt) { p.vx += ph.tilt[0] * GRAVITY * dt; p.vy += ph.tilt[1] * GRAVITY * dt; }
+  // опір повітря: g₀·(v / vT₀)² проти відносної швидкості (вітер)
+  const w = ctl.wind || [0, 0], vT0 = ph.vT0 ?? ph.vT ?? 1e9, g0 = ph.g0 ?? 1;
+  const rx = w[0] - p.vx, ry = w[1] - p.vy, rz = -p.vz, rl = Math.hypot(rx, ry, rz);
+  if (rl > 1e-6) { const dv = Math.min(rl, GRAVITY * g0 * (rl / vT0) * (rl / vT0) * dt); p.vx += rx / rl * dv; p.vy += ry / rl * dv; p.vz += rz / rl * dv; }
+  if (ph.rev) p.vz *= Math.exp(-1.5 * dt);                    // поле зворотної плями гасить коливання — зависаєш
+  const r = moveAir(C, sh, p, p.vx * dt, p.vy * dt, p.vz * dt, STAND_Z);
+  for (const [nx, ny] of r.walls) { const d = p.vx * nx + p.vy * ny; if (d < 0) { p.vx -= d * nx; p.vy -= d * ny; } }
+  p.ceil = !!r.ceil;
+  if (r.ceil && p.vz > 0) p.vz = 0;
+  // униз до опори — стоїш (тяжіння слабке, але є)
+  const f = p.vz <= 0 ? findFloor(C, sh, p.x, p.y, p.z, 0.02) : null;
+  p.ground = !!(f && stands(f, STAND_Z));
+  if (p.ground) { p.z = f.z; p.vz = 0; p.floor = f; p.floorN = floorNormal(f); } else { p.floor = null; }
+  p.moving = !!(ix || iy) || Math.hypot(p.vx, p.vy) > 0.5;
+  p.jumped = false; p.onBody = null;
   p.stepOff *= Math.exp(-dt * ph.settle);
   visXY(p, dt, ph);
   p.footOff *= Math.exp(-dt * 20);

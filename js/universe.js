@@ -489,18 +489,14 @@ export function gravityAt(L, x, y) {
   const a = noise2(L.sAn, x / A.S, y / A.S), thr = 0.62 - 0.32 * A.freq;
   if (a <= thr) return NO_ANOM;
   const s = Math.min(1, (a - thr) / 0.12), b = noise2(L.sAn2, x / (A.S * 2), y / (A.S * 2));
-  const target = b > 0 ? 1 + 1.5 * Math.min(1, b * 2.5) : 1 - 0.7 * Math.min(1, -b * 2.5);
+  // зворотна гравітація (легендарний закон, A.rev): у плямах з b < −0,4 біля ґрунту — k₀ (−1…0,1; вище — слабне до 1,
+  // worldphys.js gravAt3)
+  const rev = !!A.rev && b < -0.4;
+  const target = rev ? A.rev.k0 : b > 0 ? 1 + 1.5 * Math.min(1, b * 2.5) : 1 - 0.7 * Math.min(1, -b * 2.5);
   const k = 1 + (target - 1) * s;
-  if (!A.tilt) return { k, tx: 0, ty: 0 };
+  if (!A.tilt) return rev ? { k, tx: 0, ty: 0, rev } : { k, tx: 0, ty: 0 };
   const tx = noise2(L.sAn ^ 0x5151, x / A.S, y / A.S), ty = noise2(L.sAn ^ 0x7373, x / A.S, y / A.S);
-  return { k, tx: tx * A.tilt * s * 1.5, ty: ty * A.tilt * s * 1.5 };
-}
-
-// Рух у точці (x, y): physOf з місцевою гравітацією (аномалії) і нахилом тяжіння tilt [x, y] (частка g)
-export function physAt(L, x, y) {
-  const a = gravityAt(L, x, y);
-  if (a.k === 1 && !a.tx && !a.ty) return physOf(L);
-  return { ...physOf({ ...L, grav: L.grav * a.k }), tilt: [a.tx, a.ty], anom: a.k };
+  return { k, tx: tx * A.tilt * s * 1.5, ty: ty * A.tilt * s * 1.5, rev };
 }
 
 // Рух у всесвіті: на скільки рівнів можна піднятися кроком (up), множник швидкості ходи, як швидко ноги наздоганяють

@@ -50,15 +50,17 @@ function groundBelow(P, x, y, z) {
 }
 
 // Дорахунок тіла, що заснуло в русі (сутності: повернулось у зону симуляції): левітуюче — на висоті появи (без неї — на
-// висоті ширяння над ґрунтом), поле тримає його тут; решта — на опорі. Швидкості — нуль, сон. Ґрунту не знайдено
+// висоті ширяння над ґрунтом), поле тримає його тут; у зворотній плямі (eqAt(x, y) — висота рівноваги над ґрунтом чи
+// null) — на рівновазі; решта — на опорі. Швидкості — нуль, сон. Ґрунту не знайдено
 // (стовпець не завантажено) — де є
-export function settle(b, P) {
+export function settle(b, P, eqAt = null) {
   const lev = (b.lift || 0) > 1;
   if (lev && b.alt !== undefined) b.z = b.alt;
   else {
     const gz = groundBelow(P, b.x, b.y, b.z);
     if (gz === null) return false;
-    b.z = gz + (lev ? b.hover || 0 : 0) + b.hz;
+    const eq = !lev && eqAt ? eqAt(b.x, b.y) : null;           // зворотна пляма — на висоті рівноваги
+    b.z = gz + (eq !== null ? eq : lev ? b.hover || 0 : 0) + b.hz;
   }
   if (lev) { b.ax = b.x; b.ay = b.y; }
   b.vx = b.vy = b.vz = 0; b.sleep = true; b.calm = 0;
@@ -68,15 +70,18 @@ export function settle(b, P) {
 const ANCHOR = 2;                             // пружність поля, що тримає левітуюче тіло біля місця (1/с²)
 // Межа падіння тіла: від маси на площу (важке й компактне падає швидше й менше зноситься вітром)
 const vTof = (b, vT) => vT * Math.sqrt((b.mass / (4 * b.hx * b.hz)) / (REF_MASS / REF_AREA));
-// Чи зрушить вітер тіло, що спить: левітуюче — помітне прискорення, на ґрунті — сильніше за тертя
+// Чи зрушить тіло, що спить: тяжіння вгору; вітер — левітуюче: помітне прискорення, на ґрунті — сильніше за тертя
 export function windMoves(b, env) {
+  if (env.g < -0.02 && (b.lift || 0) <= 1) return true;      // тяжіння тягне вгору (зворотна пляма, приплив) — прокидається
   const w = env.wind ? Math.hypot(env.wind[0], env.wind[1]) : 0;
   if (!w) return false;
-  const a = GRAVITY * env.g * (w / vTof(b, env.vT)) ** 2;
+  const a = GRAVITY * (env.g0 ?? env.g) * (w / vTof(b, env.vT)) ** 2;
   return (b.lift || 0) > 1 ? a > 0.15 : a > GRAVITY * env.g * (1 - Math.min(1, b.lift || 0)) * (env.friction ?? 1) * 0.5;
 }
 
-// Крок тіла: P — щуп, env — {g (сила тяжіння, g), vT, bounce, friction, wind [x, y]}
+// Крок тіла: P — щуп, env — {g (тяжіння униз у точці, g; може бути ≤ 0 — зворотна пляма, приплив), g0 і vT (тяжіння й
+// межа падіння без аномалій — опір повітря), tilt [x, y] (горизонтальне тяжіння, g), rev (зворотна пляма: поле гасить
+// вертикальні коливання — тіло зупиняється на висоті рівноваги), bounce, friction, wind [x, y]}
 // b.held — у руках (швидкість задає той, хто тримає): без тяжіння, поля й вітру, не спить; зіткнення — як завжди
 export function stepBody(b, dt, P, env) {
   const windy = !b.held && windMoves(b, env);
@@ -95,11 +100,14 @@ export function stepBody(b, dt, P, env) {
   // (важке й компактне падає швидше й менше зноситься)
   const w = env.wind || [0, 0], vTb = vTof(b, env.vT);
   const rx = w[0] - b.vx, ry = w[1] - b.vy, rl = Math.hypot(rx, ry);
-  if (rl > 1e-6) { const dv = Math.min(rl, GRAVITY * env.g * (rl / vTb) * (rl / vTb) * dt); b.vx += rx / rl * dv; b.vy += ry / rl * dv; }
+  if (rl > 1e-6) { const dv = Math.min(rl, GRAVITY * (env.g0 ?? env.g) * (rl / vTb) * (rl / vTb) * dt); b.vx += rx / rl * dv; b.vy += ry / rl * dv; }
+  if (env.tilt) { b.vx += env.tilt[0] * GRAVITY * dt; b.vy += env.tilt[1] * GRAVITY * dt; }
+  if (env.rev) az -= b.vz * 1.5;
   // левітуюче: поле тримає й по горизонталі — вітер лише відхиляє (легке — далі), після удару — нове місце, де спиниться
   if (lift > 1 && b.ax !== undefined && b.ax !== null) { b.vx += ((b.ax - b.x) * ANCHOR - b.vx * 1.6) * dt; b.vy += ((b.ay - b.y) * ANCHOR - b.vy * 1.6) * dt; }
   b.vz += az * dt;
   if (b.vz < -vTb) b.vz = -vTb;
+  else if (b.vz > vTb) b.vz = vTb;
   moveBody(b, dt, P, env);
   const sp = Math.hypot(b.vx, b.vy, b.vz);
   b.calm = sp < SLEEP_V ? b.calm + dt : 0;
