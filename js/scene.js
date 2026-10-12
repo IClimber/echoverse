@@ -32,7 +32,10 @@ import { LAYERS, MAT_TABLE } from './gen/materials.js';
 
 const ZR_ISO = [0, (SEA + MAX_AMP) * LEVEL + 6]; // згори радіус — по рельєфу з деревами
 const KEEP_FAR = 1500;                         // плиток далечі в GPU
-const ARENA0 = 32768, ARENA_MAX = 4194304;     // ємність арени регіону (вершин): початкова, найбільша
+// Ємність арени регіону (вершин): початкова, найбільша — 2²⁴ (16 Б × 2²⁴ = 256 МіБ — гарантована межа буфера WebGPU,
+// maxBufferSize); пам'ять — лише в міру потреби (росте ×2). 12.10.2026: 4 194 304 не вистачало арені рослин зблизька
+// регіону в густих джунглях (зберігаються до FLORA_NEAR + 96, стовпець — до 96 тис. вершин) — стовпець лишався без рослин
+const ARENA0 = 32768, ARENA_MAX = 16777216;
 const UP_BYTES = 4 << 20, UP_ITEMS = 64;       // завантажень у GPU за кадр: байтів, мешів
 const BODY_R = 200;                            // тіла ближче — малюються (main.js)
 export { BODY_R };
@@ -280,7 +283,8 @@ export async function createScene(canvas, settings = {}) {
     if (!mesh.n) { U.flora.set(k, null); return; }
     const [rx, ry] = regionOf(q.cx, q.cy, 0), Gr = region(U, rx, ry, data.rz);
     const off = RG.put(Gr.R, 'fl', mesh.fl, mesh.n);
-    Gr.fls.set(k, { cx: q.cx, cy: q.cy, off, n: off < 0 ? 0 : mesh.n, nb: off < 0 ? 0 : mesh.nb, ob: mesh.ob, bb: mesh.bb });
+    // не вмістились (нестача пам'яті) — fail: стовпець малює спрощені рослини замість повних (без дірки в лісі)
+    Gr.fls.set(k, { cx: q.cx, cy: q.cy, off, n: off < 0 ? 0 : mesh.n, nb: off < 0 ? 0 : mesh.nb, ob: mesh.ob, bb: mesh.bb, fail: off < 0 });
     grow(Gr.bb, mesh.bb); RG.setBounds(Gr.R, Gr.bb);
     U.flora.set(k, Gr);
     dirtyCol(U, rx, ry);
@@ -341,6 +345,8 @@ export async function createScene(canvas, settings = {}) {
     LF[j][i] = off; LC[j][i] = n; LN[j] = i + 1;
   };
   const visRegs = [];
+  // у стовпця є повні рослини зблизька в GPU (null — порожні: малювати нічого); не вмістились — ні (малюються спрощені)
+  const nearFlora = (U, k) => { const Gr = U.flora.get(k); return Gr === null || (Gr !== undefined && !Gr.fls.get(k).fail); };
   // найдальша від цілі точка стовпця (ax, ay — кут стовпця від цілі)
   const colFar = (ax, ay) => Math.hypot(Math.max(Math.abs(ax), Math.abs(ax + CS)), Math.max(Math.abs(ay), Math.abs(ay + CS)));
   // Секція біля «вікна» (на екрані — у колі навколо гравця, ближче за нього) — матеріал з вирізом
@@ -407,7 +413,7 @@ export async function createScene(canvas, settings = {}) {
       const sl = E.L[0];
       if (!sl || sl.off < 0 || !sl.bb) continue;
       const b = blockOf(Gr, E.cx, E.cy);
-      const nf = colDist(E.cx, E.cy, t) < FLORA_NEAR && U.flora.has(ck(E.cx, E.cy)) ? 0 : sl.nf;   // тінь у смузі переходу — від повних
+      const nf = colDist(E.cx, E.cy, t) < FLORA_NEAR && nearFlora(U, ck(E.cx, E.cy)) ? 0 : sl.nf;   // тінь у смузі переходу — від повних
       if (sl.ns + nf) pushS(b * 3, sl.off, sl.ns + nf);
       if (sl.ns || nf) growB(b, sl.bb);
     }
@@ -817,7 +823,7 @@ export async function createScene(canvas, settings = {}) {
               const c = sl.bb;
               if (vis(inside, ox, oy, oz, c)) {
                 // є повні рослини: стовпець увесь до смуги переходу — спрощених не малюємо, у смузі — проступають (objF)
-                const fx = lod === 0 && dn < FLORA_NEAR && Un.flora.has(ck(E.cx, E.cy));
+                const fx = lod === 0 && dn < FLORA_NEAR && nearFlora(Un, ck(E.cx, E.cy));
                 const nf = fx && colFar(ax, ay) < FLORA_NEAR - FLORA_FADE ? 0 : sl.nf;
                 const nc = lod > 0 && (lod !== want || dn < LOD_R[lod - 1] + LOD_CAP) ? sl.nc : 0;
                 // «вікно»: рослини — завжди; земля — лише згори (у третій особі камера з землею зіштовхується — лінія до
