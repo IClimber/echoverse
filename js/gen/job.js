@@ -68,11 +68,12 @@ export function runJob(L, q, cache) {
     const rz = Math.floor(Math.floor(zmin / SEC) / RS), [dx, dy] = frameOf(q.cx, q.cy, 0);
     shelterTop(col, L);
     const F = floraMesh(col, L, rz * RS * SEC), f = packMesh(F.finish(), dx, dy, 0);
-    // nb — вершин великих рослин на початку (за ними покрив; вершина щільного меша — індекс); ob — по великому предмету:
-    // перша вершина, вершин, коробка в кадрі регіону (як bb)
+    // nb — вершин великих рослин на початку (за ними покрив; вершина щільного меша — індекс); np — вершин тіней малих
+    // рослин у кінці (лише кидачі дальніх каскадів); ob — по великому предмету: перша вершина, вершин, коробка в кадрі
+    // регіону (як bb)
     const ob = new Float32Array(F.objs);
     for (let i = 0; i < ob.length; i += 8) { ob[i + 2] += dx; ob[i + 3] += dy; ob[i + 5] += dx; ob[i + 6] += dy; }
-    return { data: { rz }, mesh: { fl: f.n ? f.buf : null, n: f.n, nb: F.nb, ob, bb: f.bb }, bufs: f.n ? [f.buf, ob.buffer] : [] };
+    return { data: { rz }, mesh: { fl: f.n ? f.buf : null, n: f.n, nb: F.nb, np: F.ni - F.ncv, ob, bb: f.bb }, bufs: f.n ? [f.buf, ob.buffer] : [] };
   }
   if (q.type === 'lod') {                      // груба секція (рівень q.lod: крок 2 чи 4 блоки) — лише меш, без блоків
     const s = q.lod === 2 ? 4 : 2, G = genCoarse(L, col, q.cz, s), [dx, dy, dz] = frameOf(q.cx, q.cy, q.cz);

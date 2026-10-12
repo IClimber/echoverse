@@ -17,6 +17,17 @@ export const SHADOW_D = 128;                   // тіні — лише ближ
 // перемальовка — раз на ~0,5 с за доби 16 хв (як оновлення освітлення за lightingThreshold скрипта ProceduralSky)
 const SHADOW_STEP = Math.cos(0.25 * Math.PI / 180);
 const MAX_DIR = 3;
+// Каскади, крім найближчого, — не щокадру: [період, зсув] у кадрах (приклад shadow-cascades: найближчий щокадру, далі —
+// раз на 5, 10, 15 кадрів); зсуви — щоб у кадрі оновлювався щонайбільше один дальній (кадри 5k, 10k + 2, 15k + 8 не
+// збігаються: за модулем 5 — 0, 2, 3). Кидачів для каскаду гра відбирає за поглядом (regions.cullCasters: зріз каскаду,
+// витягнутий до світла, з запасом), тож стара карта годиться, поки кути зрізу зсунулись не далі допуску CASC_T + CASC_A·R
+// (R — відстань від ока до найдальшого кута; зсув на CASC_T м чи поворот на CASC_A рад) і лежать у квадраті її камери
+// тіні; запас відбору — фільтр (CASC_F) + допуск. Найближчий каскад — щокадру: запас — лише фільтр
+const CASC_SCHED = [[1, 0], [5, 0], [10, 2], [15, 8]];
+const CASC_F = 2, CASC_T = 4, CASC_A = 0.05;
+// напрям світла змінився (крок SHADOW_STEP — раз на ~0,7 с при добі 20 хв; сонце ↔ місяць) — оновити й дальні: інакше до
+// 15 кадрів каскади мали б різні напрями (зсув тіні на межі каскадів); поріг 0,1° — вище похибки float32 у матрицях
+const CASC_JUMP = Math.cos(0.1 * Math.PI / 180);
 
 // G — застосунок (app.js); shadows — 'pcf3' | 'pcss' | 'off' (без тіней)
 export function createLights(G, { shadows = 'pcf3' } = {}) {
@@ -48,6 +59,7 @@ export function createLights(G, { shadows = 'pcf3' } = {}) {
   const typeOf = () => pcss() ? { shadowType: pc.SHADOW_PCSS_32F, shadowSamples: 16, shadowBlockerSamples: 16, penumbraSize: 0.0025, penumbraFalloff: 16 } : { shadowType: pc.SHADOW_PCF3_32F };
   const slots = [];
   let shD = SHADOW_D, nDir = 0;
+  let stale0 = () => {};                         // стерти пам'ять каскадів (нижче): нова карта — усі каскади заново
   const makeSlot = (i) => {
     const e = new pc.Entity(`світло ${i}`);
     e.addComponent('light', i ? { type: 'directional', intensity: 0, castShadows: false, layers: LAY } : {
@@ -63,6 +75,7 @@ export function createLights(G, { shadows = 'pcf3' } = {}) {
     while (slots.length < k) slots.push(makeSlot(slots.length));
     while (slots.length > k) { const s = slots.pop(); s.e.destroy(); }
     nDir = k;
+    stale0();
   }
   // i — слот; dir — до світила (наші координати), color — у гамі (0…1), intensity — як у LightComponent
   const V = new pc.Vec3(), C = new pc.Color();
@@ -150,19 +163,105 @@ export function createLights(G, { shadows = 'pcf3' } = {}) {
     }
     L.shadowsEnabled = on;
     L.shadowType = pcss() ? pc.SHADOW_PCF5_32F : pc.SHADOW_PCF3_32F;
+    stale0();
   }
   setQuality(q);
   setDirectionalCount(1);
 
+  // ---- каскади головного світла: зрізи, запаси відбору кидачів, оновлення не щокадру ----
+  // Зріз каскаду c — проміжок глибини від камери [s0, s1], як у PlayCanvas (ShadowRendererDirectional
+  // .generateSplitDistances: суміш рівномірного й логарифмічного розподілу cascadeDistribution між nearClip камери й
+  // min(farClip, shadowDistance)), з полосою змішування: фрагмент каскаду c глибше за (1 − cascadeBlend)·його кінець
+  // бере й каскад c + 1 (шейдер ditherShadowCascadeIndex) — тож зріз c + 1 починається там
+  const NCM = 4, SL = new Float64Array(NCM * 2), MG = new Float64Array(NCM), CN = new Float64Array(NCM * 24), LAST = new Float64Array(NCM * 24);
+  const lastOk = new Uint8Array(NCM), ovr = [], PW = new pc.Vec3(), FWD = new pc.Vec3();
+  let sched = true, nCasc = 0, lastMask = 0;
+  stale0 = () => lastOk.fill(0);
+  G.on('origin', stale0);                        // світ зсунувся в координатах PlayCanvas — старі карти не годяться
+  // Зрізи, запаси й кути зрізів (світ PlayCanvas) поточного кадру — після камери й світла кадру; → кількість каскадів
+  function prepare() {
+    const s0 = slots[0];
+    nCasc = 0;
+    if (!s0 || !s0.on || !s0.l.castShadows) return 0;
+    const l = s0.l, cc = G.cam, cam = cc.camera, nc = Math.min(NCM, l.numCascades), near = cc.nearClip;
+    const far = Math.min(cc.farClip, l.shadowDistance), k = l.cascadeDistribution, bl = l.cascadeBlend > 0 ? 1 - l.cascadeBlend : 1;
+    const wm = cam.node.getWorldTransform(), ep = cam.node.getPosition();
+    let prev = near;
+    for (let c = 0; c < nc; c++) {
+      let d = far;
+      if (c < nc - 1) { const f = (c + 1) / nc, lin = near + (far - near) * f, lg = near * (far / near) ** f; d = lin + (lg - lin) * k; }
+      const a = c ? bl * prev : near;
+      SL[c * 2] = a; SL[c * 2 + 1] = d; prev = d;
+      const pts = cam.getFrustumCorners(a, d);
+      let R = 0;
+      for (let i = 0; i < 8; i++) {
+        wm.transformPoint(pts[i], PW);
+        CN.set([PW.x, PW.y, PW.z], c * 24 + i * 3);
+        R = Math.max(R, PW.distance(ep));
+      }
+      MG[c] = c && sched ? CASC_F + CASC_T + CASC_A * R : CASC_F;
+    }
+    return (nCasc = nc);
+  }
+  // Каскади цього кадру (після prepare): за розкладом, а поза ним — каскад, чия стара карта не годиться, і біти force (гра:
+  // рухоме кидає тінь у каскад). → біти каскадів, що оновлюються
+  function cascades(frame, force = 0) {
+    const s0 = slots[0], nc = nCasc;
+    if (!nc) return (lastMask = 0);
+    const l = s0.l, light = l.light, all = (1 << nc) - 1;
+    if (!sched || nc < 2) { l.shadowUpdateOverrides = null; for (let c = 0; c < nc; c++) keep(c); return (lastMask = all); }
+    FWD.copy(s0.e.up).mulScalar(-1);              // напрямлене світить уздовж −Y сутності
+    let mask = 0;
+    for (let c = 0; c < nc; c++) {
+      const [P, O] = CASC_SCHED[Math.min(c, CASC_SCHED.length - 1)];
+      const on = c === 0 || frame % P === O || (force >> c & 1) === 1 || light._shadowCascadesInvalidated || stale(light, c, l.shadowResolution);
+      ovr[c] = on ? pc.SHADOWUPDATE_THISFRAME : pc.SHADOWUPDATE_NONE;
+      if (on) { mask |= 1 << c; keep(c); }
+    }
+    ovr.length = nc;
+    l.shadowUpdateOverrides = ovr;
+    return (lastMask = mask);
+  }
+  const keep = (c) => { LAST.set(CN.subarray(c * 24, c * 24 + 24), c * 24); lastOk[c] = 1; };
+  // Стара карта каскаду c не годиться: не було, напрям світла змінився, кути зрізу зсунулись далі допуску чи вийшли за
+  // квадрат її камери тіні (з запасом фільтра)
+  function stale(light, c, res) {
+    if (!lastOk[c]) return true;
+    const rd = light.getRenderData(G.cam.camera, c), sc = rd.shadowCamera, node = sc._node;
+    if (node.forward.dot(FWD) < CASC_JUMP) return true;
+    const oh = sc.orthoHeight, vw = light.cascades ? light.cascades[c].z : 0.5, m = 3 * 2 * oh / (res * vw);
+    const p = node.getPosition(), r = node.right, u = node.up, tol = MG[c] - CASC_F;
+    for (let i = 0; i < 8; i++) {
+      const o = c * 24 + i * 3, x = CN[o], y = CN[o + 1], z = CN[o + 2];
+      if (Math.hypot(x - LAST[o], y - LAST[o + 1], z - LAST[o + 2]) > tol) return true;
+      const dx = x - p.x, dy = y - p.y, dz = z - p.z;
+      if (Math.abs(dx * r.x + dy * r.y + dz * r.z) > oh - m || Math.abs(dx * u.x + dy * u.y + dz * u.z) > oh - m) return true;
+    }
+    return false;
+  }
+
   const LOC = [];
   return {
-    setDirectionalCount, setDirectional, setShadowDistance, warmUp, addLight, setQuality,
+    setDirectionalCount, setDirectional, setShadowDistance, warmUp, addLight, setQuality, prepare, cascades,
+    // зрізи каскадів кадру ([s0, s1] на каскад, глибина від камери) і їх кількість — після prepare
+    get slices() { return SL; }, get cascadeCount() { return nCasc; },
+    // біти каскадів, оновлених в останньому кадрі
+    get lastCascades() { return lastMask; },
+    // ?dev: false — усі каскади щокадру (порівняння)
+    get schedule() { return sched; }, set schedule(v) { sched = !!v; lastOk.fill(0); },
+    // світ під тінями змінився цілком (інший всесвіт) — у наступному кадрі всі каскади заново
+    invalidate() { lastOk.fill(0); },
     get quality() { return q === 'off' ? 'off' : pcss() ? 'pcss' : 'pcf3'; },
     get slots() { return slots; },
-    // напрямлені з тінями на кадр: [{dir — до світила, shD}] (для regions.cullCasters)
+    // напрямлені з тінями на кадр: [{dir — до світила, shD, nc — каскадів, sl — зрізи, mg — запаси відбору кидачів (м)}]
+    // (для regions.cullCasters; nc, sl, mg — лише головного, після prepare)
     dirs(out = []) {
       out.length = 0;
-      for (const s of slots) if (s.on && s.l.castShadows) { s.sh ??= { dir: s.dir, shD: 0 }; s.sh.shD = s.l.shadowDistance; out.push(s.sh); }
+      for (const s of slots) if (s.on && s.l.castShadows) {
+        s.sh ??= { dir: s.dir, shD: 0, nc: 0, sl: SL, mg: MG };
+        s.sh.shD = s.l.shadowDistance; s.sh.nc = s === slots[0] ? nCasc : 0;
+        out.push(s.sh);
+      }
       return out;
     },
     // увімкнені точкові джерела й прожектори з тінями: [{pos, range}] (наші координати)

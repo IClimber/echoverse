@@ -235,6 +235,8 @@ function boot(renderer) {
     setCull(on) { renderer.R.setCull(on); },
     // Великі рослини зблизька матеріалом без дизерингу там, де він нічого не відкидає: false — усе з дизерингом (порівняння)
     flSplit(on) { renderer.R.setFlSplit(on); return !!on; },
+    // Тіні (порівняння): {tight — маски каскадів за зрізами, lod — тіні за відстанню, sched — дальні каскади не щокадру}
+    shadowOpt(o) { return renderer.R.shadowOpt(o); },
     // Нестача пам'яті GPU (перевірка реакції): event — подією пристрою WebGPU, як від браузера; інакше — одразу обробник
     gpuOom(event = false) {
       const d = renderer.G.dev;

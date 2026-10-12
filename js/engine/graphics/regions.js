@@ -5,10 +5,11 @@
 // Облік (що в якому діапазоні, які діапазони видимі) — справа гри; тут — лише об'єкти PlayCanvas.
 // Координати регіону — наші (z угору), кут регіону (rx·RW, ry·RW, rz·RH); вершини — u16 нормовано: (локальна + PO) / S16
 import { createArena } from './arena.js';
-import { far2, near2 } from '../core/frustum.js';
+import { far2, near2, casterVolume, boxOut } from '../core/frustum.js';
 
 // layout: { size: [RW, RW, RH], PO, PQ, format (pc.VertexFormat), kinds: {вид: {arena, material}},
-//   casters: [{arena, material} | null] (вид кидача — індекс), arena0, arenaMax, stats }
+//   casters: [{arena, material, cascades — біти каскадів напрямленого світла, у які кидач цього виду малюється (типово
+//   усі)} | null] (вид кидача — індекс), arena0, arenaMax, stats }
 export function createRegions(G, layout) {
   const { pc, root, layers, O } = G, camC = G.cam;
   const { size: [RW, , RH], PO, format, kinds, casters } = layout;
@@ -100,47 +101,48 @@ export function createRegions(G, layout) {
     if (b[0] <= b[3]) G.fire('casters', [R.rx * RW + b[0], R.ry * RW + b[1], R.rz * RH + b[2], R.rx * RW + b[3], R.ry * RW + b[4], R.rz * RH + b[5]]);
   }
 
-  // Кидачі на кадр (решту PlayCanvas не бачить). Кидач потрібен, якщо справджується хоч одне:
-  // - для якогось напрямленого світла його тінь може впасти в зріз піраміди камери до глибини shD світла: коробка,
-  //   витягнута вздовж світла, перетинає зріз. Перевірка — площинами зрізу, повернутими від світла (n·L ≤ 0: уздовж світла
-  //   ними не вийти), — зріз, «розтягнутий до світла», як у Cyberpunk 2077 (SIGGRAPH 2021, «Shadows Optimizations in
-  //   Cyberpunk 2077»); плюс межа відстані від ока (як Shadow Distance у шейдерпаках Minecraft): кидачі далі не малюються;
-  // - коробка перетинає сферу (позиція, range) точкового джерела чи прожектора з тінями.
-  // Без цього каскад PlayCanvas бере все в нескінченному стовпці вздовж світла.
-  // v: { m — матриця камери відносно цілі t, eye — око відносно t, ud — напрям погляду, t, c — кривизна (вершинний шейдер
-  // опускає точку на c·d², d — від цілі по горизонталі: коробки кидачів опускаємо так само, і AABB кидача, за якою каскад
-  // PlayCanvas відсікає його сам) }; dirs: [{dir — до світила, shD}]; locals: [{pos, range}] (наші координати)
-  const shOn = [], PL = new Float64Array(3 * 6 * 4), NP = new Int32Array(3), CAP = new Float64Array(3), bbT = new Float64Array(6);
+  // Кидачі на кадр (решту PlayCanvas не бачить) і їх каскади. Кидач потрібен каскаду c напрямленого світла, якщо його тінь
+  // може впасти в зріз c піраміди камери (глибина від ока [s0, s1], lights.js prepare): коробка перетинає зріз,
+  // «витягнутий до світла» (core/frustum.js casterVolume: грані зрізу від світла й площини через ребра силуету, як у
+  // Unreal), зсунутий назовні на запас mg[c] (фільтр тіні й допуск кадрів, коли каскад не оновлюється). 13.10.2026: без
+  // площин силуету об'єм у бік граней до світла не обмежений — сонце на 33° за спиною майже паралельне нижній грані
+  // піраміди (35° униз), і чверть градуса руху сонця перемикала 57 ↔ 118 кидачів (6,8 ↔ 11,1 млн трикутників тіней):
+  // ішло все під і за камерою до межі відстані. Плюс межа відстані від ока (як Shadow Distance у шейдерпаках Minecraft).
+  // Каскади кидача — маска PlayCanvas shadowCascadeMask (ShadowRendererDirectional.cull пропускає кидача в каскаді без
+  // біта) ∩ каскади його виду (casters[вид].cascades). Без цього каскад PlayCanvas бере все в нескінченному вздовж світла
+  // стовпці завширшки з кулю свого зрізу (12.10.2026: у каскад 0–16 м ішов і ліс за 100 м). Світло без зрізів (nc 0) —
+  // один зріз від ближньої площини камери до shD, усі каскади. Ще кидач потрібен, якщо коробка перетинає сферу (позиція,
+  // range) точкового джерела чи прожектора з тінями.
+  // v: { m — матриця камери відносно цілі t, eye — око відносно t, ud — до ока (одиничний), t, c — кривизна (вершинний
+  // шейдер опускає точку на c·d², d — від цілі по горизонталі: коробки кидачів опускаємо так само, і AABB кидача, за якою
+  // каскад PlayCanvas відсікає його сам) }; dirs: [{dir — до світила, shD, nc, sl — [s0, s1] на каскад, mg — запас на
+  // каскад}]; locals: [{pos, range}] (наші координати)
+  const MPL = 12;                                  // площин на зріз (casterVolume — до 11)
+  const shOn = [], PL = new Float64Array(3 * 4 * MPL * 4), NP = new Int32Array(3 * 4), NCK = new Int32Array(3), ALL = new Uint8Array(3), CAP = new Float64Array(3), LD = new Float64Array(3), bbT = new Float64Array(6);
+  let tight = true;
   function cullCasters(regs, v, dirs, locals = []) {
     for (const s of shOn) s.visible = false;
     shOn.length = 0;
     const nd = Math.min(3, dirs.length), { m, eye, ud, t } = v, cv = v.c || 0;
     if (!nd && !locals.length) return 0;
     for (let k = 0; k < nd; k++) {
-      const L0 = -dirs[k].dir[0], L1 = -dirs[k].dir[1], L2 = -dirs[k].dir[2], shD = dirs[k].shD;
-      let np = 0;
-      const plane = (a, b, c, d) => {
-        if (a * L0 + b * L1 + c * L2 > 1e-6 * Math.hypot(a, b, c)) return;   // до світла — площина не обмежує
-        const o = (k * 6 + np) * 4;
-        PL[o] = a; PL[o + 1] = b; PL[o + 2] = c; PL[o + 3] = d; np++;
-      };
-      // площини піраміди камери з m (внутрішні; Gribb — Hartmann): ліва, права, низ, верх, ближня; дальня — на глибині shD
-      plane(m[3] + m[0], m[7] + m[4], m[11] + m[8], m[15] + m[12]); plane(m[3] - m[0], m[7] - m[4], m[11] - m[8], m[15] - m[12]);
-      plane(m[3] + m[1], m[7] + m[5], m[11] + m[9], m[15] + m[13]); plane(m[3] - m[1], m[7] - m[5], m[11] - m[9], m[15] - m[13]);
-      plane(m[3] + m[2], m[7] + m[6], m[11] + m[10], m[15] + m[14]);
-      plane(ud[0], ud[1], ud[2], shD - (ud[0] * eye[0] + ud[1] * eye[1] + ud[2] * eye[2]));
-      NP[k] = np; CAP[k] = shD * 1.46 + 16;          // найдальша точка зрізу (кут екрана 16:9, FOV 55°) + запас
+      const D = dirs[k], L0 = -D.dir[0], L1 = -D.dir[1], L2 = -D.dir[2], sliced = D.nc > 0, nc = sliced ? Math.min(4, D.nc) : 1;
+      NCK[k] = nc; ALL[k] = sliced ? 0 : 1;
+      LD[0] = L0; LD[1] = L1; LD[2] = L2;
+      // ?dev tight = false — як до 13.10.2026 (порівняння): без площин силуету
+      for (let c = 0; c < nc; c++) NP[k * 4 + c] = casterVolume(m, eye, ud, sliced ? D.sl[c * 2] : null, sliced ? D.sl[c * 2 + 1] : D.shD, LD, sliced ? D.mg[c] : 0, tight, PL, (k * 4 + c) * MPL * 4);
+      CAP[k] = D.shD * 1.46 + 16;                    // найдальша точка зрізу (кут екрана 16:9, FOV 55°) + запас
     }
-    const need = (x0, y0, z0, x1, y1, z1) => {
+    // біти каскадів, у які тінь коробки (відносно t) може впасти (маска PlayCanvas — спільна для світел)
+    const casc = (x0, y0, z0, x1, y1, z1) => {
+      let mk = 0;
       for (let k = 0; k < nd; k++) {
         if (Math.hypot(Math.max(x0 - eye[0], 0, eye[0] - x1), Math.max(y0 - eye[1], 0, eye[1] - y1)) > CAP[k]) continue;
-        let out = false;
-        for (let i = 0; i < NP[k] && !out; i++) {
-          const o = (k * 6 + i) * 4, a = PL[o], b = PL[o + 1], c = PL[o + 2];
-          if (a * (a >= 0 ? x1 : x0) + b * (b >= 0 ? y1 : y0) + c * (c >= 0 ? z1 : z0) + PL[o + 3] < 0) out = true;
-        }
-        if (!out) return true;
+        for (let c = 0; c < NCK[k]; c++) if (!boxOut(PL, (k * 4 + c) * MPL * 4, NP[k * 4 + c], x0, y0, z0, x1, y1, z1)) mk |= ALL[k] ? 255 : 1 << c;
       }
+      return tight || !mk ? mk : 255;
+    };
+    const lit = (x0, y0, z0, x1, y1, z1) => {
       for (const l of locals) {
         const px = l.pos[0] - t[0], py = l.pos[1] - t[1], pz = l.pos[2] - t[2];
         if (Math.hypot(Math.max(x0 - px, 0, px - x1), Math.max(y0 - py, 0, py - y1), Math.max(z0 - pz, 0, pz - z1)) <= l.range) return true;
@@ -153,13 +155,17 @@ export function createRegions(G, layout) {
       if (!(g[0] <= g[3])) continue;
       let lo = 0, hi = 0;
       if (cv > 0) { lo = cv * far2(ox + g[0], oy + g[1], ox + g[3], oy + g[4]); hi = cv * near2(ox + g[0], oy + g[1], ox + g[3], oy + g[4]); }
-      if (!need(ox + g[0], oy + g[1], oz + g[2] - lo, ox + g[3], oy + g[4], oz + g[5] - hi)) continue;
+      const rx0 = ox + g[0], ry0 = oy + g[1], rz0 = oz + g[2] - lo, rx1 = ox + g[3], ry1 = oy + g[4], rz1 = oz + g[5] - hi;
+      if (!casc(rx0, ry0, rz0, rx1, ry1, rz1) && !(locals.length && lit(rx0, ry0, rz0, rx1, ry1, rz1))) continue;
       for (const s of R.sh.values()) {
         const b = s.b;
         if (!s.shV) continue;
         if (cv > 0) { lo = cv * far2(ox + b[0], oy + b[1], ox + b[3], oy + b[4]); hi = cv * near2(ox + b[0], oy + b[1], ox + b[3], oy + b[4]); }
-        if (!need(ox + b[0], oy + b[1], oz + b[2] - lo, ox + b[3], oy + b[4], oz + b[5] - hi)) continue;
+        const x0 = ox + b[0], y0 = oy + b[1], z0 = oz + b[2] - lo, x1 = ox + b[3], y1 = oy + b[4], z1 = oz + b[5] - hi;
+        const K = casters[s.kind], mk = casc(x0, y0, z0, x1, y1, z1) & (K && K.cascades !== undefined ? K.cascades : 255);
+        if (!mk && !(locals.length && lit(x0, y0, z0, x1, y1, z1))) continue;
         if (lo !== s.lo || hi !== s.hi) { s.lo = lo; s.hi = hi; bbT[0] = b[0]; bbT[1] = b[1]; bbT[2] = b[2] - lo; bbT[3] = b[3]; bbT[4] = b[4]; bbT[5] = b[5] - hi; s.setCustomAabb(box(bbT, bbTmp)); }
+        s.shadowCascadeMask = mk;
         s.visible = true; shOn.push(s);
       }
     }
@@ -176,5 +182,10 @@ export function createRegions(G, layout) {
     all.delete(R);
   }
 
-  return { create, put, free, setBounds, setCamera, hide, setCasters, cullCasters, drop, stats, S16, get count() { return all.size; } };
+  return {
+    create, put, free, setBounds, setCamera, hide, setCasters, cullCasters, drop, stats, S16, get count() { return all.size; },
+    // ?dev: false — як до 13.10.2026 (порівняння): без площин силуету, кидач — у всі каскади, якщо його тінь може впасти
+    // хоч в один зріз
+    get tight() { return tight; }, set tight(v) { tight = !!v; },
+  };
 }

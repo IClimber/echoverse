@@ -64,6 +64,13 @@ const KINDS = {
 // Кидачі тіней — по блоку BS×BS стовпців регіону (regions.js): 0 — тверде з далекими рослинами й камінням секції (в арені
 // поруч — один діапазон; матеріал без відсікання граней), 2 — рослини зблизька
 const BS = 2, NB = RS / BS;
+// Тіні за відстанню (як LOD тіней у рушіях: дальні каскади — грубші кидачі; 13.10.2026, рішення користувача): каскади 0–1
+// (тіні до ~33 м) — повна будова рослин зблизька, 2–3 (до 128 м) — тінь дерева від його спрощеної будови, малої рослини —
+// від простого тіла (gen/mesh.js shadeProxy). Види кидачів: земля всіх секцій і спрощені рослини стовпців без повних (усі
+// каскади), спрощені рослини стовпців з повними (дальні), великі рослини зблизька й покрив (ближні), тіні малих рослин
+// (дальні)
+const SH_ALL = 255, SH_NEAR = 0b0011, SH_FAR = 0b1100;
+const C_GROUND = 0, C_SIMPLE = 1, C_BIG = 2, C_COVER = 3, C_SHADE = 4, NKC = 5;
 
 // settings: { gpu: 'webgl2' | 'webgpu', shadows: 'off' | 'pcf3' | 'pcss' }
 export async function createScene(canvas, settings = {}) {
@@ -95,7 +102,13 @@ export async function createScene(canvas, settings = {}) {
   const kinds = {};
   for (const k in KINDS) kinds[k] = { arena: KINDS[k][0], material: mats[KINDS[k][1]] };
   const stats = { draws: 0, tris: 0, shTris: 0, shDraws: 0, up: 0, upBytes: 0, gpuBytes: 0, arenaBytes: 0, arenaUsed: 0, full: 0 };
-  const RG = createRegions(G, { size: [RW, RW, RH], PO, PQ, format: FMT, kinds, casters: [{ arena: 'op', material: mats.obj }, null, { arena: 'fl', material: mats.fl }], arena0: ARENA0, arenaMax: ARENA_MAX, stats });
+  // види кидачів (CASTERS): матеріал і каскади (shLod — ?dev: false — усе в усі каскади, як до тіней за відстанню)
+  const CASTERS = [
+    { arena: 'op', material: mats.obj, cascades: SH_ALL }, { arena: 'op', material: mats.obj, cascades: SH_FAR },
+    { arena: 'fl', material: mats.fl, cascades: SH_NEAR }, { arena: 'fl', material: mats.fl, cascades: SH_NEAR },
+    { arena: 'fl', material: mats.fl, cascades: SH_FAR },
+  ];
+  const RG = createRegions(G, { size: [RW, RW, RH], PO, PQ, format: FMT, kinds, casters: CASTERS, arena0: ARENA0, arenaMax: ARENA_MAX, stats });
 
   // ---- небо, світла, частинки ----
   // розсіяне з неба перепікається, коли сонце зсунулось на 2° (доба 6–40 хв × плин часу — до ~2°/с; розсіяне плавне)
@@ -283,8 +296,10 @@ export async function createScene(canvas, settings = {}) {
     if (!mesh.n) { U.flora.set(k, null); return; }
     const [rx, ry] = regionOf(q.cx, q.cy, 0), Gr = region(U, rx, ry, data.rz);
     const off = RG.put(Gr.R, 'fl', mesh.fl, mesh.n);
-    // не вмістились (нестача пам'яті) — fail: стовпець малює спрощені рослини замість повних (без дірки в лісі)
-    Gr.fls.set(k, { cx: q.cx, cy: q.cy, off, n: off < 0 ? 0 : mesh.n, nb: off < 0 ? 0 : mesh.nb, ob: mesh.ob, bb: mesh.bb, fail: off < 0 });
+    // не вмістились (нестача пам'яті) — fail: стовпець малює спрощені рослини замість повних (без дірки в лісі).
+    // n — вершин, що малюються (великі nb, за ними покрив), за ними np — тіні малих рослин (лише кидачі дальніх каскадів)
+    const np = off < 0 ? 0 : mesh.np || 0;
+    Gr.fls.set(k, { cx: q.cx, cy: q.cy, off, n: off < 0 ? 0 : mesh.n - np, nb: off < 0 ? 0 : mesh.nb, np, ob: mesh.ob, bb: mesh.bb, fail: off < 0 });
     grow(Gr.bb, mesh.bb); RG.setBounds(Gr.R, Gr.bb);
     U.flora.set(k, Gr);
     dirtyCol(U, rx, ry);
@@ -372,7 +387,34 @@ export async function createScene(canvas, settings = {}) {
   // (px…pz — гравець, dP — до нього від ока, ang — півкут конуса; згори — iso, u — напрям погляду, k — радіус), knee — коліна
   const fz = { ex: 0, ey: 0, ez: 0, far: 0, drop: 0, fade: 0, cut: false, iso: false, px: 0, py: 0, pz: 0, dP: 0, k: 0, ang: 0, ux: 0, uy: 0, uz: 0, knee: 0 };
   const FZ_M = 0.5;
-  let flSplit = true;
+  let flSplit = true, shLod = true;
+  // Рухоме кидає тінь у каскад, що оновлюється не щокадру, — оновити його в цьому кадрі (lights.js cascades): фігура
+  // (рухається завжди — хоч дихання) і тіла, що зрушили з минулого кадру. Каскади — за глибиною вздовж погляду основи, верху
+  // й кінця тіні (верх, зсунутий від світла до висоти основи − 2 м, не далі 64 м). e — око відносно t, u — до ока
+  const bodyAt = new WeakMap();
+  function dynCascades(st, t, e, u) {
+    const nc = LG.cascadeCount, sl = LG.slices, d = LG.slots[0] && LG.slots[0].dir;
+    if (nc < 2 || !d) return 0;
+    const dl = Math.hypot(d[0], d[1], d[2]), lx = d[0] / dl, ly = d[1] / dl, lz = d[2] / dl;
+    const dep = (x, y, z) => -(u[0] * (x - e[0]) + u[1] * (y - e[1]) + u[2] * (z - e[2]));
+    let mk = 0;
+    const add = (x, y, z0, z1, r) => {
+      const k = lz > 0.03 ? Math.min(64, (z1 - z0 + 2) / lz) : 64;
+      const a = dep(x, y, z0), b = dep(x, y, z1), c = dep(x - lx * k, y - ly * k, z1 - lz * k);
+      const lo = Math.min(a, b, c) - r, hi = Math.max(a, b, c) + r;
+      for (let i = 1; i < nc; i++) if (hi >= sl[i * 2] && lo <= sl[i * 2 + 1]) mk |= 1 << i;
+    };
+    const me = st.me;
+    if (me) add(me.x - t[0], me.y - t[1], me.z - t[2], me.z - t[2] + 1.1, 0.6);
+    if (st.bodies) for (const bo of st.bodies) {
+      const x = bo.ix ?? bo.x, y = bo.iy ?? bo.y, z = bo.iz ?? bo.z, p = bodyAt.get(bo);
+      if (p && Math.abs(p[0] - x) + Math.abs(p[1] - y) + Math.abs(p[2] - z) < 0.005) continue;
+      if (p) { p[0] = x; p[1] = y; p[2] = z; } else bodyAt.set(bo, [x, y, z]);
+      const r = Math.max(bo.hx, bo.hy, bo.hz) * 2;
+      add(x - t[0], y - t[1], z - t[2] - r, z - t[2] + r, r);
+    }
+    return mk;
+  }
   const bigSafe = (x0, y0, z0, x1, y1, z1) => {
     x0 -= FZ_M; y0 -= FZ_M; x1 += FZ_M; y1 += FZ_M; z1 += FZ_M; z0 -= FZ_M + fz.drop;
     if (Math.hypot(Math.max(-x0, x1), Math.max(-y0, y1)) >= fz.far) return false;            // смуга переходу
@@ -395,8 +437,8 @@ export async function createScene(canvas, settings = {}) {
     return Math.acos(cosA) - Math.asin(rb / lv) > fz.ang;
   };
 
-  // Кидачі регіону: діапазони за блоками й видами (злиття сусідніх) і межі блоків (клітинки від кута регіону)
-  const NS = NB * NB * 3, SF = Array.from({ length: NS }, () => new Int32Array(256)), SC = Array.from({ length: NS }, () => new Int32Array(256)), SN = new Int32Array(NS);
+  // Кидачі регіону: діапазони за блоками й видами (злиття сусідніх) і межі блоків (клітинки від кута регіону). Види — CASTERS
+  const NS = NB * NB * NKC, SF = Array.from({ length: NS }, () => new Int32Array(256)), SC = Array.from({ length: NS }, () => new Int32Array(256)), SN = new Int32Array(NS);
   const SB = new Float64Array(NB * NB * 6), blocks = Array.from({ length: NS }, () => ({ key: 0, kind: 0, F: null, C: null, nr: 0, bb: new Float64Array(6) }));
   const pushS = (i, off, n) => {
     const k = SN[i];
@@ -412,19 +454,27 @@ export async function createScene(canvas, settings = {}) {
     for (const E of Gr.secs.values()) {
       const sl = E.L[0];
       if (!sl || sl.off < 0 || !sl.bb) continue;
-      const b = blockOf(Gr, E.cx, E.cy);
-      const nf = colDist(E.cx, E.cy, t) < FLORA_NEAR && nearFlora(U, ck(E.cx, E.cy)) ? 0 : sl.nf;   // тінь у смузі переходу — від повних
-      if (sl.ns + nf) pushS(b * 3, sl.off, sl.ns + nf);
-      if (sl.ns || nf) growB(b, sl.bb);
+      const b = blockOf(Gr, E.cx, E.cy) * NKC;
+      // є повні рослини — тінь у ближніх каскадах від них (і в смузі переходу), у дальніх — від спрощених
+      const full = colDist(E.cx, E.cy, t) < FLORA_NEAR && nearFlora(U, ck(E.cx, E.cy)), nf = full ? 0 : sl.nf;
+      if (sl.ns + nf) pushS(b + C_GROUND, sl.off, sl.ns + nf);
+      if (full && sl.nf && shLod) pushS(b + C_SIMPLE, sl.off + sl.ns, sl.nf);
+      if (sl.ns || sl.nf) growB(b / NKC, sl.bb);
     }
     for (const f of Gr.fls.values()) {
       if (f.off < 0 || !f.n || colDist(f.cx, f.cy, t) >= FLORA_NEAR) continue;
-      const b = blockOf(Gr, f.cx, f.cy);
-      pushS(b * 3 + 2, f.off, f.n); growB(b, f.bb);
+      const b = blockOf(Gr, f.cx, f.cy) * NKC;
+      if (!shLod) pushS(b + C_BIG, f.off, f.n);              // як до тіней за відстанню: усе повне в усі каскади
+      else {
+        if (f.nb) pushS(b + C_BIG, f.off, f.nb);
+        if (f.n > f.nb) pushS(b + C_COVER, f.off + f.nb, f.n - f.nb);
+        if (f.np) pushS(b + C_SHADE, f.off + f.n, f.np);
+      }
+      growB(b / NKC, f.bb);
     }
     let n = 0;
-    for (let b = 0; b < NB * NB; b++) for (const j of [0, 2]) {
-      const i = b * 3 + j;
+    for (let b = 0; b < NB * NB; b++) for (let j = 0; j < NKC; j++) {
+      const i = b * NKC + j;
       if (!SN[i]) continue;
       const B = blocks[n++];
       B.key = i; B.kind = j; B.F = SF[i]; B.C = SC[i]; B.nr = SN[i]; B.bb.set(SB.subarray(b * 6, b * 6 + 6));
@@ -554,6 +604,17 @@ export async function createScene(canvas, settings = {}) {
     get cullOn() { return cullOn; },
     // Великі рослини зблизька без дизерингу (bigSafe): false — усе матеріалом fl (порівняння)
     setFlSplit(on) { flSplit = !!on; },
+    // Тіні (порівняння): tight — кидач лише в каскади, куди його тінь може впасти; lod — тіні за відстанню (дальні каскади —
+    // спрощені дерева й прості тіла малих рослин); sched — дальні каскади не щокадру. Без аргументів — поточні
+    shadowOpt({ tight, lod, sched } = {}) {
+      if (tight !== undefined) RG.tight = tight;
+      if (lod !== undefined && !!lod !== shLod) {
+        shLod = !!lod; CASTERS[C_BIG].cascades = shLod ? SH_NEAR : SH_ALL;
+        for (const Un of unis.values()) for (const Gr of Un.regions.values()) Gr.shDirty = true;
+      }
+      if (sched !== undefined) LG.schedule = sched;
+      return { tight: RG.tight, lod: shLod, sched: LG.schedule };
+    },
     setCull(on) { cullOn = !!on; for (const k of CULLED) { mats[k].cull = cullOn ? pc.CULLFACE_BACK : pc.CULLFACE_NONE; mats[k].update(); } },
     get info() { return { ...G.info, shadows: LG.quality, lights: LG.info() }; },
     app,
@@ -636,6 +697,7 @@ export async function createScene(canvas, settings = {}) {
       stats.up = stats.upBytes; stats.upBytes = 0; stats.draws = G.R.draws;
       let shTris = 0, shDraws = 0;
       for (const s of LG.slots) if (s.on && s.l.castShadows) for (let c = 0; c < s.l.numCascades; c++) {
+        if (s === LG.slots[0] && !(LG.lastCascades >> c & 1)) continue;     // каскад не оновлювався
         const rd = s.l.light.getRenderData(cam.camera, c);
         for (const m of rd.visibleCasters) { shDraws++; shTris += (m.shV ?? m.mesh.primitive[0].count) / 3; }
       }
@@ -661,7 +723,7 @@ export async function createScene(canvas, settings = {}) {
         M.setBlend(mats.liq, laws.liquid.alpha); M.setBlend(mats.liqR, laws.liquid.alpha);
       }
       const slots = lightSlots(laws);
-      if (fresh) { lawsKey = tk; LG.setDirectionalCount(slots); }
+      if (fresh) { lawsKey = tk; LG.setDirectionalCount(slots); LG.invalidate(); }
       const lt = (st.clock || 0) * (laws.phys ? laws.phys.time : 1) % 3000;
 
       // плаваючий початок (регіони, світла, плитки — на подію 'origin')
@@ -690,6 +752,7 @@ export async function createScene(canvas, settings = {}) {
         LG.setDirectional(i, l ? { dir: l.dir, color: l.col, intensity: pcIntensity(l.k) } : null);
       }
       LG.setShadowDistance(iso ? 400 + view.rad : SHADOW_D);
+      LG.prepare();                                   // зрізи каскадів кадру (кидачі, розклад оновлення)
       const bakeK = Lt.amb / Math.max(1e-4, 0.6 * lum(sk.zenith) + 0.4 * lum(sk.horizon));
       setSky(sk, bakeK);
       cloudMap(laws, st.clock || 0, t[0] + view.eye[0], t[1] + view.eye[1], performance.now());
@@ -875,6 +938,7 @@ export async function createScene(canvas, settings = {}) {
       viewC.m = m; viewC.eye = e; viewC.ud = b.u; viewC.t = t; viewC.c = curve;
       engRegs.length = 0;
       if (Un) for (const Gr of Un.regions.values()) engRegs.push(Gr.R);
+      LG.cascades(frame, dynCascades(st, t, e, b.u));
       RG.cullCasters(engRegs, viewC, LG.dirs(dirsBuf), LG.locals());
 
       // Далечінь: плитки поверхні — лише за швом

@@ -514,11 +514,25 @@ export function chunkMesh(C, L, { near = true, far = true } = {}) {
   return { solid: M.finish(), liquid: W.n ? W.finish() : null, caps: Mc.n ? Mc.finish() : null, flora: F.n ? F.finish() : null, far: Ff.n ? Ff.finish() : null };
 }
 
+// Тінь малої рослини в дальніх каскадах (scene.js, кидач малих рослин дальніх каскадів): одне просте тіло — восьмигранник
+// у межах листя рослини (від найнижчого листка до верху; радіус — 0,6 охоплення: між листям просвіти) замість повної
+// будови (50–150 трикутників); у кадрі не малюється. Мітка проріджування — та сама, що в рослини (рідшає разом з нею),
+// матеріал — листя (гойдається вітром, як листя). Нижчі за 0,2 м — без тіні: у дальніх каскадах це менше за тексель
+const SHADE_MIN = 0.2, SHADE_R = 0.6;
+function shadeProxy(M, T, x, y, z, s, thin) {
+  const e = extent(T), top = e.top * s, z0 = Math.min(e.z0 * s, 0.5 * top), r = SHADE_R * e.r * s, mt = M_LEAF | thin << 5;
+  if (top < SHADE_MIN || r <= 0) return;
+  const zm = z + (z0 + top) / 2, c = [128, 128, 128];
+  const a = M.vert(x, y, z + top, 0, 0, 127, c, mt), b = M.vert(x, y, z + z0, 0, 0, -127, c, mt);
+  const q = [M.vert(x + r, y, zm, 127, 0, 0, c, mt), M.vert(x, y + r, zm, 0, 127, 0, c, mt), M.vert(x - r, y, zm, -127, 0, 0, c, mt), M.vert(x, y - r, zm, 0, -127, 0, c, mt)];
+  for (let i = 0; i < 4; i++) { const u = q[i], w = q[(i + 1) & 3]; M.idx(a, u, w); M.idx(b, w, u); }
+}
+
 // Рослини й каміння предметів з основою в K0…K0+NK−1: шаблон виду (варіант будови — від хешу) з поворотом, віком,
 // нахилом і розкидом кольору; висота — від K0. F — зблизька (повна будова, трава й квіти), Ff — здалеку (спрощені
-// великі рослини й каміння); near / far — що рахувати
-function objMeshes(C, L, K0, NK, near, far, dz = 0) {
-  const F = new Mesh(), Ff = new Mesh(), cover = [];
+// великі рослини й каміння); near / far — що рахувати; shade — за покривом F ще тіні малих рослин (F.ncv — кінець покриву)
+function objMeshes(C, L, K0, NK, near, far, dz = 0, shade = false) {
+  const F = new Mesh(), Ff = new Mesh(), cover = [], sh = [];
   F.nb = 0; F.objs = [];
   // зблизька — спершу великі (дерева, каміння), за ними малі (покрив): F.nb — індексів великих, F.objs — по 8 чисел на
   // великий предмет: перший індекс, індексів, коробка x0, y0, z0, x1, y1, z1 (scene.js малює великі поза зонами
@@ -534,7 +548,13 @@ function objMeshes(C, L, K0, NK, near, far, dz = 0) {
       const tl = ((v >> 2 & 7) / 7) * 0.1;
       if (near) place(F, template(g, v % 3, 0), cx, cy, z, rot, s, tl, cj, sk);
       if (far) place(Ff, template(g, v % 3, 1), cx, cy, z, rot, s, tl, cj, sk);   // той самий варіант, спрощений
-    } else if (o.k === O_COVER) { if (near) place(F, template(g, v & 1, 0), cx, cy, z, rot, s, 0, cj, sk, 1 + hash3(0x7f1a, o.x + C.cx * CS, o.y + C.cy * CS) % THIN_N); }
+    } else if (o.k === O_COVER) {
+      if (near) {
+        const T = template(g, v & 1, 0), thin = 1 + hash3(0x7f1a, o.x + C.cx * CS, o.y + C.cy * CS) % THIN_N;
+        place(F, T, cx, cy, z, rot, s, 0, cj, sk, thin);
+        if (shade) sh.push(T, cx, cy, z, s, thin);
+      }
+    }
     else { const T = template(o.st ? stoneGenome(L, g, o.st) : g, v & 3, 0, styleOf(g, v)); if (near) place(F, T, cx, cy, z, rot, s, 0, cj, sk); if (far) place(Ff, T, cx, cy, z, rot, s, 0, cj, sk); }
     if (!pass) {
       F.nb = F.ni;
@@ -548,6 +568,8 @@ function objMeshes(C, L, K0, NK, near, far, dz = 0) {
       }
     }
   }
+  F.ncv = F.ni;
+  for (let i = 0; i < sh.length; i += 6) shadeProxy(F, sh[i], sh[i + 1], sh[i + 2], sh[i + 3], sh[i + 4], sh[i + 5]);
   return { F, Ff };
 }
 
@@ -561,8 +583,9 @@ export function objMesh(C, L, o) {
   return M.finish();
 }
 
-// Рослини й каміння зблизька всього стовпця (окрема робота: потрібні лише біля камери); висота — від блоку K0
-export function floraMesh(C, L, K0) { return objMeshes(C, L, K0, 1e9, true, false).F; }
+// Рослини й каміння зблизька всього стовпця (окрема робота: потрібні лише біля камери); висота — від блоку K0. Індекси:
+// [0, nb) — великі, [nb, ncv) — покрив, [ncv, ni) — тіні малих рослин для дальніх каскадів (у кадрі не малюються)
+export function floraMesh(C, L, K0) { return objMeshes(C, L, K0, 1e9, true, false, 0, true).F; }
 // Далекі рослини й каміння з основою в секції K0…K0+15 (груба секція: dz — опустити до грубої землі)
 export function farFlora(C, L, K0, dz = 0) { return objMeshes(C, L, K0, SEC, false, true, dz).Ff; }
 

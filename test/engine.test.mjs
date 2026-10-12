@@ -41,6 +41,7 @@ test('workerOf: стовпець і його секції — в одного, �
 // ================= Щільна вершина, алокатор, еталон мешів =================
 import { hashStr, rng } from '../js/rng.js';
 import { lawsOf } from '../js/universe.js';
+import { M_LEAF as M_LEAF_ } from '../js/gen/materials.js';
 import { genChunk, genCol, genSection, CS, SEC, FR } from '../js/gen/chunk.js';
 import { chunkMesh, objPose } from '../js/gen/mesh.js';
 import { colSummary } from '../js/gen/job.js';
@@ -213,8 +214,9 @@ test('робота flora: рослини зблизька стовпця — т�
     const r = runJob(L, { type: 'flora', d, n, cx, cy }, cache);
     if (!r.mesh.n) { assert.equal(MESH_GOLD[`${i}:near`], '0:00000000'); return; }
     // кадр еталона — регіон секції czLo: зсунути на різницю регіонів по висоті
-    const dz = (r.data.rz - Math.floor(C.czLo / RS)) * RS * SEC * LEVEL, u = new Uint16Array(r.mesh.fl.slice(0));
-    for (let j = 0; j < r.mesh.n; j++) u[j * 8 + 2] += dz * 128;
+    // тіні малих рослин у кінці (np) — лише кидачі дальніх каскадів, у кадрі не малюються: еталон — без них
+    const dz = (r.data.rz - Math.floor(C.czLo / RS)) * RS * SEC * LEVEL, nv = r.mesh.n - r.mesh.np, u = new Uint16Array(r.mesh.fl.slice(0, nv * 16));
+    for (let j = 0; j < nv; j++) u[j * 8 + 2] += dz * 128;
     assert.equal(meshDigest(meshHash(u.buffer)), MESH_GOLD[`${i}:near`]);
   });
 });
@@ -245,6 +247,39 @@ test('робота flora: спершу великі рослини, коробк
     for (let j = 0; j < m.n; j++) assert.equal(V.thin[j] > 0, j >= m.nb);
   });
   assert.ok(objs > 0 && cover > 0);
+});
+
+test('робота flora: тіні малих рослин — у кінці (np), восьмигранник (24 вершини) листя з міткою своєї рослини, у межах рослини', () => {
+  const seed = hashStr('test');
+  let proxies = 0;
+  SPOTS.forEach(([d, n, cx, cy]) => {
+    const L = lawsOf(seed, d, n), cache = new Map();
+    runJob(L, { type: 'col', d, n, cx, cy }, cache);
+    const m = runJob(L, { type: 'flora', d, n, cx, cy }, cache).mesh;
+    if (!m.n) return;
+    const V = unpack(m.fl), e = m.n - m.np;
+    assert.ok(m.np >= 0 && m.np % 24 === 0 && e >= m.nb, `np ${m.np}`);
+    if (m.n > m.nb) assert.ok(m.np > 0, 'є покрив — є й тіні');
+    // вершини покриву за міткою: найдальша по горизонталі від точки й межі висоти
+    const byT = new Map();
+    for (let j = m.nb; j < e; j++) { const t = V.thin[j]; if (!byT.has(t)) byT.set(t, []); byT.get(t).push(j); }
+    for (let q = e; q < m.n; q += 24, proxies++) {
+      const t = V.thin[q];
+      for (let j = q; j < q + 24; j++) { assert.equal(V.mat[j], M_LEAF_); assert.equal(V.thin[j], t); }
+      const own = byT.get(t);
+      assert.ok(own, `мітка тіні ${t} — є рослина покриву з нею`);
+      let x = 0, y = 0, top = -Infinity, bot = Infinity, r = 0;
+      for (let j = q; j < q + 24; j++) { top = Math.max(top, V.pos[j * 3 + 2]); bot = Math.min(bot, V.pos[j * 3 + 2]); }
+      for (let j = q; j < q + 24; j++) if (V.pos[j * 3 + 2] === top) { x = V.pos[j * 3]; y = V.pos[j * 3 + 1]; }
+      for (let j = q; j < q + 24; j++) r = Math.max(r, Math.hypot(V.pos[j * 3] - x, V.pos[j * 3 + 1] - y));
+      let far = 0, zt = -Infinity, zb = Infinity;
+      for (const j of own) { far = Math.max(far, Math.hypot(V.pos[j * 3] - x, V.pos[j * 3 + 1] - y)); zt = Math.max(zt, V.pos[j * 3 + 2]); zb = Math.min(zb, V.pos[j * 3 + 2]); }
+      assert.ok(r <= 0.6 * far + 0.02, `радіус тіні ${r.toFixed(3)} — у межах рослини ${far.toFixed(3)}`);
+      assert.ok(top <= zt + 0.02 && bot >= zb - 0.02, `висота тіні ${bot.toFixed(2)}…${top.toFixed(2)} — у межах ${zb.toFixed(2)}…${zt.toFixed(2)}`);
+      assert.ok(top - bot >= 0.1, 'не пласка');
+    }
+  });
+  assert.ok(proxies > 100, `${proxies}`);
 });
 
 // ================= Стрімінг =================
@@ -582,3 +617,69 @@ test('піраміда з кривизною: вигнута коробка — 
   assert.ok(seen > 1000 && all > 100, `${seen} ${all}`);
 });
 function rngT(s) { return () => ((s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 4294967296); }
+
+// ================= Об'єм кидачів тіні =================
+import { casterVolume, boxOut } from '../js/engine/core/frustum.js';
+import { basis as basis_, fovOf as fovOf_ } from '../js/camera.js';
+
+// Чи входить промінь p + s·L (s ≥ 0) у зріз [s0, s1] піраміди m (точно: інтервал s за всіма гранями)
+function rayHitsSlice(m, eye, ud, s0, s1, L, p) {
+  const ue = ud[0] * eye[0] + ud[1] * eye[1] + ud[2] * eye[2];
+  const F = [[m[3] + m[0], m[7] + m[4], m[11] + m[8], m[15] + m[12]], [m[3] - m[0], m[7] - m[4], m[11] - m[8], m[15] - m[12]],
+    [m[3] + m[1], m[7] + m[5], m[11] + m[9], m[15] + m[13]], [m[3] - m[1], m[7] - m[5], m[11] - m[9], m[15] - m[13]],
+    [-ud[0], -ud[1], -ud[2], ue - s0], [ud[0], ud[1], ud[2], s1 - ue]];
+  let lo = 0, hi = Infinity;
+  for (const [a, b, c, d] of F) {
+    const g = a * p[0] + b * p[1] + c * p[2] + d, k = a * L[0] + b * L[1] + c * L[2];
+    if (Math.abs(k) < 1e-12) { if (g < 0) return false; } else if (k > 0) lo = Math.max(lo, -g / k); else hi = Math.min(hi, g / -k);
+  }
+  return lo <= hi;
+}
+
+test('об\'єм кидачів тіні: кожна точка, з якої промінь уздовж світла входить у зріз, — усередині; площини силуету відкидають зайве', () => {
+  const R = rngT(11), P = new Float64Array(48), P0 = new Float64Array(48);
+  let need = 0, inSil = 0, inOld = 0, n = 0;
+  for (let trial = 0; trial < 240; trial++) {
+    const cam = createCamera(trial % 2 ? FIRST_ : THIRD);
+    cam.yaw = cam.yawT = R() * 6.28;
+    if (cam.mode === FIRST_) cam.pitch1 = cam.pitch1T = (R() * 150 - 75) * Math.PI / 180; else cam.pitch3 = cam.pitch3T = (R() * 120 - 50) * Math.PI / 180;
+    const { m, eye } = viewProj(cam, 1600, 900), { r, up, u } = basis_(cam), ud = u;
+    // світло згори під будь-яким кутом; кожне четверте — уздовж нижньої грані піраміди (±1°): майже паралельна грань
+    let el = (1 + R() * 88) * Math.PI / 180, az = R() * 6.28;
+    const tv = Math.tan(fovOf_(cam) / 2), th = tv * 1600 / 900;
+    let L;
+    if (trial % 4 === 3) {
+      const a = Math.atan(tv) + (R() * 2 - 1) * Math.PI / 180, fw = [-u[0], -u[1], -u[2]];     // напрям нижньої грані
+      L = [fw[0] * Math.cos(a) - up[0] * Math.sin(a), fw[1] * Math.cos(a) - up[1] * Math.sin(a), fw[2] * Math.cos(a) - up[2] * Math.sin(a)];
+      if (L[2] > -0.02) continue;                                // світло — лише згори
+      const k = Math.hypot(...L); L = L.map((x) => x / k);
+    } else L = [-Math.cos(el) * Math.cos(az), -Math.cos(el) * Math.sin(az), -Math.sin(el)];
+    const s0 = trial % 3 === 0 ? 0.1 : 0.1 + R() * 60, s1 = s0 + 2 + R() * 100;
+    const np = casterVolume(m, eye, ud, s0, s1, L, 0, true, P), np0 = casterVolume(m, eye, ud, s0, s1, L, 0, false, P0);
+    assert.ok(np <= 11 && np0 <= 6);
+    n++;
+    for (let i = 0; i < 400; i++) {
+      // точка в зрізі, відсунута до світла на 0…300 м, з бічним розкидом (половина — поза об'ємом)
+      const d = s0 + (s1 - s0) * R(), x = (R() * 2 - 1) * 1.1, y = (R() * 2 - 1) * 1.1, s = R() * 300, j = R() < 0.5 ? 0 : (R() * 2 - 1) * 20;
+      const p = [0, 1, 2].map((a) => eye[a] - u[a] * d + r[a] * x * d * th + up[a] * y * d * tv - L[a] * s + j * (a === 2 ? 0.3 : 1));
+      const hit = rayHitsSlice(m, eye, ud, s0, s1, L, p);
+      const a = !boxOut(P, 0, np, p[0], p[1], p[2], p[0], p[1], p[2]), b = !boxOut(P0, 0, np0, p[0], p[1], p[2], p[0], p[1], p[2]);
+      if (hit) { need++; assert.ok(a, `точка, з якої тінь падає в зріз, відкинута (спроба ${trial})`); assert.ok(b); }
+      if (a) inSil++;
+      if (b) inOld++;
+      if (a) assert.ok(b, 'об\'єм з площинами силуету — у межах старого');
+    }
+  }
+  assert.ok(n > 200 && need > 20000, `${n} ${need}`);
+  assert.ok(inSil < 0.95 * inOld, `з силуетом ${inSil}, без ${inOld}`);
+  // скарга 13.10.2026: перша особа, погляд прямо, сонце на 33° за спиною (нижня грань — 35° униз, майже паралельна):
+  // точка 150 м позаду й 60 м нижче ока тіні в зріз 51–128 м не кине — без площин силуету вона в об'ємі
+  const cam = createCamera(FIRST_); cam.yaw = cam.yawT = 1; cam.pitch1 = cam.pitch1T = 0;
+  const { m, eye } = viewProj(cam, 1600, 900), { u } = basis_(cam), el = 33.4 * Math.PI / 180;
+  const L = [Math.cos(el) * -u[0], Math.cos(el) * -u[1], -Math.sin(el)];                // світить уперед і вниз
+  const p = [eye[0] + u[0] * 150, eye[1] + u[1] * 150, eye[2] - 60];
+  assert.equal(rayHitsSlice(m, eye, u, 51.3, 128, L, p), false);
+  const np = casterVolume(m, eye, u, 51.3, 128, L, 2, true, P), np0 = casterVolume(m, eye, u, 51.3, 128, L, 2, false, P0);
+  assert.ok(boxOut(P, 0, np, ...p, ...p), 'з площинами силуету — відкинута');
+  assert.ok(!boxOut(P0, 0, np0, ...p, ...p), 'без них — ні (надмірно)');
+});
