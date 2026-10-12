@@ -50,12 +50,12 @@ export function weatherAt(L, clock) {
   };
 }
 
-// Погода в місці: cold — холодно (сніг, лід), desert — пустеля, arid — пустеля чи степ. Дощ у холоді — сніг,
+// Погода в місці: cold — холодно (сніг; climate.js snowy — за температурою в точці), desert — пустеля, arid — пустеля чи степ. Дощ у холоді — сніг,
 // у пустелі не долітає; пилова буря — лише в пустелі й степу, деінде — просто вітер; кислота — кислотний дощ. Повертає {type: 'rain' | 'snow' | 'acid' |
 // 'dust' | null, k (сила 0…1), name (для HUD), W (погода з поправкою на місце: видимість, пил)}
 export function localWeather(L, W, cold, desert, arid = desert) {
   let name = WEATHER_NAMES[W.kind];
-  if (L.air.pressure < 0.1) return { type: null, k: 0, name: 'без повітря', W };
+  if (L.air.vacuum) return { type: null, k: 0, name: 'без повітря', W };
   if (W.dust > 0.05) {
     if (arid) return { type: 'dust', k: W.dust, name, W };
     return { type: null, k: 0, name: 'вітряно', W: { ...W, dust: 0, vis: Math.max(W.vis, 0.85) } };
@@ -68,24 +68,22 @@ export function localWeather(L, W, cold, desert, arid = desert) {
   return { type, k: W.precip, name, W };
 }
 
-// Клімат місця для погоди: холодно (сніг), пустеля (дощ не долітає), сухо (пилова буря) — за околом (3×3 точки з
+// Клімат місця для погоди: пустеля (дощ не долітає), сухо (пилова буря) — за околом (3×3 точки з
 // кроком CLIM_S клітинок: погода не знає про окремі клітинки) з гістерезисом: біля межі не перемикається на кожному
 // кроці (скарга 08.10.2026: «в одному блоці пилова буря, а в сусідньому нема»). prev — попередній результат
-const COLD_T = -0.45, COLD_H = 0.04, CLIM_S = 12;
+const CLIM_S = 12;
 export function areaClimate(L, x, y, prev) {
   const fx = Math.floor(x), fy = Math.floor(y);
   if (prev && prev.L === L && prev.x === fx && prev.y === fy) return prev;
-  let T = 0, de = 0, ar = 0;
+  let de = 0, ar = 0;
   for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) {
     const c = tile(L, fx + i * CLIM_S, fy + j * CLIM_S);
-    T += c.T / 9;
     if (c.t === T_DESERT) de++;
     if (c.t === T_DESERT || c.t === T_DRY) ar++;
   }
   const p = prev && prev.L === L ? prev : null;
   return {
     L, x: fx, y: fy,
-    cold: p ? (p.cold ? T < COLD_T + COLD_H : T < COLD_T - COLD_H) : T < COLD_T,
     desert: p && p.desert ? de >= 3 : de >= 6,       // вмикається з 6 із 9 точок, вимикається нижче 3
     arid: p && p.arid ? ar >= 3 : ar >= 6,
   };

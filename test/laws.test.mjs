@@ -202,3 +202,19 @@ test('зворотна гравітація: тіло піднімається �
   for (let i = 0; i < 120 * 40; i++) step(me, 0, 0, false, 1 / 120, Pp, physAt3(L, me.x, me.y, me.z, 0, g0));
   assert.ok(me.hover && Math.abs(me.z - eq) < 1.5, `гравець на ${me.z}, рівновага ${eq}`);
 });
+
+test('температура в точці: доба, сезон, висота; повітря на висоті; сніг за температурою', async () => {
+  const { tempAt, airAt, snowy } = await import('../js/climate.js');
+  const { SEA } = await import('../js/universe.js');
+  const L = lawsOf(hashStr('test'), 0, 0), z0 = SEA * 0.5, day = L.sky.dayMin * 60 / L.phys.time;
+  let lo = 1e9, hi = -1e9;
+  for (let i = 0; i < 48; i++) { const T = tempAt(L, 10, 10, z0, i * day / 48); lo = Math.min(lo, T); hi = Math.max(hi, T); }
+  near((hi - lo) / 2, L.clim.Ad, 0.6, 'добова амплітуда'); assert.ok(L.clim.Ad > 4 && L.clim.Ad < 9, `Ad ${L.clim.Ad}`);
+  near(tempAt(L, 10, 10, z0, 0) - tempAt(L, 10, 10, z0 + 1000, 0), 52 * L.grav, 0.5, '−52 °C/км × g');
+  assert.ok(L.clim.As > 3 && L.clim.As < 12, `сезонна амплітуда ${L.clim.As}`);
+  const A = airAt(L, z0 + L.air.H);
+  near(A.P, L.air.pressure / Math.E, 1e-9, 'тиск на висоті H');
+  assert.equal(snowy(-1, false), true); assert.equal(snowy(1, true), true); assert.equal(snowy(1, false), false); assert.equal(snowy(2, true), false);
+  for (let n = 300; n < 300000; n += 13) { const V = lawsOf(hashStr('test'), 3, n); if (V.air.vacuum && !V.sky.lock) { assert.ok(V.clim.Ad > 60, `без повітря ±${V.clim.Ad}`); return; } }
+  assert.fail('вакуум не трапився');
+});

@@ -15,6 +15,7 @@ import { listWorlds, putWorld, deleteWorld, serialize, deserialize, newId } from
 import { hashStr } from './rng.js';
 import { GEN, SEA, physOf, gravityAt } from './universe.js';
 import { physAt3 } from './worldphys.js';
+import { tempAt, snowy } from './climate.js';
 import { CS, SEC, B_LIQ, B_MAGMA, solidB, BLOCK_NAMES } from './gen/chunk.js';
 import { LEVEL } from './iso.js';
 import { debugText, fmtN } from './debug.js';
@@ -799,7 +800,7 @@ function boot(renderer) {
     return { pos, col };
   }
 
-  // Клімат місця для погоди (сніг, пустеля, пил) — за околом з гістерезисом (areaClimate)
+  // Клімат місця для погоди (пустеля, пил) — за околом з гістерезисом (areaClimate); сніг — за температурою (climate.js)
   let clim = null;
 
   function draw(dt, now) {
@@ -808,7 +809,8 @@ function boot(renderer) {
     if (wOver === 'clear') W = { ...W, kind: 0, clouds: 0, vis: 1, precip: 0, dust: 0, dim: 0, flash: 0 };
     if (me.placed) clim = areaClimate(L, me.x, me.y, clim);
     const C = me.placed && clim;
-    let loc = localWeather(L, W, !!C && C.cold, !!C && C.desert, !!C && C.arid);
+    if (me.placed) { g.temp = tempAt(L, me.x, me.y, me.z, g.clock, W); g.snow = snowy(g.temp, g.snow); }   // сніг чи дощ — за температурою тут
+    let loc = localWeather(L, W, !!g.snow, !!C && C.desert, !!C && C.arid);
     if (wOver !== null) loc = { ...loc, type: wOver === 'clear' ? null : wOver || null, k: wOver === 'clear' ? 0 : 1 };
     g.loc = loc;                                     // опади тут (мокра стіна — лазіння)
     // голова — туди, куди погляд: перша й третя особа — камера (на стіні тіло дивиться в стіну), згори — на ціль під курсором
