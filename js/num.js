@@ -1,29 +1,24 @@
-// num.js — точна арифметика для генерації (лише + − × ÷, Math.floor, порівняння): корені й тригонометрія, однакові до
-// останнього біта в будь-якому рушії JS (Math.sqrt / sin / pow — ні: CLAUDE.md, «Детермінізм генерації»).
+// num.js — точна детермінована арифметика для генерації (CLAUDE.md, «Детермінізм генерації»). Дозволено: + − × ÷,
+// Math.floor / ceil / round / abs / min / max / imul / sqrt (точні за IEEE 754 — однакові до біта в будь-якому рушії JS),
+// зсуви й функції цього модуля. Math.sin / cos / exp / log / pow / cbrt / ** — ні: їхній останній біт залежить від рушія
+// (13.10.2026: Node 22, Chrome 155 і Firefox дають різні біти). Трансцендентні функції — stdlib (js/lib/stdlib: порти
+// fdlibm / FreeBSD msun і Boost лише на точних операціях, похибка ≤ 1 ulp; до 13.10.2026 — власні наближення: синус
+// Бхаскари I з похибкою до 0,0017). Лінтер (eslint.config.js) забороняє неточні Math.* у файлах генерації.
+import sin from './lib/stdlib/sin.js';
+import cos from './lib/stdlib/cos.js';
+import cbrt from './lib/stdlib/cbrt.js';
+import log10 from './lib/stdlib/log10.js';
+import erfcinv from './lib/stdlib/erfcinv.js';
+
 export const PI = 3.141592653589793;
-
-// Квадратний корінь: зведення до [1/16, 16] множенням на степені 16 (точно в двійковому), далі Ньютон
-export function nsqrt(v) {
-  if (!(v > 0)) return 0;
-  let s = 1;
-  while (v > 16) { v /= 16; s *= 4; }
-  while (v < 0.0625) { v *= 16; s /= 4; }
-  let r = 0.5 * v + 0.5;
-  for (let i = 0; i < 7; i++) r = 0.5 * (r + v / r);
-  return r * s;
-}
-export const nroot4 = (v) => nsqrt(nsqrt(v));
-
-// Синус (наближення Бхаскари I, похибка < 0,0017): x — будь-який кут у радіанах
-export function nsin(x) {
-  const T = 2 * PI;
-  x -= Math.floor(x / T) * T;                     // 0…2π
-  const neg = x > PI;
-  if (neg) x -= PI;
-  const p = x * (PI - x), v = 16 * p / (5 * PI * PI - 4 * p);
-  return neg ? -v : v;
-}
-export const ncos = (x) => nsin(x + PI / 2);
+export const nsqrt = (v) => v > 0 ? Math.sqrt(v) : 0;
+export const nroot4 = (v) => v > 0 ? Math.sqrt(Math.sqrt(v)) : 0;
+export const nsin = sin;
+export const ncos = cos;
+export const ncbrt = cbrt;
+export const nlog10 = (v) => v > 0 ? log10(v) : -Infinity;
+// Квантиль стандартного нормального розподілу Φ⁻¹(q), 0 < q < 1: −√2·erfc⁻¹(2q)
+export const nqnorm = (q) => -1.4142135623730951 * erfcinv(2 * q);
 
 // Кусково-лінійна функція за вузлами [[x, y], …] (x зростають); поза вузлами — крайні значення
 export function pwl(T, x) {

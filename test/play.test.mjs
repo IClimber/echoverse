@@ -318,11 +318,11 @@ test('світла неба: головне (з тінню) — найяскра
     return { suns: [sun], moons: [{ dir: n(moonDir), col: [200, 200, 200], size: 0.08 }], main: sun, duskCol: [255, 140, 60], lock: false, I: 0.24 + 0.76 * day, amb: 0.3, day };
   };
   const full = [-0.3, 0, 0.95];                                     // високо, майже навпроти сонця — повня
-  let L = lightsOf(sky(zOf(0.01), full), 3).dirs;
-  assert.ok(L[0].dir[0] > 0.9, 'сонце на 1 % над обрієм — головне'); assert.ok(L.every((l, i) => !i || l.k < L[0].k * 0.01), 'поки сонце видно, місяць прямо не світить');
-  L = lightsOf(sky(-0.05, full), 3).dirs;
+  let o = lightsOf(sky(zOf(0.01), full), 3), L = o.all;
+  assert.ok(L[0].dir[0] > 0.9, 'сонце на 1 % над обрієм — найяскравіше'); assert.ok(o.dirs.every((l) => l.sun), 'поки сонце видно, місяць прямо не світить');
+  L = lightsOf(sky(-0.15, full), 3).dirs;
   assert.equal(L.length, 1); assert.ok(L[0].dir[2] > 0.9, 'сонце під обрієм — головний місяць');
-  const bFull = L[0].b, bNew = lightsOf(sky(-0.05, [0.95, 0, 0.3]), 3).dirs[0].b;   // за 17° від сонця — вузький серп
+  const bFull = L[0].b, bNew = lightsOf(sky(-0.15, [0.95, 0, 0.2]), 3).all[0].b;   // за 20° від сонця — вузький серп
   assert.ok(bNew < bFull * 0.05, 'серп світить у десятки разів слабше за повню');
   // захід без провалу й стрибка: верх (освітлений і в тіні) змінюється плавно; освітлений не світлішає, поки сонце сідає
   for (const moon of [full, [0.3, 0, -0.5]]) {
@@ -335,6 +335,32 @@ test('світла неба: головне (з тінню) — найяскра
       }
       pl = lit; ps = sh;
     }
+  }
+  // одне сонце — як до 13.10.2026 (сума світил, тінь лише помітних): освітлене й тінь на екрані — у межах 1/255
+  const old = (sk, max) => {   // lightsOf до 13.10.2026
+    const Lo = [];
+    let P = 0, tw = 1, Bs = 0, Bm = 0, Mm = 0;
+    const sm = (a, b, v) => { const t = Math.max(0, Math.min(1, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
+    for (const s of sk.suns) {
+      const z0 = -Math.sin(s.size); tw = Math.min(tw, 1 - sm(z0 - 0.1, z0, s.dir[2]));
+      const b = s.bright * aboveHorizon(s.dir[2], s.size);
+      if (b <= 0) continue;
+      P = Math.max(P, sm(z0, 0.2, s.dir[2])); Bs += b; Lo.push({ dir: s.dir, b, sun: true });
+    }
+    for (const m of sk.moons) {
+      const M = sk.main, lit = (1 - (m.dir[0] * M.dir[0] + m.dir[1] * M.dir[1] + m.dir[2] * M.dir[2])) / 2, vis = aboveHorizon(m.dir[2], m.size);
+      const b = M.bright * 0.12 * m.size * m.size * lit * vis;
+      if (b > 0) { Lo.push({ dir: m.dir, b, sun: false }); Bm += b; Mm = Math.max(Mm, lit * vis); }
+    }
+    Lo.sort((a, b) => b.b - a.b); Lo.length = Math.min(Lo.length, max);
+    const S = sk.I ** 2.2, rho = sk.amb / (sk.amb + (1 - sk.amb) * 0.77), Ea = S * rho ** 2.2, Ed = S * (1 - rho ** 2.2) / 0.77, Pm = (1 - P) * tw * Mm;
+    for (const l of Lo) l.k = l.sun ? Ed * P * l.b / Bs : Ed * Pm * l.b / Bm;
+    return { dirs: Lo.filter((l) => l.k > 0), amb: Ea + Ed * 0.77 * (1 - (Bs > 0 ? P : 0) - (Bm > 0 ? Pm : 0)) };
+  };
+  const scr = (o) => [o.amb + o.dirs.reduce((s, l) => s + l.k * Math.max(0, l.dir[2]), 0), o.amb].map((v) => v ** (1 / 2.2));
+  for (const moon of [full, [0.3, 0, -0.5], [0.95, 0, 0.2]]) for (let z = 1; z >= -0.3; z -= 0.01) {
+    const a = scr(old(sky(z, moon), 3)), b = scr(lightsOf(sky(z, moon), 3));
+    assert.ok(Math.abs(a[0] - b[0]) <= 1 / 255 + 1e-9 && Math.abs(a[1] - b[1]) <= 1 / 255 + 1e-9, `одне сонце на z = ${z.toFixed(2)}: ${a} → ${b}`);
   }
 });
 
@@ -436,9 +462,12 @@ test('нові сили: вітер — чесний опір (на землі �
   const T = world(rows, { swim: true, danger: '', density: 1, tension: true }), r = man(T, 0.5, 1.5);
   for (let i = 0; i < 60; i++) step(r, 1, 0, false, 1 / 60, T, PH1, [[1, 0], [0, 1]], { sprint: true });
   assert.ok(r.x > 4 && !r.wet && r.z > 2.8, `натяг: ${r.x} ${r.z} ${r.wet}`);
-  const q = man(P, 20.5, 20.5);
-  for (let i = 0; i < 30; i++) step(q, 0, 0, false, 1 / 60, P, { ...PH1, tilt: [0.3, 0] });
-  assert.ok(q.x > 21, `нахил: ${q.x}`);
+  // горизонтальне тяжіння на землі — як схил: тертя спокою тримає (приплив 1,5 % g, нахил 0,3 g), понад межу — зносить
+  const tilted = (tilt, fr) => { const q = man(P, 20.5, 20.5); for (let i = 0; i < 60; i++) step(q, 0, 0, false, 1 / 60, P, { ...PH1, tilt, friction: fr }); return q.x - 20.5; };
+  assert.equal(tilted([0.015, 0], 1), 0, 'приплив 1,5 % g — не тягне');
+  assert.equal(tilted([0.3, 0], 1), 0, 'нахил 0,3 g, звичайний ґрунт — тримає');
+  assert.ok(tilted([0.3, 0], 0.15) > 0.15, `нахил 0,3 g, ковзко — зносить: ${tilted([0.3, 0], 0.15)}`);
+  assert.ok(tilted([1.6, 0], 1) > 1, `нахил 1,6 g — зносить: ${tilted([1.6, 0], 1)}`);
 });
 
 test('тіла: левітуюче висить на висоті появи, звичайне падає й лежить; удар — легке відлітає, важке ледь зрушить; на тіло можна стати', async () => {

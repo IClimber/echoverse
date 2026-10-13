@@ -3,7 +3,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { lawsOf, zOfLane, SPREAD } from '../js/universe.js';
 import { starOf, planetOf, pMin, tEq, airOf, tSurf, fieldOf } from '../js/astro.js';
-import { nsqrt, nsin, ncos, PI } from '../js/num.js';
+import { nsqrt, nroot4, nsin, ncos, ncbrt, nlog10, nqnorm, PI } from '../js/num.js';
+import { LIB_GOLD, libDigest } from '../js/golden.js';
 import { noise2 } from '../js/noise.js';
 import { hashStr } from '../js/rng.js';
 
@@ -12,9 +13,24 @@ const near = (v, want, eps, msg) => assert.ok(Math.abs(v - want) <= eps, `${msg}
 const PHYS = ['зоря', 'відстань до зорі', 'альбедо', 'радіус планети', 'густина планети', 'обертання', 'нахил осі', 'широта', 'поле',
   'тиск', 'кисень', 'вуглекислий газ', 'метан', 'серпанок', 'вітер', 'плин часу', 'аномалії', 'кільця', 'компаньйон'];
 
-test('точна арифметика: корінь і синус', () => {
-  for (const v of [1e-9, 0.003, 0.5, 1, 2, 17, 1234.5, 9e7]) near(nsqrt(v), Math.sqrt(v), Math.sqrt(v) * 1e-12, `√${v}`);
-  for (let x = -7; x < 7; x += 0.37) { near(nsin(x), Math.sin(x), 0.0017, `sin ${x}`); near(ncos(x), Math.cos(x), 0.0017, `cos ${x}`); }
+test('точна арифметика: stdlib — похибка ≤ 1e-15, до біта однакова (LIB_GOLD)', () => {
+  const rel = (a, b) => Math.abs(a - b) / Math.max(1e-300, Math.abs(b));
+  for (const v of [1e-9, 0.003, 0.5, 1, 2, 17, 1234.5, 9e7]) {
+    assert.equal(nsqrt(v), Math.sqrt(v), `√${v}`);
+    assert.ok(rel(nroot4(v), Math.pow(v, 0.25)) <= 1e-15, `⁴√${v}`);
+    assert.ok(rel(ncbrt(v), Math.cbrt(v)) <= 1e-15, `∛${v}`); assert.ok(rel(ncbrt(-v), -Math.cbrt(v)) <= 1e-15, `∛−${v}`);
+    assert.ok(rel(nlog10(v), Math.log10(v)) <= 1e-15 || Math.abs(nlog10(v) - Math.log10(v)) <= 1e-16, `lg ${v}`);
+  }
+  assert.equal(nsqrt(-1), 0); assert.equal(nsqrt(NaN), 0); assert.equal(nlog10(0), -Infinity);
+  for (let x = -7; x < 7; x += 0.37) {
+    assert.ok(Math.abs(nsin(x) - Math.sin(x)) <= 2e-16 * Math.max(1, Math.abs(x)), `sin ${x}`);
+    assert.ok(Math.abs(ncos(x) - Math.cos(x)) <= 2e-16 * Math.max(1, Math.abs(x)), `cos ${x}`);
+  }
+  // Φ⁻¹: відомі квантилі
+  for (const [q, z] of [[0.5, 0], [0.84134474606854293, 1], [0.975, 1.959963984540054], [0.999, 3.090232306167813], [0.9999, 3.719016485455709], [0.025, -1.959963984540054]])
+    near(nqnorm(q), z, 1e-12, `Φ⁻¹(${q})`);
+  // відбиток бібліотеки на фіксованих аргументах: оновлення js/lib/stdlib, що змінює хоч один біт, — тут (тоді й GEN)
+  assert.equal(libDigest(), LIB_GOLD);
 });
 
 test('нормальний розподіл: z з номера — стандартне нормальне', () => {
@@ -125,28 +141,74 @@ test('небо: сезони (полудень сонцестояння на 45�
   const dayFrac = (lat, yoff) => { let n = 0; for (let i = 0; i < 200; i++) n += el(one(lat, yoff, i / 200)) > 0; return n / 200; };
   assert.ok(dayFrac(45, 0.25) > 0.6 && dayFrac(45, 0.75) < 0.4, `день улітку ${dayFrac(45, 0.25)}, узимку ${dayFrac(45, 0.75)}`);
   assert.equal(dayFrac(80, 0.25), 1); assert.equal(dayFrac(80, 0.75), 0);
-  const Lk = skyL({ lock: true, off: 0.6 });
-  assert.deepEqual(skyState(Lk, 0).suns[0].dir, skyState(Lk, 5000).suns[0].dir);
+  // захоплене сонце стоїть (нахилу осі при захопленні немає), а рік іде: зорі повертаються раз на рік, місяці ходять
+  const L0 = lawsOf(hashStr('test'), 0, 0), Lk = skyL({ lock: true, off: 0.6, year: { ...L0.sky.year, obliq: 0 } });
+  const k0 = skyState(Lk, 0), k1 = skyState(Lk, 5000);
+  assert.deepEqual(k0.suns[0].dir, k1.suns[0].dir);
+  assert.notDeepEqual(k0.cel, k1.cel); assert.notDeepEqual(k0.moons[0].dir, k1.moons[0].dir);
 });
 
-test('небо: затемнення — частка диска, повне — 2 % світла; місяць у тіні планети темніє', async () => {
+test('небо: затемнення — частка диска, повне — сонце не світить; місяць у тіні планети темніє', async () => {
   const { skyState, covered } = await import('../js/sky.js');
   near(covered(0.05, 0.05, 0), 1, 1e-9, 'повне'); near(covered(0.05, 5, 5), 0.5, 0.01, 'половина'); assert.equal(covered(0.05, 0.05, 0.11), 0);
   const L0 = lawsOf(hashStr('test'), 0, 0), m = L0.sky.moons[0];
   const big = { ...m, Rkm: m.Rkm * 3, dec: 0, off: 0, period: 30 };
   const Le = skyL({ moons: [big], off: 0.5, year: { ...L0.sky.year, off: 0 } });
   const s = skyState(Le, 0);
-  assert.ok(s.suns[0].eclipse === 1 && s.suns[0].bright <= 0.02 + 1e-9, `затемнення ${s.suns[0].eclipse}`);
+  assert.ok(s.suns[0].eclipse === 1 && s.suns[0].bright === 0 && s.suns[0].bright0 > 0, `затемнення ${s.suns[0].eclipse}`);
   const Ll = skyL({ moons: [{ ...big, off: 0.5 }], off: 0.5, year: { ...L0.sky.year, off: 0 } });
   assert.ok(skyState(Ll, 0).moons[0].eclipse > 0.9, 'місячне затемнення в повню біля вузла');
 });
 
-test('компаньйон: видимий радіус з припливної сили, світить уночі, займає слот світла', async () => {
+test('світло кількох сонць: сума (головне — звичайний день, разом — світліше, небо — як з одним); закрите не світить, тінь — від наступного; без світил — нічний рівень без тіней', async () => {
+  const { skyState, lightsOf, sunDay } = await import('../js/sky.js');
+  const lit = (st) => { const o = lightsOf(st, 3); return o.amb + o.dirs.reduce((s, l) => s + l.k * Math.max(0, l.dir[2]), 0); };
+  const L0 = lawsOf(hashStr('test'), 0, 0), s0 = L0.sky.suns[0], night = L0.sky.night;
+  // одне сонце: рівень — як раніше (нічний + частка дня від найяскравішого)
+  for (let i = 0; i < 24; i++) {
+    const st = skyState(skyL({ moons: [] }), i * L0.sky.dayMin * 60 / 24), s = st.suns[0];
+    near(st.I, night + (1 - night) * s.bright * Math.max(0, Math.min(1, ((t) => t * t * (3 - 2 * t))(Math.max(0, Math.min(1, (s.dir[2] + 0.1) / 0.32))))), 1e-9, `одне сонце, година ${i}`);
+  }
+  // два однакові сонця в одному місці (далеке на тій самій відстані, без зсуву): світло — сума (лінійно), небо — як з одним
+  const same = (o) => ({ ...s0, main: false, close: false, a2: L0.star.a, dec: 0, off: 0, ...o });
+  const a = skyState(skyL({ moons: [], off: 0.5, year: { ...L0.sky.year, off: 0 } }), 0), b = skyState(skyL({ moons: [], off: 0.5, year: { ...L0.sky.year, off: 0 }, suns: [s0, same()] }), 0);
+  near(a.I, night + (1 - night) * sunDay(a.suns[0]) ** (1 / 2.2), 1e-9, 'одне в полудень');
+  near(b.I, night + (1 - night) * (2 * sunDay(a.suns[0])) ** (1 / 2.2), 1e-9, 'два — сума');
+  assert.ok(b.I > a.I * 1.2 && lit(b) > lit(a) * 1.5, `два сонця світліші: I ${a.I} → ${b.I}, світло ${lit(a)} → ${lit(b)}`);
+  for (let k = 0; k < 3; k++) { near(b.zenith[k], a.zenith[k], 1e-6, 'зеніт'); near(b.horizon[k], a.horizon[k], 1e-6, 'обрій'); }
+  assert.equal(b.day, a.day);
+  assert.equal(lightsOf(b, 3).dirs.length, 2);
+  // головне повністю закрите місяцем — не світить; тінь (слот 0) — від другого сонця; світло — лише від нього
+  const m = L0.sky.moons[0], big = { ...m, Rkm: m.Rkm * 3, dec: 0, off: 0, period: 30 };
+  const half = same({ L: s0.L * 0.5, off: 0.06 });
+  const e = skyState(skyL({ moons: [big], off: 0.5, year: { ...L0.sky.year, off: 0 }, suns: [s0, half] }), 0);
+  assert.equal(e.suns[0].eclipse, 1); assert.equal(e.suns[0].bright, 0); assert.equal(e.suns[1].eclipse, 0);
+  near(e.I, night + (1 - night) * sunDay(e.suns[1]) ** (1 / 2.2), 1e-9, 'світло — від незакритого');
+  const le = lightsOf(e, 3);
+  assert.ok(le.dirs[0].sun && le.dirs[0].dir === e.suns[1].dir, 'тінь — від другого сонця');
+  assert.ok(le.all.every((l) => l.dir !== e.suns[0].dir), 'закрите сонце не світить');
+  assert.equal(e.main, e.suns[1]);
+  // без світил (північ, без місяців): напрямлених немає (тіні не рахуються), розсіяне — нічний рівень
+  const n0 = skyState(skyL({ moons: [], off: 0 }), 0), ln = lightsOf(n0, 3);
+  assert.ok(n0.suns[0].dir[2] < -0.3); assert.equal(ln.dirs.length, 0);
+  near(n0.I, night, 1e-9, 'нічний рівень'); near(ln.amb, night ** 2.2, 1e-9, 'розсіяне — нічний рівень');
+});
+
+test('компаньйон: видимий радіус з припливної сили, не ближче дотику й межі Роша, світить уночі, займає слот світла', async () => {
   const { bodiesOf, lightSlots } = await import('../js/sky.js');
-  const L = skyL({}, { comp: { f: 0.05, type: 0, rhoR: 0.2, Rr: 8, inc: 0.1, albedo: 0.5, off: 0.3, hue: 0.4, hue2: 0.6 } });
-  const B = bodiesOf(L), C = B.moons[B.moons.length - 1];
-  near(C.size, Math.asin(Math.cbrt(0.05 / 0.4)), 1e-9, 'α'); assert.equal(C.comp, 1);
-  assert.equal(lightSlots(L), Math.min(3, B.suns.length + B.moons.length));
+  let n = 0;
+  for (let d = 0; d <= 12; d += 3) for (let k = 100; k < 60000 && n < 400; k += 41) {
+    const L = lawsOf(hashStr('test'), d, k), C = L.comp;
+    if (!C) continue;
+    n++;
+    const B = bodiesOf(L), M = B.moons[B.moons.length - 1];
+    near(2 * C.rhoR * C.sa ** 3, C.f, 1e-9, 'f = 2·(ρк/ρп)·sin³α'); near(M.size, Math.asin(C.sa), 1e-12, 'α'); assert.equal(M.comp, C.type + 1);
+    const roche = C.Rr >= 1 ? 1.26 * C.Rr * Math.cbrt(C.rhoR) : 1.26 * Math.cbrt(1 / C.rhoR);
+    assert.ok(C.D >= 1.05 * (1 + C.Rr) - 1e-9 && C.D >= roche - 1e-9 && C.sa <= 0.866, `компаньйон впритул: D ${C.D}, Rr ${C.Rr}, Роша ${roche}`);
+    if (L.sky.rings) assert.ok(L.sky.rings.r0 + L.sky.rings.w < C.D - C.Rr, 'кільця всередині орбіти компаньйона');
+    assert.equal(lightSlots(L), Math.min(3, B.suns.length + B.moons.length));
+  }
+  assert.ok(n > 300, `компаньйонів ${n}`);
 });
 
 test('оптика: Земля — блакитне небо й помаранчевий захід; без повітря — чорне; густе — біліше; червона зоря — тепліше світло', async () => {
@@ -244,6 +306,9 @@ test('вітер: без повітря немає; межа падіння пр
 
 test('погода в просторі: стан триває хвилини, сусідні точки — та сама погода, поле пливе за вітром', async () => {
   const { weatherAt, cloudsAt, prevailing } = await import('../js/weather.js');
+  // «та сама за 100 м» — у середньому за трьома всесвітами > 0,9, у кожному > 0,85 (межа туману й хмарності за 100 м — частка
+  // залежить від всесвіту: 13.10.2026, генератор v16, у всесвіті 300 вага грози змінилась у 4-му знаку — 0,917 → 0,895)
+  let sameAll = 0;
   for (const n of [0, 300, -777]) {
     const L = lawsOf(hashStr('1hsb1wu'), 0, n);
     let prev = null, last = -1, t0 = 0, pa = null, pb = null, same = 0, N = 0;
@@ -251,8 +316,10 @@ test('погода в просторі: стан триває хвилини, с
     for (let t = 0; t < 86400; t += 2) { const W = weatherAt(L, t, 100, 100, prev); prev = W; if (W.kind !== last) { if (last >= 0) durs.push(t - t0); t0 = t; last = W.kind; } }
     for (let t = 0; t < 86400; t += 30) { N++; pa = weatherAt(L, t, 100, 100, pa); pb = weatherAt(L, t, 200, 100, pb); same += pa.kind === pb.kind; }
     durs.sort((a, b) => a - b);
-    assert.ok(durs[durs.length >> 1] >= 240 && durs[0] >= 60 && same / N > 0.9, `${n}: медіана ${durs[durs.length >> 1]} с, найкоротший ${durs[0]} с, та сама за 100 м ${same / N}`);
+    assert.ok(durs[durs.length >> 1] >= 240 && durs[0] >= 60 && same / N > 0.85, `${n}: медіана ${durs[durs.length >> 1]} с, найкоротший ${durs[0]} с, та сама за 100 м ${same / N}`);
+    sameAll += same / N / 3;
   }
+  assert.ok(sameAll > 0.9, `та сама за 100 м у середньому ${sameAll}`);
   // за вітром: хмарність у точці, зсунутій на u·Δt, ближча до попередньої, ніж на місці
   const L = lawsOf(hashStr('1hsb1wu'), 0, 300), Pw = prevailing(L), u = 0.5 * L.air.wind, dt = 600;
   let dMove = 0, dStay = 0;
@@ -281,8 +348,8 @@ test('блискавки — у грозу й рідко в пиловій бу�
     assert.ok(Math.abs((o.h + 1) * 0.5 - B.z) < 1e-9, 'ціль — верх клітинки');
   }
   assert.ok(hits > 0, 'блискавок немає');
-  // суха блискавка в пиловій бурі (всесвіт з частими бурями, пустеля; розряд о 209,25 с — пошуком, dustbolt)
-  const D = lawsOf(hashStr('1hsb1wu'), 0, 219), Bd = lightningNear(D, 209.3, 7500, 1000, 1500);
+  // суха блискавка в пиловій бурі (всесвіт з частими бурями, пустеля; розряд о 65,3 с — пошуком, генератор v15)
+  const D = lawsOf(hashStr('1hsb1wu'), 0, 757), Bd = lightningNear(D, 65.3, 0, 0, 1500);
   assert.ok(Bd, 'сухої блискавки немає');
   const Wd = weatherAt(D, Math.floor(Bd.t0 * 2) / 2, Bd.cx, Bd.cy);
   assert.ok(Wd.dust > 0.6 && Wd.precip < 0.05, `не пилова буря: пил ${Wd.dust}, опади ${Wd.precip}`);

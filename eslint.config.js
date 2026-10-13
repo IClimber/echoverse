@@ -19,8 +19,19 @@ const rules = {
   'valid-typeof': 'error',
 };
 
+// Детермінізм генерації (CLAUDE.md): у файлах генерації — лише функції, точні за IEEE 754 (однакові до біта в будь-якому
+// рушії JS); трансцендентні — з num.js (stdlib). Неточні Math.* й оператор ** — помилка лінтера
+const GEN_FILES = ['js/rng.js', 'js/noise.js', 'js/num.js', 'js/astro.js', 'js/universe.js', 'js/gen/chunk.js', 'js/gen/biomes.js', 'js/gen/flora.js'];
+const INEXACT = ['sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'atan2', 'exp', 'expm1', 'log', 'log10', 'log2', 'log1p', 'pow', 'cbrt', 'hypot',
+  'sinh', 'cosh', 'tanh', 'asinh', 'acosh', 'atanh', 'random'];
+const determinism = {
+  'no-restricted-properties': ['error', ...INEXACT.map((property) => ({ object: 'Math', property, message: 'генерація: останній біт залежить від рушія — функції num.js (stdlib)' }))],
+  'no-restricted-syntax': ['error', { selector: "BinaryExpression[operator='**'], AssignmentExpression[operator='**=']", message: 'генерація: ** — це Math.pow; множення чи функції num.js' }],
+};
+
 export default [
   { ignores: ['.wt/**', 'js/lib/**', 'docs/**', 'temp/**', 'tmp/**', 'node_modules/**', 'echoverse-prompts/**'] },
   { files: ['js/**/*.js'], languageOptions: { ecmaVersion: 2024, sourceType: 'module', globals: { ...globals.browser, ...globals.worker } }, plugins: { js }, rules },
+  { files: GEN_FILES, rules: determinism },
   { files: ['test/**/*.mjs', 'eslint.config.js', '*.mjs'], languageOptions: { ecmaVersion: 2024, sourceType: 'module', globals: { ...globals.node, WebSocket: 'readonly' } }, rules },
 ];

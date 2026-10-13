@@ -53,9 +53,16 @@ const LAW = {
   polar: [0, 'L => L.planet.lat > 72 && !L.planet.lock && L.air.pressure > 0.5', 0.5, 'land'],
   reverse: [10, 'L => !!L.anom.rev && L.anom.freq > 0.3 && L.anom.rev.k0 < -0.3 && !L.air.vacuum', 0.45, 'land', "!!eco.findAnom('rev')"],
   tanom: [8, 'L => !!L.tanom && !L.air.vacuum', 0.45, 'land', "!!eco.findAnom('time')"],
+  // зорі з масою (13.10.2026): тісна пара в затемненні (ближча зоря затуляє дальшу), компаньйон, що стоїть на небі
+  // (захопив планету), нічне небо двома кадрами (зорі й місяць — на захід), світло червоного карлика на землі
+  pair: [0, 'L => L.star.extra.some((e) => e.close) && !L.sky.lock && !L.air.vacuum && L.air.pressure > 0.5', null, 'sun', 'pairEclipse()'],
+  heldcomp: [0, "L => L.planet.held === 'comp' && !L.air.vacuum && L.air.pressure > 0.5", 0.5, 'comp', "eco.weather('clear')"],
+  nightsky: [0, 'L => L.sky.moons.length > 0 && !L.sky.lock && !L.air.vacuum', 'moon', 'moon', "eco.weather('clear')"],
+  redland: [0, 'L => L.star.T < 3300 && L.star.n === 1 && !L.sky.lock && !L.air.vacuum && L.air.pressure > 0.5 && L.air.pressure < 3', 0.5, 'land', "eco.weather('clear')"],
 };
 const LSCENES = arg('lscenes', Object.keys(LAW).join(',')).split(',').filter((k) => LAW[k]);
-const flags = ['--headless=new', '--use-angle=vulkan', '--enable-features=Vulkan', '--enable-unsafe-webgpu', '--ignore-gpu-blocklist', '--window-size=2560,1440'];
+// --sw — програмний рендер (GPU зайнятий: перевірка помилок, к/с так не міряти)
+const flags = process.argv.includes('--sw') ? ['--headless=new', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--enable-unsafe-webgpu', '--window-size=1280,720'] : ['--headless=new', '--use-angle=vulkan', '--enable-features=Vulkan', '--enable-unsafe-webgpu', '--ignore-gpu-blocklist', '--window-size=2560,1440'];
 rmSync(`${OUT}/profile`, { recursive: true, force: true });
 const ch = spawn('google-chrome', [`--remote-debugging-port=${port}`, ...flags, `--user-data-dir=${OUT}/profile`, 'about:blank'], { stdio: 'ignore', detached: true });
 // google-chrome — скрипт-обгортка: ch.kill() вбив би лише її, а браузер лишився б на порту (наступний запуск підключився б
@@ -153,7 +160,7 @@ for (const [gpu, sh, view] of COMBOS) {
   for (const sc of LSCENES) {
     log('сцена законів', sc);
     const [d, pred, ph, look, prep] = LAW[sc];
-    await ev(`eco.weather(null); eco.starStorm(null); eco.setCam('third'); 1`);
+    await ev(`eco.weather(null); eco.starStorm(null); eco.setCam('third'); window.__look = null; 1`);
     if (pred) {
       const n = await ev(`eco.findLaw(${pred}, { d: ${d}, from: 100, count: 60000 })`);
       if (n === null) { R.push({ gpu, sh, view, sc, skip: 'всесвіту не знайдено' }); continue; }
@@ -162,10 +169,12 @@ for (const [gpu, sh, view] of COMBOS) {
     }
     if (ph === 'comp') await ev(`(async () => { const S = await import('./js/sky.js'), g = eco.g, L = g.world.laws(g.d, g.n), day = L.sky.dayMin * 60 / L.phys.time;
       for (let c = g.clock; c < g.clock + day * 40; c += day / 200) { const s = S.skyState(L, c), m = s.moons.find((o) => o.comp); if (m && m.dir[2] > 0.35 && s.day < 0.3) { g.clock = c; return true; } } return false; })()`);
+    else if (ph === 'moon') await ev(`(async () => { const S = await import('./js/sky.js'), g = eco.g, L = g.world.laws(g.d, g.n), day = L.sky.dayMin * 60 / L.phys.time;
+      for (let c = g.clock; c < g.clock + day * 40; c += day / 200) { const s = S.skyState(L, c), m = s.moons.find((o) => !o.comp); if (m && m.dir[2] > 0.3 && s.day < 0.05) { g.clock = c; return true; } } return false; })()`);
     else if (ph === 'dusk') await ev(`(async () => { const S = await import('./js/sky.js'), g = eco.g, L = g.world.laws(g.d, g.n), day = L.sky.dayMin * 60 / L.phys.time;
       for (let c = g.clock; c < g.clock + day * 2; c += day / 2000) { const a = S.skyState(L, c).suns[0].dir[2], b = S.skyState(L, c + day / 2000).suns[0].dir[2]; if (a > 0.05 && a < 0.09 && b < a) { g.clock = c; return true; } } return false; })()`);
     else if (ph !== null) await ev(`eco.setPhase(${ph})`);
-    if (prep && !(await ev(`(async () => { const meteor = async () => { const W = await import('./js/weather.js'), g = eco.g, L = g.world.laws(g.d, g.n); for (let c = g.clock; c < g.clock + 3600 * 6; c += 0.5) if (W.meteorsAt(L, c, 1).length) { g.clock = c; return true; } return false; }; return ${prep}; })()`))) { R.push({ gpu, sh, view, sc, skip: 'не підготувалось' }); continue; }
+    if (prep && !(await ev(`(async () => { const pairEclipse = async () => { const S = await import('./js/sky.js'), g = eco.g, L = g.world.laws(g.d, g.n), day = L.sky.dayMin * 60 / L.phys.time; for (let c = g.clock; c < g.clock + day * 400; c += day / 400) { const s = S.skyState(L, c), e = s.suns.find((o) => o.role === 'pair' && o.eclipse > 0.2 && o.dir[2] > 0.15) || s.suns.find((o) => o.role === 'main' && o.eclipse > 0.2 && o.dir[2] > 0.15); if (e) { g.clock = c; window.__look = e.dir; return true; } } return false; }; const meteor = async () => { const W = await import('./js/weather.js'), g = eco.g, L = g.world.laws(g.d, g.n); for (let c = g.clock; c < g.clock + 3600 * 6; c += 0.5) if (W.meteorsAt(L, c, 1).length) { g.clock = c; return true; } return false; }; return ${prep}; })()`))) { R.push({ gpu, sh, view, sc, skip: 'не підготувалось' }); continue; }
     if (prep && prep.includes('findAnom')) { await wait(3000); await ev('eco.g.me.fly = false; 1'); for (let i = 0; i < 300 && !(await ev('eco.g.me.ground || eco.g.me.hover')); i++) await wait(50); await wait(500); }
     await idle(); for (let i = 0; i < 300 && (await ev('eco.visMissing()')) !== 0; i++) await wait(50);
     // небо — з висоти 60 м над місцем (пагорби й дерева не закривають), гравець висить у польоті
@@ -173,15 +182,23 @@ for (const [gpu, sh, view] of COMBOS) {
     if (look === 'land') await ev('eco.look(0.8, 0.2, 9); 1');
     else if (look === 'sky') await ev('eco.look(0.8, -0.9, 9); 1');
     else await ev(`(async () => { const S = await import('./js/sky.js'), g = eco.g, L = g.world.laws(g.d, g.n), s = S.skyState(L, g.clock);
-      const v = ${look === 'bolt' ? '[g.boltForce.x - g.cam[0], g.boltForce.y - g.cam[1], 60]' : look === 'comp' ? 's.moons.find((o) => o.comp).dir' : look === 'aur' ? '[s.aurora.dir[0], s.aurora.dir[1], 0.45]' : 's.suns[0].dir'}, l = Math.hypot(...v);
+      const v = ${look === 'bolt' ? '[g.boltForce.x - g.cam[0], g.boltForce.y - g.cam[1], 60]' : look === 'comp' ? 's.moons.find((o) => o.comp).dir' : look === 'moon' ? 's.moons.find((o) => !o.comp).dir' : look === 'aur' ? '[s.aurora.dir[0], s.aurora.dir[1], 0.45]' : '(window.__look || s.suns[0].dir)'}, l = Math.hypot(...v);
       eco.look(Math.atan2(v[1], v[0]), -Math.min(1.2, Math.asin(v[2] / l)), 9); return 1; })()`);
     if (look !== 'bolt') await wait(2500);
     if (sc === 'meteors') await ev(`(async () => { const W = await import('./js/weather.js'), g = eco.g, L = g.world.laws(g.d, g.n); for (let c = g.clock; c < g.clock + 3600 * 6; c += 0.25) { const m = W.meteorsAt(L, c, 1); if (m.length) { const a = m[0].a; g.clock = c + 0.25; eco.look(Math.atan2(a[1], a[0]), -Math.min(1.2, Math.asin(a[2])), 9); return true; } } return false; })()`);
     await menu(true); await wait(look === 'bolt' ? 300 : 1500);
     if (gpu !== 'webgpu') await shot(`${gpu}-${sh}-${view}-${sc}`);
+    let extra = '';
+    if (sc === 'nightsky') {   // другий кадр через 1/40 доби: місяць і зорі зсунулись на захід (азимут місяця — у звіті)
+      const az = `(async () => { const S = await import('./js/sky.js'), g = eco.g, s = S.skyState(g.world.laws(g.d, g.n), g.clock), m = s.moons.find((o) => !o.comp).dir; return [Math.atan2(m[1], m[0]), m[2]]; })()`;
+      const a0 = await ev(az);
+      await ev('(() => { const g = eco.g, L = g.world.laws(g.d, g.n); g.clock += L.sky.dayMin * 60 / L.phys.time / 40; return 1; })()'); await wait(1500);
+      if (gpu !== 'webgpu') await shot(`${gpu}-${sh}-${view}-${sc}-b`);
+      const a1 = await ev(az); extra = ` · місяць: азимут ${a0[0].toFixed(3)} → ${a1[0].toFixed(3)}, висота ${a0[1].toFixed(3)} → ${a1[1].toFixed(3)}`;
+    }
     const st = await ev('eco.stats()');
     await menu(false); await ev('eco.weather(null); eco.starStorm(null); 1');
-    R.push({ gpu, sh, view, sc, device: `${st.device} · ${await ev("document.getElementById('env').textContent")} · ${await ev("document.getElementById('coords').textContent")}` });
+    R.push({ gpu, sh, view, sc, device: `${st.device} · ${await ev("document.getElementById('env').textContent")} · ${await ev("document.getElementById('coords').textContent")}${extra}` });
   }
   // стенд руху ?move: ті самі налаштування, свої сцени; ціль — без меню (з відкритим меню цілі немає)
   if (!MSCENES.length) continue;

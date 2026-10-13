@@ -606,8 +606,9 @@ function boot(renderer) {
     if (L.air.vacuum && !P.air.vacuum) msg.push('повітря майже немає');
     else if (!L.air.vacuum && (pr > 1.6 || pr < 1 / 1.6)) msg.push(`тиск ${atmStr(L.air.pressure)}`);
     if (L.star.cls !== P.star.cls || L.star.n !== P.star.n) msg.push(STAR_CLS[L.star.cls] + (L.star.n > 1 ? ` (зір ${L.star.n})` : ''));
-    if (L.comp && !P.comp) msg.push('на небі — планета-компаньйон');
-    if (L.sky.lock && !P.sky.lock) msg.push('вічний день');
+    if (L.comp && !P.comp) msg.push(L.planet.held === 'comp' ? 'на небі стоїть планета-компаньйон' : 'на небі — планета-компаньйон');
+    const H = L.planet.held;
+    if (H !== P.planet.held) { if (H === 'sun') msg.push('вічний день'); else if (H === 'moon') msg.push('місяць стоїть на небі'); else if (H === 'res') msg.push('доба — 2 роки (резонанс 3:2)'); }
     if (L.tanom && !P.tanom) msg.push('часові аномалії');
     if (L.anom.rev && !P.anom.rev) msg.push('зворотна гравітація');
     if (Math.abs(L.phys.time / P.phys.time - 1) > 0.3) msg.push(`час тече ${L.phys.time > P.phys.time ? 'швидше' : 'повільніше'} (×${L.phys.time.toFixed(1).replace('.', ',')})`);
@@ -979,7 +980,15 @@ function boot(renderer) {
     const op = showSt ? '1' : '0';
     if (hudCache.stamOp !== op) { hudCache.stamOp = op; $('stam').style.opacity = op; }
     if (showSt) { $('stamArc').setAttribute('stroke-dashoffset', (87.96 * (1 - stam)).toFixed(1)); $('stam').classList.toggle('low', stam < 0.25); }
-    if (showDebug && now - (hudCache.dbgT || 0) > 250) { hudCache.dbgT = now; frameStats(); $('debug').textContent = debugText(g, perf, renderer.meshCount, camera, renderer.R, renderer.lodCounts); }
+    if (showDebug && now - (hudCache.dbgT || 0) > 250) { hudCache.dbgT = now; frameStats(); showDebugText(debugText(g, perf, renderer.meshCount, camera, renderer.R, renderer.lodCounts)); }
+  }
+
+  // Панель F3: рядок — окремий блок (довгий переноситься з відступом під значення), блоки перевикористовуються
+  function showDebugText(s) {
+    const el = $('debug'), lines = s.split('\n');
+    while (el.children.length < lines.length) el.appendChild(document.createElement('div'));
+    while (el.children.length > lines.length) el.lastChild.remove();
+    for (let i = 0; i < lines.length; i++) if (el.children[i].textContent !== lines[i]) el.children[i].textContent = lines[i];
   }
 
   // Ctrl+Shift+C — увесь текст панелі F3 у буфер обміну (той самий, що на екрані, свіжий), щоб ділитися текстом, а не знімком

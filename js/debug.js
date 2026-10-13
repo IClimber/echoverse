@@ -5,7 +5,7 @@ import { physOf, STRANGE_NAMES, TIER_NAMES, FAM_NAMES, LEVEL } from './universe.
 import { BIOMES } from './gen/biomes.js';
 import { regionAt, speciesOf, FORMS } from './gen/flora.js';
 import { jumpHeight } from './player.js';
-import { dayPhase, clockStr, yearPhase } from './sky.js';
+import { dayPhase, clockStr, yearPhase, starsText, heldText } from './sky.js';
 import { weatherAt, WEATHER_NAMES } from './weather.js';
 import { LOD_ON } from './camera.js';
 import { LAMP } from './lamp.js';
@@ -57,18 +57,19 @@ const f1 = (v) => v.toFixed(1).replace('.', ','), f2 = (v) => v.toFixed(2).repla
 const f0 = (v) => v.toFixed(0).replace('-', '−'), pc = (v) => (v >= 0.1 ? (v * 100).toFixed(0) : (v * 100).toPrecision(1)).replace('.', ',') + ' %';
 const sg = (v, d = 1) => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(d).replace('.', ',');
 const atm = (P) => (P < 0.01 ? P.toPrecision(1) : P < 0.1 ? P.toFixed(3) : P < 10 ? P.toFixed(2) : P.toFixed(0)).replace('.', ',');
-const CLS = 'MKGFAB', COMP = ['', 'газовий гігант', "кам'яна", 'крижана'], dg = (r) => (r * 180 / Math.PI).toFixed(0) + '°';
-// Зоря: T, клас, світність, радіус, маса (сонячні), відстань (земні для цієї світності), велика піввісь (а. о.), інсоляція; інші
+const COMP = ['', 'газовий гігант', "кам'яна", 'крижана'], dg = (r) => (r * 180 / Math.PI).toFixed(0) + '°';
+// Зорі: кожна — роль, клас, T, маса, радіус, світність (сонячні), відстань (а. о.), потік (земних і відносно найяскравішої);
+// орбіта планети — відстань (земні для світності групи), велика піввісь, інсоляція, альбедо
 function starLine(L) {
-  const S = L.star, x = S.extra.map((e) => `${CLS[e.cls]} ${f0(e.T)} K ${e.close ? 'тісна' : `далека (${f0(e.a2)} відст.)`}`);
-  return `${CLS[S.cls]} ${f0(S.T)} K, L ${f2(S.L)}, R ${f2(S.R)}, M ${f2(S.M)}, активність ${f1(S.act)} · відстань ${f2(S.d)} (${f2(S.a)} а. о.), інсоляція ${f2(S.S)} земної, альбедо ${f2(S.albedo)}${x.length ? ' · ще: ' + x.join(', ') : ''}`;
+  const S = L.star;
+  return `${starsText(L).join(' · ')} · орбіта ${f2(S.d)} (${f2(S.a)} а. о.), інсоляція ${f2(S.S)} земної, альбедо ${f2(S.albedo)}, активність ${f1(S.act)}`;
 }
 // Планета: радіус, густина, тяжіння (база й тут), маса, друга космічна, обертання (доба гри), нахил, широта, рік, сезон
 function planetLine(L, g) {
   const P = L.planet, Y = L.sky.year, ph = Y && !P.lock ? yearPhase(L, g.clock || 0) : null;
   return `R ${f0(P.R * 6371)} км, ρ ${f2(P.rho * 5.51)} г/см³, g₀ ${f2(P.g0)} → ${f2(L.grav)} g (відцентрова ${pc(P.cent)}), M ${f2(P.M)} M⊕, v₂ ${f1(P.vEsc)} км/с`
     + ` · обертання ${f1(P.rot)} год (мін. ${f1(P.Pmin)}), нахил ${f0(P.obliq)}°, широта ${f0(P.lat)}°`
-    + (P.lock ? ' · припливне захоплення' : ` · рік ${f0(P.year)} хв${ph !== null ? `, фаза ${f2(ph)}` : ''}`);
+    + ` · рік ${f0(P.year)} хв${ph !== null ? `, фаза ${f2(ph)}` : ''}${heldText(L) ? ' · ' + heldText(L) : ''}`;
 }
 // Повітря: тиск, склад, μ, густина, висота однорідної атмосфери, парникова товща, температури, градієнт
 function airLine(L) {

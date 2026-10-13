@@ -6,14 +6,13 @@ import { lawsOf, physOf, STRANGE_NAMES, TIER_NAMES } from './universe.js';
 import { hashStr } from './rng.js';
 import { fmtN } from './debug.js';
 import { skyOptics } from './optics.js';
-import { starColor, skyState, clockStr, dayPhase } from './sky.js';
+import { starColor, skyState, clockStr, dayPhase, starsText, heldText } from './sky.js';
 import { physAt3 } from './worldphys.js';
 import { tempAt } from './climate.js';
 import { weatherAt, WEATHER_NAMES } from './weather.js';
 
 const TIER_COL = ['#5d6b86', '#e0c060', '#f08a4b', '#ff4d6d'];
 const WCOL = ['#8fb8e8', '#9aa3b0', '#4f79b8', '#3c3f8f', '#c9ccd2', '#d6a65a'];
-const CLS = 'MKGFAB';
 const el = (tag, css = '', txt = '') => { const e = document.createElement(tag); if (css) e.style.cssText = css; if (txt) e.textContent = txt; return e; };
 const fx = (v, d = 2) => v.toFixed(d).replace('.', ',').replace('-', '−');
 const css = (c) => `rgb(${c.map((v) => Math.max(0, Math.min(255, v)) | 0).join(',')})`;
@@ -67,10 +66,10 @@ function card(L, seedText) {
   const S = L.star, P = L.planet, A = L.air, C = L.clim, ph = physOf(L);
   const rows = [
     ['адреса', `зерно «${seedText}», глибина ${L.d}, всесвіт ${fmtN(L.n)} · ${STRANGE_NAMES[L.strange.cls]}${Object.keys(L.tiers).length ? ': ' + Object.entries(L.tiers).map(([k, t]) => `${k} — ${TIER_NAMES[t]}`).join(', ') : ''}`],
-    ['зоря', `${CLS[S.cls]} ${S.T.toFixed(0)} K, L ${fx(S.L)} сонячних, R ${fx(S.R)}, M ${fx(S.M)}${S.extra.length ? ' · ще ' + S.extra.map((e) => `${CLS[e.cls]} ${e.T.toFixed(0)} K ${e.close ? 'тісна' : 'далека'}`).join(', ') : ''}`],
+    ['зорі', starsText(L).join(' · ')],
     ['орбіта', `відстань ${fx(S.d)} земної (${fx(S.a)} а. о.), інсоляція ${fx(S.S)} земної, рік ${P.lock ? '—' : (P.year / 400).toPrecision(3).replace('.', ',') + ' земного'}`],
     ['планета', `R ${(P.R * 6371).toFixed(0)} км, ρ ${fx(P.rho * 5.51)} г/см³, M ${fx(P.M)} M⊕, g ${fx(L.grav)} (${fx(L.grav * 9.81)} м/с²), v₂ ${fx(P.vEsc, 1)} км/с`],
-    ['обертання', P.lock ? 'припливне захоплення: вічний день' : `${fx(P.rot, 1)} год (доба гри ${fx(L.sky.dayMin, 1)} хв), нахил ${P.obliq.toFixed(0)}°, широта ${P.lat.toFixed(0)}°`],
+    ['обертання', `${P.lock ? 'вічний день' : `${fx(P.rot, 1)} год (доба гри ${fx(L.sky.dayMin, 1)} хв)`}, нахил ${P.obliq.toFixed(0)}°, широта ${P.lat.toFixed(0)}°${heldText(L) ? ' · ' + heldText(L) : ''}`],
     ['повітря', A.vacuum ? `майже немає (${A.pressure.toPrecision(2)} атм)` : `${fx(A.pressure)} атм, ${Object.entries(A.comp).filter(([, v]) => v >= 0.001).map(([k, v]) => `${k} ${fx(v * 100, 1)} %`).join(', ')}; ${A.gasName}; ρ ${fx(A.rho)} кг/м³, H ${A.H.toFixed(0)} м`],
     ['температура', `рівноважна ${fx(C.Teq - 273.15, 0)} °C, поверхні ${fx(C.Ts - 273.15, 0)} °C, ділянки ${fx(C.Tpatch - 273.15, 0)} °C; ${(C.lapse * 1000).toFixed(0)} °C/км, доба ±${C.Ad.toFixed(0)}, сезон ±${C.As.toFixed(0)}`],
     ['поле', `B ${fx(L.mag.B)} земного, сяйва ${(L.mag.k * 100).toFixed(0)} %, радіація ${(A.rad * 100).toFixed(0)} %, активність зорі ${fx(S.act, 1)}`],

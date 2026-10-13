@@ -511,16 +511,23 @@ export async function createScene(canvas, settings = {}) {
   // ---- небо: уніформи (sky-shader.js) через dev.scope ----
   const sc = dev.scope, U = (k) => sc.resolve(k);
   const wrapN = (v) => ((v % 256) + 256) % 256;      // період шуму неба (sky-shader.js): зсув хмар — без великих чисел
-  const SU = Object.fromEntries(['uZen', 'uHor', 'uMain', 'uDusk', 'uSun[0]', 'uSunCol[0]', 'uMoon[0]', 'uMoonCol[0]', 'uMoon2[0]', 'uNSun', 'uNMoon', 'uDay', 'uStars', 'uCel', 'uRing', 'uRingCol', 'uPole', 'uCloud', 'uCloudCol', 'uFlash', 'uAur', 'uAurCol', 'uAurE', 'uCloudC', 'uCloudMap', 'uMet[0]', 'uMetB[0]', 'uNMet', 'eco_bakeK'].map((k) => [k, U(k)]));
-  const sun4 = new Float32Array(12), sunC = new Float32Array(12), moon4 = new Float32Array(16), moonC = new Float32Array(16), moon2 = new Float32Array(16), cel = new Float32Array(9);
+  const SU = Object.fromEntries(['uZen', 'uHor', 'uMain', 'uDusk', 'uSun[0]', 'uSunCol[0]', 'uMoon[0]', 'uMoonCol[0]', 'uMoon2[0]', 'uMoonA[0]', 'uMoonB[0]', 'uNSun', 'uNMoon', 'uDay', 'uStars', 'uCel', 'uRing', 'uRingCol', 'uPole', 'uCloud', 'uCloudCol', 'uFlash', 'uAur', 'uAurCol', 'uAurG', 'uFwd', 'uCloudC', 'uCloudMap', 'uMet[0]', 'uMetB[0]', 'uNMet', 'eco_bakeK'].map((k) => [k, U(k)]));
+  const sun4 = new Float32Array(12), sunC = new Float32Array(12), moon4 = new Float32Array(16), moonC = new Float32Array(16), moon2 = new Float32Array(16), moonA = new Float32Array(16), moonB = new Float32Array(16), cel = new Float32Array(9);
   const c3 = (v) => [v[0] / 255, v[1] / 255, v[2] / 255];
   function setSky(st, bakeK) {
-    SU.uZen.setValue(c3(st.zenith)); SU.uHor.setValue(c3(st.horizon)); SU.uMain.setValue([...st.suns[0].dir]);
+    SU.uZen.setValue(c3(st.zenith)); SU.uHor.setValue(c3(st.horizon)); SU.uMain.setValue([...st.main.dir]);
     SU.uDusk.setValue([...c3(st.duskCol), st.dusk]);
-    sun4.fill(0); sunC.fill(0); moon4.fill(0); moonC.fill(0); moon2.fill(0);
-    st.suns.forEach((s, i) => { sun4.set([...s.dir, s.size], i * 4); sunC.set([...c3(s.col), s.bright], i * 4); });
-    st.moons.forEach((m, i) => { if (i > 3) return; moon4.set([...m.dir, m.size], i * 4); moonC.set([...c3(m.col), m.comp || 0], i * 4); moon2.set([...c3(m.col2 || m.col), m.eclipse || 0], i * 4); });
+    sun4.fill(0); sunC.fill(0); moon4.fill(0); moonC.fill(0); moon2.fill(0); moonA.fill(0); moonB.fill(0);
+    // сонця й тіла — від дальшого до ближчого (сонця — а. о., тіла — радіуси планети; тіла завжди ближче за сонця): ближче
+    // закриває дальше (шейдер малює по черзі, непрозорими); диск і ореол сонця — колір його прямого світла (lit)
+    [...st.suns].sort((a, b) => (b.dist ?? 0) - (a.dist ?? 0)).forEach((s, i) => { sun4.set([...s.dir, s.size], i * 4); sunC.set([...c3(s.lit || s.col), s.bright], i * 4); });
+    [...st.moons].sort((a, b) => b.D - a.D).forEach((m, i) => {
+      if (i > 3) return;
+      moon4.set([...m.dir, m.size], i * 4); moonC.set([...c3(m.col), m.comp || 0], i * 4); moon2.set([...c3(m.col2 || m.col), m.eclipse || 0], i * 4);
+      moonA.set(m.fa || st.pole, i * 4); moonB.set(m.fb || [1, 0, 0], i * 4);
+    });
     SU['uSun[0]'].setValue(sun4); SU['uSunCol[0]'].setValue(sunC); SU['uMoon[0]'].setValue(moon4); SU['uMoonCol[0]'].setValue(moonC); SU['uMoon2[0]'].setValue(moon2);
+    SU['uMoonA[0]'].setValue(moonA); SU['uMoonB[0]'].setValue(moonB);
     SU.uNSun.setValue(st.suns.length); SU.uNMoon.setValue(Math.min(4, st.moons.length));
     SU.uDay.setValue(st.day); SU.uStars.setValue([st.stars, st.starHue]);
     cel.set(st.cel); SU.uCel.setValue(cel);
@@ -529,8 +536,9 @@ export async function createScene(canvas, settings = {}) {
     SU.uRingCol.setValue(rg ? c3(rg.col) : [0, 0, 0]); SU.uPole.setValue([...st.pole]);
     const cl = st.cloud || { k: 0, off: [0, 0], dark: 0, col: [255, 255, 255] };
     SU.uCloud.setValue([cl.k, wrapN(cl.off[0]), wrapN(cl.off[1]), cl.dark]); SU.uCloudCol.setValue(c3(cl.col)); SU.uFlash.setValue(st.flash || 0);
-    const au = st.aurora || { dir: [0, 1], k: 0, t: 0, col: [0, 0, 0] };
-    SU.uAur.setValue([au.dir[0], au.dir[1], au.k, au.t % 25600]); SU.uAurCol.setValue(c3(au.col)); SU.uAurE.setValue(au.e0 ?? 0.4);   // час: ×0,01 / 0,02 / 0,05 — кратні періоду шуму 256
+    const au = st.aurora || { pole: [0, 1], k: 0, t: 0, col: [0, 0, 0], dist: 0, R: 6371, width: 150 };
+    SU.uAur.setValue([au.pole[0], au.pole[1], au.k, au.t % 25600]); SU.uAurCol.setValue(c3(au.col));   // час: ×0,01 / 0,02 / 0,05 / 0,1 — кратні періоду шуму 256
+    SU.uAurG.setValue([au.dist, au.R, au.width, 0]);
     SU.eco_bakeK.setValue(bakeK);
   }
   // Карта часових аномалій (М10): ваги (повільна, швидка) 64×64 на 256 м навколо цілі, кут — на ґратці 4 м (зсув не
@@ -815,10 +823,11 @@ export async function createScene(canvas, settings = {}) {
       } else if (lampL && lampL.e.enabled) lampL.set({ enabled: false });
       const bakeK = Lt.amb / Math.max(1e-4, 0.6 * lum(sk.zenith) + 0.4 * lum(sk.horizon));
       setSky(sk, bakeK);
+      SU.uFwd.setValue([-b.u[0], -b.u[1], -b.u[2]]);   // погляд камери: диски світил — у площині кадру (sky-shader.js)
       cloudMap(laws, st.clock || 0, t[0] + view.eye[0], t[1] + view.eye[1], performance.now());
       meteors(laws, st.clock || 0, 1 - sk.day);
       bolt(st.bolt, st.clock || 0, [t[0] + view.eye[0], t[1] + view.eye[1], t[2] + view.eye[2]]);
-      const cl = sk.cloud ? sk.cloud.k : 0, d0 = sk.suns[0].dir;
+      const cl = sk.cloud ? sk.cloud.k : 0, d0 = sk.main.dir;
       sig.set([d0[0], d0[1], d0[2], ...c3(sk.zenith), ...c3(sk.horizon), sk.dusk, cl, Math.log2(bakeK + 1e-6) / 10]);
       sky.maybeBake(sig, fresh || forceBake); forceBake = false;
       // Туман (лінійний, PlayCanvas; колір — екранний, рушій сам переводить). Згори — без туману: глибина від ока ~400

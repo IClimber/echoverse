@@ -319,6 +319,7 @@ export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
     }
     hr2 = (w0 - p.vx) ** 2 + (w1 - p.vy) ** 2;
     if (ph.tilt) { p.vx += ph.tilt[0] * GRAVITY * dt; p.vy += ph.tilt[1] * GRAVITY * dt; }
+    p.tiltV = null;
   } else if (swimFast) {
     // біг під рідиною: уздовж погляду (3D), прискорення 8/с
     const lk = ctl.look && p.dive ? ctl.look : ctl.look ? [ctl.look[0], ctl.look[1], 0] : [dirX, dirY, 0];   // на поверхні — уздовж неї
@@ -347,7 +348,23 @@ export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
       p.windPush = wl > th;
       if (wl > th) { tvx += wind[0] / wl * (wl - th); tvy += wind[1] / wl * (wl - th); }
     } else p.windPush = false;
-    if (ph.tilt) { tvx += ph.tilt[0] * 9; tvy += ph.tilt[1] * 9; }
+    // горизонтальне тяжіння (нахил плями, приплив) на землі — як схил з tan φ = |tilt| / g: тертя спокою тримає, поки
+    // tan φ ≤ межі сповзання (tanS); понад — розганяє різницею (тертя ковзання — та сама межа), інакше набрана швидкість
+    // гасне тертям. У рідині — ні: рідина в тому самому полі врівноважена, тіло з густиною ≈ рідини — теж. До 13.10.2026 —
+    // сталий знос 9·tilt м/с без тертя: приплив компаньйона 1,5 % g тягнув гравця по рівному на ~0,14 м/с
+    let tv = surf === null ? p.tiltV : null;
+    if (surf === null) {
+      const tl = ph.tilt ? Math.hypot(ph.tilt[0], ph.tilt[1]) : 0, hold = Math.max(0, ph.g) * tanS(mu, ph), ex = tl - hold;
+      if (ex > 0) {
+        tv = tv || [0, 0];
+        tv[0] += ph.tilt[0] / tl * ex * GRAVITY * dt; tv[1] += ph.tilt[1] / tl * ex * GRAVITY * dt;
+      } else if (tv) {
+        const l = Math.hypot(tv[0], tv[1]), k = Math.max(0, l - (hold - tl) * GRAVITY * dt) / (l || 1);
+        tv = k > 0 ? [tv[0] * k, tv[1] * k] : null;
+      }
+      if (tv) { tvx += tv[0]; tvy += tv[1]; }
+    }
+    p.tiltV = tv;
     if (p.slide) {
       // сповзання: прискорення вниз схилом g·(sin θ − cos θ·tan θs) (тертя ковзання — те саме, що межа), по горизонталі
       // × cos θ; керування — ×0,3

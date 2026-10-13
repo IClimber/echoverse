@@ -3,7 +3,7 @@
 import { lawsOf, STRANGE_NAMES, TIER_NAMES, FAM_NAMES } from './universe.js';
 import { tile, genChunk, digest, T_WATER, T_ICE, T_LUSH, T_DRY, T_DESERT, O_TREE, O_ROCK, O_FLOAT, O_COVER } from './gen/chunk.js';
 import { regionAt, speciesOf, pickSpecies, groundTint } from './gen/flora.js';
-import { GOLD, SPOTS } from './golden.js';
+import { GOLD, SPOTS, LIB_GOLD, libDigest } from './golden.js';
 import { hashStr } from './rng.js';
 import { fmtN } from './debug.js';
 import { skyState, bodiesOf } from './sky.js';
@@ -90,7 +90,7 @@ export function runStrip() {
         L.land.insel.prob >= 0.3 && 'останці', L.land.karst.share >= 0.15 && 'карст', L.land.rift.share >= 0.2 && 'рифти',
         L.land.ero.bias <= -0.35 && 'рівнини', L.land.ero.bias >= 0.35 && 'порізано'].filter(Boolean);
       const odd = Object.entries(L.tiers).filter(([, t]) => t >= 2).map(([k, t]) => `${k} (${TIER_NAMES[t]})`);
-      const St = L.star, P = L.air.pressure, phen = [L.comp && 'компаньйон', L.anom.rev && 'зворотна гравітація', L.tanom && 'часові аномалії'].filter(Boolean);
+      const St = L.star, P = L.air.pressure, phen = [L.comp && (L.planet.held === 'comp' ? 'компаньйон стоїть' : 'компаньйон'), L.planet.held === 'moon' && 'місяць стоїть', L.planet.held === 'res' && 'резонанс 3:2', L.anom.rev && 'зворотна гравітація', L.tanom && 'часові аномалії'].filter(Boolean);
       cap.textContent = `${d}:${fmtN(n)} · ${STRANGE_NAMES[L.strange.cls]}${odd.length ? ': ' + odd.join(', ') : ''} · зоря ${'MKGFAB'[St.cls]} ${St.T.toFixed(0)} K${St.n > 1 ? ` (+${St.n - 1})` : ''} · ${L.grav.toFixed(L.grav < 0.1 ? 3 : 2)} g · ${(L.clim.Tpatch - 273.15).toFixed(0)} °C · ${L.air.vacuum ? 'без повітря' : `${P < 0.1 ? P.toPrecision(1) : P.toFixed(1)} атм, ${L.air.gasName.split(' ')[0]}`}${phen.length ? ' · ' + phen.join(', ') : ''} · доба ${S.lock ? 'вічна' : S.dayMin.toFixed(0) + ' хв'} · сонць ${S.suns.length}, місяців ${S.moons.length}${S.rings ? ', кільця' : ''}${L.phys.friction < 1 ? ' · ковзко' : ''}${L.phys.bounce ? ' · пружно' : ''}${L.phys.time !== 1 ? ` · час ×${L.phys.time.toFixed(1)}` : ''} · планета ${(L.planet.R * 6371).toFixed(0)} км · ${L.liquid.name}${L.liquid.kind === 0 ? ' ' + L.liquid.tC + '°' : ''} · море ${L.seaE.toFixed(2)} · рельєф ${L.amp} · t ${L.temp.toFixed(2)} · вол ${L.wet.toFixed(2)} · біомів ${mm.biomes}, видів ${mm.species}${forms.length ? ' · ' + forms.join(', ') : ''}`;
       fig.append(skyBar(L), mm.cv, cap);
       wrap.append(fig);
@@ -103,7 +103,10 @@ export function runStrip() {
   const det = document.createElement('p');
   det.id = 'det';
   det.style.cssText = `font-size:20px;font-weight:600;color:${bad ? '#ff6b5e' : '#7ee0c3'}`;
-  det.textContent = bad ? `Детермінізм: ${bad} з 12 відбитків НЕ збігаються з еталоном` : 'Детермінізм: усі 12 відбитків збігаються з еталоном';
+  const lib = libDigest(), libOk = lib === LIB_GOLD;   // точна математика (stdlib) — до біта та сама, що в Node
+  if (!libOk) det.style.color = '#ff6b5e';
+  det.textContent = (bad ? `Детермінізм: ${bad} з 12 відбитків НЕ збігаються з еталоном` : 'Детермінізм: усі 12 відбитків збігаються з еталоном')
+    + (libOk ? ' · математика (stdlib) — до біта' : ` · математика (stdlib) НЕ збігається: ${lib} замість ${LIB_GOLD}`);
   root.prepend(det);
   const note = document.createElement('p');
   note.textContent = `зерно «${seedText}», центр (${x0 + SIZE / 2}, ${y0 + SIZE / 2}), ${(performance.now() - t0).toFixed(0)} мс`;

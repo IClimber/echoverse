@@ -1,6 +1,6 @@
 // flora-stand.js — стенд «види рослин» (index.html?flora[&seed=…&d=…&n=…&far&small]): галерея видів, що трапляються
 // в одному всесвіті (області навколо центру карти), кожен — на клаптику землі свого біому, з підписом.
-// Перевірка «чи дивує»: види мають бути різні за будовою, а не перефарбовані. far — спрощені (для далечі), small — малі.
+// Види мають бути різні за будовою, а не перефарбовані. far — спрощені (для далечі), small — малі.
 import { createApp, pc } from './engine/graphics/app.js';
 import { createMaterials } from './engine/graphics/materials.js';
 import { createLights } from './engine/graphics/lights.js';

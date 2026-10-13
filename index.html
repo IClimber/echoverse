@@ -51,8 +51,11 @@
   #toast { position: absolute; left: 50%; top: 18px; transform: translateX(-50%); transition: opacity .3s; }
   #debug {
     position: fixed; right: 12px; top: 12px; margin: 0; font: 12px/1.45 ui-monospace, Menlo, Consolas, monospace;
-    background: #000a; padding: 8px 10px; border-radius: 6px; pointer-events: none; white-space: pre;
+    background: #000a; padding: 8px 10px; border-radius: 6px; pointer-events: none;
+    max-width: min(120ch, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow: hidden;
   }
+  /* рядок F3: довгий переноситься, продовження — під значенням, а не під міткою (мітка — 11 знаків) */
+  #debug div { white-space: pre-wrap; overflow-wrap: anywhere; padding-left: 11ch; text-indent: -11ch; }
   #flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; transition: opacity .45s ease-out; }
   #flash.on { opacity: .85; transition: none; }
   #loading { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); }
@@ -116,7 +119,7 @@
   <svg id="stam" viewBox="0 0 34 34" style="opacity: 0"><circle class="bg" cx="17" cy="17" r="14"/><circle class="fg" id="stamArc" cx="17" cy="17" r="14" stroke-dasharray="87.96 87.96" stroke-dashoffset="0"/></svg>
   <div id="mouseHint" class="chip" hidden>Клацни по світу — і мишею керуй камерою (Esc — відпустити)</div>
 </div>
-<pre id="debug" hidden></pre>
+<div id="debug" hidden></div>
 <div id="flash"></div>
 <div id="loading" class="chip" hidden>Генеруємо світ…</div>
 

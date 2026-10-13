@@ -3,10 +3,12 @@
 // екранні, тож ^2,2). З ECO_BAKE (запікання): без дисків і ореолів сонць, місяців, зір, сяйва, спалаху; нижче обрію —
 // колір обрію × 0,3 (земля відбиває менше за небо); × eco_bakeK (калібрування сили розсіяного, js/scene.js).
 // Уніформи — через dev.scope (js/scene.js): uZen, uHor, uMain, uDusk (rgb, сила), uSun[3] (напрям, кутовий радіус),
-// uSunCol[3] (колір, яскравість), uMoon[4] (місяці й компаньйон), uMoonCol[4] (rgb, тип: 0 — місяць, 1 — газовий гігант,
-// 2 — кам'яний, 3 — крижаний), uMoon2[4] (другий колір візерунка, затемнення 0…1), uNSun, uNMoon, uDay, uStars (яскравість, відтінок),
+// uSunCol[3] (колір прямого світла зорі — диск її кольору, яскравість), uMoon[4] (місяці й компаньйон), uMoonCol[4] (rgb, тип: 0 — місяць, 1 — газовий гігант,
+// 2 — кам'яний, 3 — крижаний), uMoon2[4] (другий колір візерунка, затемнення 0…1), uMoonA[4] / uMoonB[4] (вісь і нульовий
+// меридіан тіла: візерунок компаньйона — у його системі — повернутий до нас одним боком чи крутиться), uNSun, uNMoon, uDay, uStars (яскравість, відтінок),
 // uCel (обертання зоряного неба), uRing (r0, r1, непрозорість, смуг), uRingCol, uPole, uCloud (хмарність, зсув x, y,
-// темність), uCloudCol, uFlash, uAur (напрям на овал x, y, сила, час), uAurCol, uAurE (висота середини сяйва), uCloudC
+// темність), uCloudCol, uFlash, uAur (напрям на магнітний полюс x, y, сила, час), uAurCol, uAurG (відстань до середини овалу вздовж uAur.xy, км;
+// радіус планети, км; півширина овалу, км), uFwd (погляд камери — диски світил у площині кадру), uCloudC
 // (зсув камери від центру карти хмар x, y, стиснення карти A, висота шару хмар над камерою; м), uCloudMap (хмарність
 // 64×64; точка шару хмар p — у клітинці q = p / (|p| + A): біля зеніту дрібно, до обрію — грубіше, край карти — обрій),
 // uMet[4] / uMetB[4] (метеор: початок і поступ, кінець і яскравість), uNMet, eco_bakeK.
@@ -25,6 +27,8 @@ uniform vec4 uSunCol[3];
 uniform vec4 uMoon[4];
 uniform vec4 uMoonCol[4];
 uniform vec4 uMoon2[4];
+uniform vec4 uMoonA[4];
+uniform vec4 uMoonB[4];
 uniform int uNSun;
 uniform int uNMoon;
 uniform float uDay;
@@ -38,7 +42,8 @@ uniform vec3 uCloudCol;
 uniform float uFlash;
 uniform vec4 uAur;
 uniform vec3 uAurCol;
-uniform float uAurE;
+uniform vec4 uAurG;
+uniform vec3 uFwd;
 uniform vec4 uCloudC;
 uniform sampler2D uCloudMap;
 uniform vec4 uMet[4];
@@ -53,11 +58,51 @@ float ecoNoise(vec2 p) {
   return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 float ecoFbm(vec2 p) { float v = 0.0, a = 0.5; for (int i = 0; i < 5; i++) { v += a * ecoNoise(p); p = p * 2.0 + 17.0; a *= 0.5; } return v; }
+float ecoN1(float x) { float i = floor(x), f = fract(x); return mix(ecoHashN(vec2(i, 3.7)), ecoHashN(vec2(i + 1.0, 3.7)), f * f * (3.0 - 2.0 * f)); }
+// Диск світила (o — центр, s — кутовий радіус): xyz — напрям e, у якому шукати точку тіла, w — l2 = sin²θ / sin²s (θ — кут
+// e від центру; 1 — край, > 1 — поза). Великі тіла (компаньйон, s > 0,25) — справжня куля: e = d, вигляд не залежить від
+// того, куди дивишся (13.10.2026, скарга: смуги й освітлена частина компаньйона радіусом 54° «пливли» з поглядом —
+// білборд такого розміру росте й ковзає відносно ландшафту). Малі (сонця, місяці, s < 0,15) — «білборд», паралельний
+// площині кадру (uFwd — погляд камери): прямолінійна перспектива на краях кадру розтягує диск за кутом у 1/cos θ разів
+// уздовж радіуса екрана, а білборд у кадрі — завжди коло; e — напрям, що дав би той самий зсув, якби дивились прямо на
+// тіло (зсув у площині, повернутий з uFwd на o). Центр далі ~65° від осі (поза кадром) — плавно до справжньої кулі.
+// Білборд не виходить за кутовий радіус диска (упоперек — рівно s, уздовж — менше), тож далі 1,3·s — одразу «поза»
+vec4 ecoDisk(vec3 d, vec3 o, float s) {
+  float co = dot(d, o), fo = dot(o, uFwd);
+  if (co < cos(min(s * 1.3, 1.55))) return vec4(d, 2.0);
+  vec3 e = d;
+  float w = smoothstep(0.2, 0.45, fo) * smoothstep(0.25, 0.15, s);
+  if (w > 0.0) {
+    vec3 q = d * (fo / max(dot(d, uFwd), 1e-4)) - o;
+    q -= dot(q, o) / (1.0 + fo) * (uFwd + o);
+    e = normalize(mix(d, normalize(o + q), w));
+  }
+  float ce = dot(e, o), ss = sin(s);
+  return vec4(e, ce > 0.0 ? (1.0 - ce * ce) / (ss * ss) : 2.0);
+}
+// Нормаль кулі в точці, де її перетинає промінь e (l2 < 1): відстань до центру D = 1 / sin s (радіусів), перетин
+// t = D·cos θ − √(1 − l2) — видно лише ковпак до 90° − s від центру (у велетня — не півкулю)
+vec3 ecoBodyN(vec3 e, vec3 o, float s, float l2) { float D = 1.0 / sin(s); return normalize((D * dot(e, o) - sqrt(max(0.0, 1.0 - l2))) * e - D * o); }
+// Край тіла: згладжування на 5 % радіуса, не ширше 0,0075 рад (до 13.10.2026 — частка радіуса: край компаньйона в 54° —
+// розмитий на ~4°)
+float ecoEdge(float l2, float s) { return smoothstep(0.0, 0.05 * min(s, 0.15), s - asin(min(1.0, sqrt(l2) * sin(s)))); }
 vec3 ecoSky(vec3 d) {
   float up = d.z, above = smoothstep(-0.02, 0.01, up);
   vec3 c = up < 0.0 ? uHor * (1.0 + up * 0.35) : mix(uHor, uZen, smoothstep(0.0, 0.55, up));
   float g = max(dot(d, uMain), 0.0);
   c += uDusk.rgb * uDusk.a * (pow(g, 5.0) * 0.6 + pow(g, 40.0) * 0.4) * smoothstep(-0.25, 0.05, up);
+#ifndef ECO_BAKE
+  vec3 c0 = c;                                   // небо перед світилами (без зір)
+#endif
+  float cover = 0.0;
+  if (uCloud.x > 0.01 && up > 0.0) {
+    // хмарність — з карти погоди в точці шару хмар (uCloudC.w над камерою); карта стиснена з відстанню й сягає обрію
+    vec2 p = uCloudC.xy + d.xy * (uCloudC.w / max(up, 0.03));
+    float cov = texture2D(uCloudMap, p / (length(p) + uCloudC.z) * 0.5 + 0.5).r;
+    vec2 uv = d.xy / (up + 0.08) * 0.9 + uCloud.yz;
+    float f = ecoFbm(uv);
+    cover = cov > 0.01 ? smoothstep(1.02 - cov * 0.75, 1.25 - cov * 0.7, f + 0.25) * smoothstep(0.0, 0.12, up) : 0.0;
+  }
 #ifndef ECO_BAKE
   if (uStars.x > 0.01 && up > -0.05) {
     vec3 q = d * uCel, aq = abs(q);
@@ -74,6 +119,39 @@ vec3 ecoSky(vec3 d) {
       c += sc * br * uStars.x * smoothstep(-0.05, 0.12, up);
     }
   }
+#endif
+#ifndef ECO_BAKE
+  // Сонця — за всім, потім місяці й компаньйон (з CPU — від дальшого до ближчого) — непрозорі: закривають сонця, зорі
+  // й одне одного; перед тілом — лише світло неба (c0: розсіяне повітрям між оком і тілом — удень тіло бліде). Ореол
+  // сонця — розсіяння в атмосфері, тож поверх тіл (сила — яскравість сонця з затемненням: закрите — без ореолу); кільця
+  // планети, сяйва й метеори — теж ближче, далі. До 13.10.2026 тіло вдень було напівпрозорим, а на диску сонця —
+  // непрозорим: крізь компаньйон проступав контур сонця
+  vec3 glow = vec3(0.0);
+  float hide = 1.0 - cover * 0.85;
+  for (int i = 0; i < 3; i++) {
+    if (i >= uNSun) break;
+    float cs = dot(d, uSun[i].xyz), s = uSun[i].w, th2 = max(0.0, 2.0 * (1.0 - cs));
+    float disk = smoothstep(1.1, 0.85, ecoDisk(d, uSun[i].xyz, s).w);
+    vec3 sc = uSunCol[i].rgb;
+    c = mix(c, sc / max(max(sc.r, sc.g), max(sc.b, 0.001)), disk * above * hide);
+    glow += sc * uSunCol[i].a * (exp(-th2 / (s * s * 9.0)) * 0.45 * hide + exp(-th2 / (s * s * 90.0)) * 0.12) * above;
+  }
+  for (int i = 0; i < 4; i++) {
+    if (i >= uNMoon) break;
+    vec4 e = ecoDisk(d, uMoon[i].xyz, uMoon[i].w);
+    if (e.w < 1.0) {
+      vec3 n = ecoBodyN(e.xyz, uMoon[i].xyz, uMoon[i].w, e.w), fa = uMoonA[i].xyz, fb = uMoonB[i].xyz;
+      vec3 nb = vec3(dot(n, fb), dot(n, cross(fa, fb)), dot(n, fa));   // нормаль у системі тіла: візерунок обертається з ним
+      float lit = smoothstep(-0.05, 0.15, dot(n, uMain)), ty = uMoonCol[i].a;
+      vec3 mc = uMoonCol[i].rgb;
+      if (ty > 0.5 && ty < 1.5) mc = mix(mc, uMoon2[i].rgb, smoothstep(0.3, 0.7, 0.5 + 0.5 * sin(nb.z * 16.0 + ecoFbm(nb.xy * 4.0 + nb.z * 3.0) * 2.5)));
+      else if (ty > 1.5 && ty < 2.5) mc = mix(mc, uMoon2[i].rgb, smoothstep(0.48, 0.56, ecoFbm(nb.xy * 3.0 + nb.z * 5.0 + 3.0)));
+      else if (ty > 2.5) mc = mix(mc, uMoon2[i].rgb, 0.4 * smoothstep(0.45, 0.65, ecoFbm(nb.xy * 6.0 + nb.z * 2.0)));
+      mc = mix(mc, mc * vec3(0.35, 0.12, 0.08), uMoon2[i].a);
+      c = mix(c, mix(c0, mc * (0.14 + 0.86 * lit), 1.0 - 0.45 * uDay), ecoEdge(e.w, uMoon[i].w) * above);
+    }
+  }
+  c += glow;
 #endif
   if (uRing.z > 0.0) {
     float dp = dot(d, uPole);
@@ -92,13 +170,39 @@ vec3 ecoSky(vec3 d) {
   }
 #ifndef ECO_BAKE
   if (uAur.z > 0.01 && up > 0.0) {
-    vec2 h = normalize(d.xy + 1e-5);
-    float face = mix(smoothstep(-0.2, 0.7, dot(h, uAur.xy)), 1.0, smoothstep(0.6, 0.95, uAurE)), ang = atan(h.y, h.x);
-    float band = smoothstep(uAurE - 0.3, uAurE - 0.1, up) * (1.0 - smoothstep(uAurE + 0.1, uAurE + 0.45, up)) * smoothstep(0.0, 0.08, up);
-    float wave = ecoFbm(vec2(ang * 3.0 + uAur.w * 0.02, up * 1.5 + uAur.w * 0.01));
-    float rays = 0.55 + 0.45 * sin(ang * 70.0 + ecoFbm(vec2(ang * 9.0, uAur.w * 0.05)) * 12.0);
-    float a = face * band * smoothstep(0.42, 0.75, wave) * rays * uAur.z;
-    c += mix(uAurCol, uAurCol.bgr, smoothstep(0.2, 0.6, up)) * a * 0.9;
+    // Завіси в шарі ~100–255 км над планетою радіуса uAurG.y (км): промінь з ока перетинає сферу R + h на відстані
+    // t(h) = √(b² + 2Rh + h²) − b, b = R·up. Візерунок задано на «підніжжі» — точці, звідки силова лінія (нахил ~78°:
+    // на висоті h зсув 0,2·h до екватора) піднялась на h, тож вертикальні промені завіс у перспективі сходяться до
+    // магнітного зеніту (корона над головою), а не в зеніті. Поперек овалу (s, км від середини, + до полюса) — дуги
+    // кожні 90 км у межах півширини uAurG.z, зігнуті складками (~300–700 км); уздовж (w) — яскравість дуг (~250 км),
+    // нижній край (100–118 км) і промені (~2 км). Вигин, яскравість і край — раз на промінь у підніжжі на 120 км (великі
+    // масштаби); 10 кроків по висоті з тремтінням, густіше внизу (h = 95 + 160·u²: світіння — біля нижнього краю);
+    // довжина шляху в шарі — dt/dh = (R + h)/√…, ≤ 6 (біля обрію сяйво яскравіше). Дуга чи промінь, які промінь за крок
+    // проходить наскрізь, — їхнім середнім (0,161 і 0,38): без цього тонкі завіси на пологих променях — зерно тремтіння.
+    // Промінь, що на висотах 95, 150 і 255 км далі від овалу, ніж 1,5 півширини + 30 км, — без кроків (сяйво — смуга неба). До 13.10.2026 — візерунок за азимутом і висотою на небі: над головою сектори
+    // сходились в ідеальну зірку в зеніті, на азимуті ±π — шов
+    vec2 pd = uAur.xy, qd = vec2(-pd.y, pd.x);
+    float R = uAurG.y, W = uAurG.z, b = R * up, tm = uAur.w;
+    vec2 f0 = d.xy * (sqrt(b * b + 240.0 * R + 14400.0) - b) + pd * 4.0;
+    float w0 = dot(f0, qd);
+    float warp = (ecoNoise(vec2(w0 / 700.0 + tm * 0.01, 5.3)) * 0.65 + ecoNoise(vec2(w0 / 300.0 - tm * 0.02, 9.1)) * 0.35 - 0.5) * W;
+    float bright = 0.25 + 0.75 * smoothstep(0.25, 0.7, ecoNoise(vec2(w0 / 250.0 + tm * 0.02, 2.1)));
+    float hb = 100.0 + 18.0 * ecoN1(w0 / 40.0 + tm * 0.05), j = ecoHashN(d.xy * 1543.0 + d.z * 3571.0), acc = 0.0, top = 0.0;
+    float pp = dot(d.xy, pd), s0 = pp * (sqrt(b * b + 190.0 * R + 9025.0) - b) - uAurG.x, s1 = pp * (sqrt(b * b + 300.0 * R + 22500.0) - b) + 10.0 - uAurG.x;
+    float s2 = pp * (sqrt(b * b + 510.0 * R + 65025.0) - b) + 31.0 - uAurG.x, sm = W * 1.5 + 30.0;
+    if (min(min(s0, s1), s2) < sm && max(max(s0, s1), s2) > -sm) for (int i = 0; i < 10; i++) {
+      float u = (float(i) + j) * 0.1, h = 95.0 + 160.0 * u * u, dh = 32.0 * u, q = sqrt(b * b + 2.0 * R * h + h * h);
+      vec2 f = d.xy * (q - b) + pd * (h - 100.0) * 0.2;
+      float sc = dot(f, pd) - uAurG.x, env = smoothstep(W * 1.5, W * 0.5, abs(sc));
+      if (env <= 0.0) continue;
+      float dt = (R + h) / q, ray = ecoN1(dot(f, qd) / 2.0 + tm * 0.1);
+      float arc = mix(pow(0.5 + 0.5 * cos((sc + warp) * 0.0698), 12.0), 0.161, smoothstep(6.0, 25.0, abs((pp * dt + 0.2) * dh)));
+      ray = mix(0.12 + 0.88 * ray * ray, 0.38, smoothstep(2.0, 8.0, abs(dot(d.xy, qd) * dt * dh)));
+      float e = env * arc * ray * smoothstep(hb - 5.0, hb + 5.0, h) * exp(-(h - hb) / 45.0) * min(dt, 6.0) * dh * 0.1;
+      acc += e; top += e * smoothstep(170.0, 240.0, h);
+    }
+    float a = (1.0 - exp(-acc * 2.0)) * bright * uAur.z * smoothstep(0.0, 0.06, up);
+    c += mix(uAurCol, uAurCol.gbr * 0.8, top / max(acc, 1e-4)) * a * 0.9;
   }
   for (int i = 0; i < 4; i++) {
     if (i >= uNMet || up < 0.0) break;
@@ -107,45 +211,6 @@ vec3 ecoSky(vec3 d) {
     vec3 hd = normalize(mix(a, b, t)), tl = normalize(mix(a, b, max(0.0, t - 0.35))), ab = hd - tl;
     float s = clamp(dot(d - tl, ab) / max(dot(ab, ab), 1e-8), 0.0, 1.0), dist = length(d - (tl + ab * s));
     c += vec3(1.0, 0.95, 0.85) * uMetB[i].w * s * (1.0 - t * t) * smoothstep(0.003, 0.0, dist) * smoothstep(0.0, 0.1, up);
-  }
-#endif
-  float cover = 0.0;
-  if (uCloud.x > 0.01 && up > 0.0) {
-    // хмарність — з карти погоди в точці шару хмар (uCloudC.w над камерою); карта стиснена з відстанню й сягає обрію
-    vec2 p = uCloudC.xy + d.xy * (uCloudC.w / max(up, 0.03));
-    float cov = texture2D(uCloudMap, p / (length(p) + uCloudC.z) * 0.5 + 0.5).r;
-    vec2 uv = d.xy / (up + 0.08) * 0.9 + uCloud.yz;
-    float f = ecoFbm(uv);
-    cover = cov > 0.01 ? smoothstep(1.02 - cov * 0.75, 1.25 - cov * 0.7, f + 0.25) * smoothstep(0.0, 0.12, up) : 0.0;
-  }
-#ifndef ECO_BAKE
-  // сонця, потім місяці й компаньйон поверх (затемнення: диск місяця перед сонцем непрозорий)
-  float sunA = 0.0;
-  for (int i = 0; i < 3; i++) {
-    if (i >= uNSun) break;
-    float cs = dot(d, uSun[i].xyz), s = uSun[i].w, th2 = max(0.0, 2.0 * (1.0 - cs));
-    float disk = smoothstep(s * s * 1.1, s * s * 0.85, th2);
-    vec3 sc = uSunCol[i].rgb;
-    float hide = 1.0 - cover * 0.85;
-    c = mix(c, min(vec3(1.0), sc * 1.3 + 0.15), disk * above * hide);
-    c += sc * uSunCol[i].a * (exp(-th2 / (s * s * 9.0)) * 0.45 * hide + exp(-th2 / (s * s * 90.0)) * 0.12) * above;
-    sunA = max(sunA, disk);
-  }
-  for (int i = 0; i < 4; i++) {
-    if (i >= uNMoon) break;
-    float cs = dot(d, uMoon[i].xyz), s = uMoon[i].w;
-    if (cs > cos(s)) {
-      vec3 v = (d - uMoon[i].xyz * cs) / sin(s);
-      float l2 = dot(v, v);
-      vec3 n = normalize(v - uMoon[i].xyz * sqrt(max(0.0, 1.0 - l2)));
-      float lit = smoothstep(-0.05, 0.15, dot(n, uMain)), ty = uMoonCol[i].a;
-      vec3 mc = uMoonCol[i].rgb;
-      if (ty > 0.5 && ty < 1.5) mc = mix(mc, uMoon2[i].rgb, smoothstep(0.3, 0.7, 0.5 + 0.5 * sin(dot(n, uPole) * 16.0 + ecoFbm(n.xy * 4.0 + n.z * 3.0) * 2.5)));
-      else if (ty > 1.5 && ty < 2.5) mc = mix(mc, uMoon2[i].rgb, smoothstep(0.48, 0.56, ecoFbm(n.xy * 3.0 + n.z * 5.0 + 3.0)));
-      else if (ty > 2.5) mc = mix(mc, uMoon2[i].rgb, 0.4 * smoothstep(0.45, 0.65, ecoFbm(n.xy * 6.0 + n.z * 2.0)));
-      mc = mix(mc, mc * vec3(0.35, 0.12, 0.08), uMoon2[i].a);
-      c = mix(c, mc * (0.14 + 0.86 * lit), smoothstep(1.0, 0.9, l2) * above * max(1.0 - 0.45 * uDay, sunA));
-    }
   }
 #endif
   if (cover > 0.0) {
@@ -173,6 +238,8 @@ uniform uSunCol: array<vec4f, 3>;
 uniform uMoon: array<vec4f, 4>;
 uniform uMoonCol: array<vec4f, 4>;
 uniform uMoon2: array<vec4f, 4>;
+uniform uMoonA: array<vec4f, 4>;
+uniform uMoonB: array<vec4f, 4>;
 uniform uNSun: i32;
 uniform uNMoon: i32;
 uniform uDay: f32;
@@ -186,7 +253,8 @@ uniform uCloudCol: vec3f;
 uniform uFlash: f32;
 uniform uAur: vec4f;
 uniform uAurCol: vec3f;
-uniform uAurE: f32;
+uniform uAurG: vec4f;
+uniform uFwd: vec3f;
 uniform uCloudC: vec4f;
 uniform uMet: array<vec4f, 4>;
 uniform uMetB: array<vec4f, 4>;
@@ -219,12 +287,58 @@ fn ecoFbm(p0: vec2f) -> f32 {
   return v;
 }
 fn ecoSs(e0: f32, e1: f32, x: f32) -> f32 { let t = clamp((x - e0) / (e1 - e0), 0.0, 1.0); return t * t * (3.0 - 2.0 * t); }
+fn ecoN1(x: f32) -> f32 {
+  let i = floor(x);
+  let f = fract(x);
+  return mix(ecoHashN(vec2f(i, 3.7)), ecoHashN(vec2f(i + 1.0, 3.7)), f * f * (3.0 - 2.0 * f));
+}
+// Диск світила (o — центр, s — кутовий радіус): xyz — напрям e, у якому шукати точку тіла, w — l2 = sin²θ / sin²s (θ — кут
+// e від центру; 1 — край, > 1 — поза). Великі тіла (компаньйон, s > 0,25) — справжня куля: e = d, вигляд не залежить від
+// того, куди дивишся (13.10.2026, скарга: смуги й освітлена частина компаньйона радіусом 54° «пливли» з поглядом —
+// білборд такого розміру росте й ковзає відносно ландшафту). Малі (сонця, місяці, s < 0,15) — «білборд», паралельний
+// площині кадру (uFwd — погляд камери): прямолінійна перспектива на краях кадру розтягує диск за кутом у 1/cos θ разів
+// уздовж радіуса екрана, а білборд у кадрі — завжди коло; e — напрям, що дав би той самий зсув, якби дивились прямо на
+// тіло (зсув у площині, повернутий з uFwd на o). Центр далі ~65° від осі (поза кадром) — плавно до справжньої кулі.
+// Білборд не виходить за кутовий радіус диска (упоперек — рівно s, уздовж — менше), тож далі 1,3·s — одразу «поза»
+fn ecoDisk(d: vec3f, o: vec3f, s: f32) -> vec4f {
+  let co = dot(d, o);
+  let fo = dot(o, uniform.uFwd);
+  if (co < cos(min(s * 1.3, 1.55))) { return vec4f(d, 2.0); }
+  var e = d;
+  let w = ecoSs(0.2, 0.45, fo) * ecoSs(0.25, 0.15, s);
+  if (w > 0.0) {
+    var q = d * (fo / max(dot(d, uniform.uFwd), 1e-4)) - o;
+    q -= dot(q, o) / (1.0 + fo) * (uniform.uFwd + o);
+    e = normalize(mix(d, normalize(o + q), w));
+  }
+  let ce = dot(e, o);
+  let ss = sin(s);
+  return vec4f(e, select(2.0, (1.0 - ce * ce) / (ss * ss), ce > 0.0));
+}
+// Нормаль кулі в точці, де її перетинає промінь e (l2 < 1): відстань до центру D = 1 / sin s (радіусів), перетин
+// t = D·cos θ − √(1 − l2) — видно лише ковпак до 90° − s від центру (у велетня — не півкулю)
+fn ecoBodyN(e: vec3f, o: vec3f, s: f32, l2: f32) -> vec3f {
+  let D = 1.0 / sin(s);
+  return normalize((D * dot(e, o) - sqrt(max(0.0, 1.0 - l2))) * e - D * o);
+}
+fn ecoEdge(l2: f32, s: f32) -> f32 { return ecoSs(0.0, 0.05 * min(s, 0.15), s - asin(min(1.0, sqrt(l2) * sin(s)))); }
 fn ecoSky(d: vec3f) -> vec3f {
   let up = d.z;
   let above = ecoSs(-0.02, 0.01, up);
   var c: vec3f = select(mix(uniform.uHor, uniform.uZen, ecoSs(0.0, 0.55, up)), uniform.uHor * (1.0 + up * 0.35), up < 0.0);
   let g = max(dot(d, uniform.uMain), 0.0);
   c += uniform.uDusk.rgb * uniform.uDusk.a * (pow(g, 5.0) * 0.6 + pow(g, 40.0) * 0.4) * ecoSs(-0.25, 0.05, up);
+#ifndef ECO_BAKE
+  let c0 = c;
+#endif
+  var cover = 0.0;
+  if (uniform.uCloud.x > 0.01 && up > 0.0) {
+    let cp = uniform.uCloudC.xy + d.xy * (uniform.uCloudC.w / max(up, 0.03));
+    let cov = textureSampleLevel(uCloudMap, uCloudMapSampler, cp / (length(cp) + uniform.uCloudC.z) * 0.5 + 0.5, 0.0).r;
+    let cuv = d.xy / (up + 0.08) * 0.9 + uniform.uCloud.yz;
+    let f = ecoFbm(cuv);
+    cover = select(0.0, ecoSs(1.02 - cov * 0.75, 1.25 - cov * 0.7, f + 0.25) * ecoSs(0.0, 0.12, up), cov > 0.01);
+  }
 #ifndef ECO_BAKE
   if (uniform.uStars.x > 0.01 && up > -0.05) {
     let q = d * uniform.uCel;
@@ -244,6 +358,43 @@ fn ecoSky(d: vec3f) -> vec3f {
     }
   }
 #endif
+#ifndef ECO_BAKE
+  // сонця за всім, тіла непрозорі над небом без зір (c0), ореол сонця — поверх (як у GLSL)
+  var glow = vec3f(0.0);
+  let hide = 1.0 - cover * 0.85;
+  for (var i = 0; i < 3; i++) {
+    if (i >= uniform.uNSun) { break; }
+    let su = uniform.uSun[i];
+    let cs = dot(d, su.xyz);
+    let s = su.w;
+    let th2 = max(0.0, 2.0 * (1.0 - cs));
+    let disk = ecoSs(1.1, 0.85, ecoDisk(d, su.xyz, s).w);
+    let sc = uniform.uSunCol[i].rgb;
+    c = mix(c, sc / max(max(sc.r, sc.g), max(sc.b, 0.001)), disk * above * hide);
+    glow += sc * uniform.uSunCol[i].a * (exp(-th2 / (s * s * 9.0)) * 0.45 * hide + exp(-th2 / (s * s * 90.0)) * 0.12) * above;
+  }
+  for (var i = 0; i < 4; i++) {
+    if (i >= uniform.uNMoon) { break; }
+    let mo = uniform.uMoon[i];
+    let e = ecoDisk(d, mo.xyz, mo.w);
+    if (e.w < 1.0) {
+      let n = ecoBodyN(e.xyz, mo.xyz, mo.w, e.w);
+      let fa = uniform.uMoonA[i].xyz;
+      let fb = uniform.uMoonB[i].xyz;
+      let nb = vec3f(dot(n, fb), dot(n, cross(fa, fb)), dot(n, fa));
+      let lit = ecoSs(-0.05, 0.15, dot(n, uniform.uMain));
+      let ty = uniform.uMoonCol[i].a;
+      let m2 = uniform.uMoon2[i];
+      var mc = uniform.uMoonCol[i].rgb;
+      if (ty > 0.5 && ty < 1.5) { mc = mix(mc, m2.rgb, ecoSs(0.3, 0.7, 0.5 + 0.5 * sin(nb.z * 16.0 + ecoFbm(nb.xy * 4.0 + nb.z * 3.0) * 2.5))); }
+      else if (ty > 1.5 && ty < 2.5) { mc = mix(mc, m2.rgb, ecoSs(0.48, 0.56, ecoFbm(nb.xy * 3.0 + nb.z * 5.0 + 3.0))); }
+      else if (ty > 2.5) { mc = mix(mc, m2.rgb, 0.4 * ecoSs(0.45, 0.65, ecoFbm(nb.xy * 6.0 + nb.z * 2.0))); }
+      mc = mix(mc, mc * vec3f(0.35, 0.12, 0.08), m2.a);
+      c = mix(c, mix(c0, mc * (0.14 + 0.86 * lit), 1.0 - 0.45 * uniform.uDay), ecoEdge(e.w, mo.w) * above);
+    }
+  }
+  c += glow;
+#endif
   if (uniform.uRing.z > 0.0) {
     let dp = dot(d, uniform.uPole);
     if (abs(dp) > 1e-4) {
@@ -261,15 +412,57 @@ fn ecoSky(d: vec3f) -> vec3f {
   }
 #ifndef ECO_BAKE
   if (uniform.uAur.z > 0.01 && up > 0.0) {
-    let h = normalize(d.xy + 1e-5);
-    let e0 = uniform.uAurE;
-    let face = mix(ecoSs(-0.2, 0.7, dot(h, uniform.uAur.xy)), 1.0, ecoSs(0.6, 0.95, e0));
-    let ang = atan2(h.y, h.x);
-    let band = ecoSs(e0 - 0.3, e0 - 0.1, up) * (1.0 - ecoSs(e0 + 0.1, e0 + 0.45, up)) * ecoSs(0.0, 0.08, up);
-    let wave = ecoFbm(vec2f(ang * 3.0 + uniform.uAur.w * 0.02, up * 1.5 + uniform.uAur.w * 0.01));
-    let rays = 0.55 + 0.45 * sin(ang * 70.0 + ecoFbm(vec2f(ang * 9.0, uniform.uAur.w * 0.05)) * 12.0);
-    let a = face * band * ecoSs(0.42, 0.75, wave) * rays * uniform.uAur.z;
-    c += mix(uniform.uAurCol, uniform.uAurCol.bgr, ecoSs(0.2, 0.6, up)) * a * 0.9;
+    // Завіси в шарі ~100–255 км над планетою радіуса uAurG.y (км): промінь з ока перетинає сферу R + h на відстані
+    // t(h) = √(b² + 2Rh + h²) − b, b = R·up. Візерунок задано на «підніжжі» — точці, звідки силова лінія (нахил ~78°:
+    // на висоті h зсув 0,2·h до екватора) піднялась на h, тож вертикальні промені завіс у перспективі сходяться до
+    // магнітного зеніту (корона над головою), а не в зеніті. Поперек овалу (s, км від середини, + до полюса) — дуги
+    // кожні 90 км у межах півширини uAurG.z, зігнуті складками (~300–700 км); уздовж (w) — яскравість дуг (~250 км),
+    // нижній край (100–118 км) і промені (~2 км). Вигин, яскравість і край — раз на промінь у підніжжі на 120 км (великі
+    // масштаби); 10 кроків по висоті з тремтінням, густіше внизу (h = 95 + 160·u²: світіння — біля нижнього краю);
+    // довжина шляху в шарі — dt/dh = (R + h)/√…, ≤ 6 (біля обрію сяйво яскравіше). Дуга чи промінь, які промінь за крок
+    // проходить наскрізь, — їхнім середнім (0,161 і 0,38): без цього тонкі завіси на пологих променях — зерно тремтіння.
+    // Промінь, що на висотах 95, 150 і 255 км далі від овалу, ніж 1,5 півширини + 30 км, — без кроків (сяйво — смуга неба). До 13.10.2026 — візерунок за азимутом і висотою на небі: над головою сектори
+    // сходились в ідеальну зірку в зеніті, на азимуті ±π — шов
+    let pd = uniform.uAur.xy;
+    let qd = vec2f(-pd.y, pd.x);
+    let R = uniform.uAurG.y;
+    let W = uniform.uAurG.z;
+    let b = R * up;
+    let tm = uniform.uAur.w;
+    let f0 = d.xy * (sqrt(b * b + 240.0 * R + 14400.0) - b) + pd * 4.0;
+    let w0 = dot(f0, qd);
+    let warp = (ecoNoise(vec2f(w0 / 700.0 + tm * 0.01, 5.3)) * 0.65 + ecoNoise(vec2f(w0 / 300.0 - tm * 0.02, 9.1)) * 0.35 - 0.5) * W;
+    let bright = 0.25 + 0.75 * ecoSs(0.25, 0.7, ecoNoise(vec2f(w0 / 250.0 + tm * 0.02, 2.1)));
+    let hb = 100.0 + 18.0 * ecoN1(w0 / 40.0 + tm * 0.05);
+    let j = ecoHashN(d.xy * 1543.0 + d.z * 3571.0);
+    var acc = 0.0;
+    var top = 0.0;
+    let pp = dot(d.xy, pd);
+    let s0 = pp * (sqrt(b * b + 190.0 * R + 9025.0) - b) - uniform.uAurG.x;
+    let s1 = pp * (sqrt(b * b + 300.0 * R + 22500.0) - b) + 10.0 - uniform.uAurG.x;
+    let s2 = pp * (sqrt(b * b + 510.0 * R + 65025.0) - b) + 31.0 - uniform.uAurG.x;
+    let sm = W * 1.5 + 30.0;
+    if (min(min(s0, s1), s2) < sm && max(max(s0, s1), s2) > -sm) {
+      for (var i = 0; i < 10; i++) {
+        let u = (f32(i) + j) * 0.1;
+        let h = 95.0 + 160.0 * u * u;
+        let dh = 32.0 * u;
+        let q = sqrt(b * b + 2.0 * R * h + h * h);
+        let f = d.xy * (q - b) + pd * (h - 100.0) * 0.2;
+        let sc = dot(f, pd) - uniform.uAurG.x;
+        let env = ecoSs(W * 1.5, W * 0.5, abs(sc));
+        if (env <= 0.0) { continue; }
+        let dt = (R + h) / q;
+        let arc = mix(pow(0.5 + 0.5 * cos((sc + warp) * 0.0698), 12.0), 0.161, ecoSs(6.0, 25.0, abs((pp * dt + 0.2) * dh)));
+        let r0 = ecoN1(dot(f, qd) / 2.0 + tm * 0.1);
+        let ray = mix(0.12 + 0.88 * r0 * r0, 0.38, ecoSs(2.0, 8.0, abs(dot(d.xy, qd) * dt * dh)));
+        let e = env * arc * ray * ecoSs(hb - 5.0, hb + 5.0, h) * exp(-(h - hb) / 45.0) * min(dt, 6.0) * dh * 0.1;
+        acc += e;
+        top += e * ecoSs(170.0, 240.0, h);
+      }
+    }
+    let a = (1.0 - exp(-acc * 2.0)) * bright * uniform.uAur.z * ecoSs(0.0, 0.06, up);
+    c += mix(uniform.uAurCol, uniform.uAurCol.gbr * 0.8, top / max(acc, 1e-4)) * a * 0.9;
   }
   for (var i = 0; i < 4; i++) {
     if (i >= uniform.uNMet || up < 0.0) { break; }
@@ -282,51 +475,6 @@ fn ecoSky(d: vec3f) -> vec3f {
     let s = clamp(dot(d - tl, ab) / max(dot(ab, ab), 1e-8), 0.0, 1.0);
     let dist = length(d - (tl + ab * s));
     c += vec3f(1.0, 0.95, 0.85) * uniform.uMetB[i].w * s * (1.0 - t * t) * ecoSs(0.003, 0.0, dist) * ecoSs(0.0, 0.1, up);
-  }
-#endif
-  var cover = 0.0;
-  if (uniform.uCloud.x > 0.01 && up > 0.0) {
-    let cp = uniform.uCloudC.xy + d.xy * (uniform.uCloudC.w / max(up, 0.03));
-    let cov = textureSampleLevel(uCloudMap, uCloudMapSampler, cp / (length(cp) + uniform.uCloudC.z) * 0.5 + 0.5, 0.0).r;
-    let cuv = d.xy / (up + 0.08) * 0.9 + uniform.uCloud.yz;
-    let f = ecoFbm(cuv);
-    cover = select(0.0, ecoSs(1.02 - cov * 0.75, 1.25 - cov * 0.7, f + 0.25) * ecoSs(0.0, 0.12, up), cov > 0.01);
-  }
-#ifndef ECO_BAKE
-  // сонця, потім місяці й компаньйон поверх (затемнення: диск місяця перед сонцем непрозорий)
-  var sunA = 0.0;
-  for (var i = 0; i < 3; i++) {
-    if (i >= uniform.uNSun) { break; }
-    let su = uniform.uSun[i];
-    let cs = dot(d, su.xyz);
-    let s = su.w;
-    let th2 = max(0.0, 2.0 * (1.0 - cs));
-    let disk = ecoSs(s * s * 1.1, s * s * 0.85, th2);
-    let sc = uniform.uSunCol[i].rgb;
-    let hide = 1.0 - cover * 0.85;
-    c = mix(c, min(vec3f(1.0), sc * 1.3 + 0.15), disk * above * hide);
-    c += sc * uniform.uSunCol[i].a * (exp(-th2 / (s * s * 9.0)) * 0.45 * hide + exp(-th2 / (s * s * 90.0)) * 0.12) * above;
-    sunA = max(sunA, disk);
-  }
-  for (var i = 0; i < 4; i++) {
-    if (i >= uniform.uNMoon) { break; }
-    let mo = uniform.uMoon[i];
-    let cs = dot(d, mo.xyz);
-    let s = mo.w;
-    if (cs > cos(s)) {
-      let v = (d - mo.xyz * cs) / sin(s);
-      let l2 = dot(v, v);
-      let n = normalize(v - mo.xyz * sqrt(max(0.0, 1.0 - l2)));
-      let lit = ecoSs(-0.05, 0.15, dot(n, uniform.uMain));
-      let ty = uniform.uMoonCol[i].a;
-      let m2 = uniform.uMoon2[i];
-      var mc = uniform.uMoonCol[i].rgb;
-      if (ty > 0.5 && ty < 1.5) { mc = mix(mc, m2.rgb, ecoSs(0.3, 0.7, 0.5 + 0.5 * sin(dot(n, uniform.uPole) * 16.0 + ecoFbm(n.xy * 4.0 + n.z * 3.0) * 2.5))); }
-      else if (ty > 1.5 && ty < 2.5) { mc = mix(mc, m2.rgb, ecoSs(0.48, 0.56, ecoFbm(n.xy * 3.0 + n.z * 5.0 + 3.0))); }
-      else if (ty > 2.5) { mc = mix(mc, m2.rgb, 0.4 * ecoSs(0.45, 0.65, ecoFbm(n.xy * 6.0 + n.z * 2.0))); }
-      mc = mix(mc, mc * vec3f(0.35, 0.12, 0.08), m2.a);
-      c = mix(c, mc * (0.14 + 0.86 * lit), ecoSs(1.0, 0.9, l2) * above * max(1.0 - 0.45 * uniform.uDay, sunA));
-    }
   }
 #endif
   if (cover > 0.0) {

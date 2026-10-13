@@ -5,10 +5,10 @@
 import { hash2, hash3, unit } from './rng.js';
 import { noise2 } from './noise.js';
 import { BIOMES, BIOME_IN_ZONE, ZONES } from './gen/biomes.js';
-import { nsqrt, nsin, ncos, PI, pwlXY } from './num.js';
+import { nsqrt, ncbrt, nlog10, nsin, ncos, nqnorm, PI, pwlXY } from './num.js';
 import { starOf, planetOf, pMin, tEq, airOf, tSurf, kTr, fieldOf, radOf, rhoAir, scaleH, VACUUM } from './astro.js';
 
-export const GEN = 14;        // версія генератора; зберігається у світі (змінений генератор — інші незмінені чанки)
+export const GEN = 16;        // версія генератора; зберігається у світі (змінений генератор — інші незмінені чанки)
                              // 2 — гравітація (07.10.2026): рельєф, рослини, ширяюче каміння
                              // 3 — рідини (07.10.2026): дно водойм, вид рідини, сухі русла
                              // 4 — вокселі (07.10.2026): блоки-півблоки, печери, нависання, ширяючі острови
@@ -27,6 +27,8 @@ export const GEN = 14;        // версія генератора; зберіг
                              //      ерозія, куести, останці, баштовий карст, рифти
                              // 14 — закони фізики світу (12.10.2026, п. 4 roadmap): тяжіння з радіуса й густини (з відцентровою на
                              //      широті ділянки), температура з зорі, відстані, альбедо й парникового ефекту, градієнт 52 °C/км × g
+                             // 15 — зорі й захоплення (13.10.2026): головна — найважча з тісної групи, далека — за орбітою планети
+                             //      (межа Хілла), припливне захоплення компаньйоном і місяцем, сонцем — рідко (решта — резонанс 3:2)
 export const LEVEL = 0.5;   // висота блоку (рівня рельєфу), м; клітинка — 1 × 1 м
 export const WORLD_H = 96;   // висота стовпця для тестів і відбитків (блок — 1×1×LEVEL); світ — KMIN…KMAX
 export const KMIN = -4096, KMAX = 4095;   // межі світу в блоках (рішення 08.10.2026: ±4096); нижче — корінна порода, вище — повітря
@@ -70,11 +72,9 @@ export function qOf(v) {
   const [x0, y0] = LQ[i - 1], [x1, y1] = LQ[i], t = a >= x1 ? 1 : (a - x0) / (x1 - x0), q = y0 + (y1 - y0) * t;
   return v < 0 ? 1 - q : q;
 }
-// Нормальний розподіл законів (п. 4 roadmap, рішення 12.10.2026): z — стандартне нормальне з номера (вузли LQ по |lane|
-// з Φ⁻¹(q); |z| ≤ 3,72)
-const LZ = [[0, 0], [0.0935, 0.2533], [0.1989, 0.5244], [0.3316, 0.8416], [0.4111, 1.0364], [0.5018, 1.2816], [0.5884, 1.5548],
-  [0.6752, 1.8808], [0.7746, 2.3263], [0.8568, 2.7478], [0.9219, 3.0902], [1.196, 3.719]];
-export const zOfLane = (v) => v < 0 ? -pwl(LZ, -v) : pwl(LZ, v);
+// Нормальний розподіл законів (п. 4 roadmap, рішення 12.10.2026): z — стандартне нормальне з номера: z = Φ⁻¹(q), q — частка
+// розподілу lane (qOf); |z| ≤ 3,72 (q ≤ 0,9999). До 13.10.2026 — кусково-лінійно за вузлами LQ (таблиця Φ⁻¹ з 12 вузлів)
+export const zOfLane = (v) => { const q = qOf(v < 0 ? -v : v), z = nqnorm(q < 0.9999 ? q : 0.9999); return v < 0 ? -z : z; };
 // Ширина розкиду від незвичайності всесвіту qs: у звичайних (qs < 0,3) |t| < 1,5 завжди — жодного незвичного закону
 export const SPREAD = [[0, 0.3], [0.3, 0.4], [0.75, 0.9], [0.95, 1.25], [1, 1.6]];
 // Вузли відхилення t: двобічний закон — e[0…8] (легендарне … звичайне … легендарне), однобічний — за |t|
@@ -104,6 +104,10 @@ function tierVal(z, T, e) {
 const tierOf = (z, T) => z < T[0] ? 0 : z < T[1] ? 1 : z < T[2] ? 2 : 3;
 // Поріг 3D-шуму печерних областей (noise3 x/200, y/200, k/300; емпірично): частка нижче → значення
 export const NOISE_Q = [[0, -0.961], [0.05, -0.445], [0.1, -0.353], [0.2, -0.238], [0.3, -0.149], [0.4, -0.069], [0.5, 0.002], [0.6, 0.074], [0.7, 0.154], [0.8, 0.244], [0.85, 0.295], [0.9, 0.358], [0.95, 0.45], [0.97, 0.5], [0.99, 0.59], [1, 0.893]];
+
+// Поріг припливного захоплення: D⁶/(q²·ρ) для Сонця й Землі на a³/M = 0,014 (а. о. — 23 455 радіусів Землі, Сонце —
+// 333 000 мас Землі); множення, не **: однаково в будь-якому рушії
+const AU_RE = 23455 * 23455 * 23455, LAM0 = 0.014 * 0.014 * AU_RE * AU_RE / (333000 * 333000);
 
 // Родини кривої «материк → висота» (рельєф 3.1; форми — famF у gen/chunk.js)
 export const FAM_NAMES = ['пенеплен', 'розчленоване плато', 'уступ', 'трапові сходи', 'столові гори', 'перевернутий рельєф'];
@@ -147,36 +151,117 @@ export function lawsOf(seed, d, n) {
   const nrm1T = (name, t, e) => { lv(name, t); return pwlXY(NK1, e, t < 0 ? -t : t); };
   const nrm1 = (name, i, per, e) => nrm1T(name, tOf(i, per), e);
   const lvAbs = (t) => levelOf(t < 0 ? -t : t);
-  // --- Зорі (смуги 400…409): кількість (|t|: незвичне — 2, крайнє — 3), температура головної → світність, радіус, маса;
-  // інші — тісна пара (планета обертається навколо обох) чи далека (S-тип: мала яскрава зоря)
+  // --- Зорі (смуги 400…409, 480…487): кількість (|t|: незвичне — 2, крайнє — 3), температура → світність, радіус, маса;
+  // інші — тісна пара (планета обертається навколо обох) чи далека (S-тип). Головна — найважча з тісної групи (13.10.2026,
+  // вимога користувача: «земля повинна крутитись навколо найважчого»): центр мас групи — біля неї. Задачі трьох тіл немає
+  // (13.10.2026, рішення користувача: взаємодіють лише пари): дві тісні — кожна з головною окремо, між собою — ні
   const tS = lv('сонця', tOf(400, 60)), nSun = lvAbs(tS) >= 2 ? 3 : lvAbs(tS) === 1 ? 2 : 1;
   const T_E = [2400, 3100, 3600, 4300, 5772, 6600, 7800, 9800, 20000];
-  const st0 = starOf(nrm('зоря', 401, 120, T_E)), extra = [];
-  let Ltot = st0.L, Mtot = st0.M;
-  for (let i = 1; i < nSun; i++) {
-    const b = 404 + (i - 1) * 3, s2 = starOf(nrm(null, b, 120, T_E)), close = U(b + 1, 60) < 0.5;
-    const a2 = 20 + 280 * U(b + 2, 60);                                  // далека: а. о. в «земних» відстанях головної
-    extra.push({ ...s2, close, a2: close ? 0 : a2 * nsqrt(st0.L), dec: close ? 0.05 + 0.2 * U(b + 2, 30) : 0.5 * L(b + 2, 30), off: close ? 0.01 + 0.05 * U(b + 1, 30) : U(b + 2, 20) });
-    if (close) { Ltot += s2.L; Mtot += s2.M; }
+  const born = [{ t: tOf(401, 120), close: true }];
+  for (let i = 1; i < nSun; i++) { const b = 404 + (i - 1) * 3; born.push({ t: tOf(b, 120), close: U(b + 1, 60) < 0.5 }); }
+  for (const s of born) s.st = starOf(pwlXY(NK, T_E, s.t));
+  let im = 0;
+  for (let i = 1; i < born.length; i++) if (born[i].close && born[i].st.M > born[im].st.M) im = i;
+  const st0 = born[im].st;
+  lv('зоря', born[im].t);
+  let Ltot = 0, Mtot = 0;
+  for (const s of born) if (s.close) { Ltot += s.st.L; Mtot += s.st.M; }
+  const nClose = born.filter((s) => s.close).length - 1, extra = [];
+  for (let j = 1; j < born.length; j++) {
+    const s = born[j === im ? 0 : j], b = 404 + (j - 1) * 3, o = 480 + (j - 1) * 4;
+    // тісна: орбіта навколо головної — θ = a_пари / a_планети (стійкість орбіти планети — не більше ~0,3; дві тісні — внутрішня
+    // й зовнішня), нахил до площини орбіти планети (переважно 0–5°, як Kepler-16: пари затуляють одна одну; рідко до 30°),
+    // вузол і фаза (частки оберту). Далека: відстань — у «земних» відстанях групи (a2 = (20…300)·√L_групи; до 13.10.2026 —
+    // √L першої зорі: при яскравій тісній парі далека бувала ближчою за планету) — далі, з межею Хілла
+    if (s.close) {
+      const th = nClose > 1 ? (j === 1 ? 0.06 + 0.08 * U(o, 60) : 0.18 + 0.12 * U(o, 60)) : 0.06 + 0.24 * U(o, 60), u = U(o + 1, 40);
+      extra.push({ ...s.st, close: true, th, tilt: 0.5236 * u * u * u * u, node: U(o + 2, 30), ph: U(o + 3, 20) });
+    } else extra.push({ ...s.st, close: false, ka: 20 + 280 * U(b + 2, 60), dec: 0.5 * L(b + 2, 30), off: U(b + 2, 20) });
   }
   // --- Орбіта (402, 403): відстань у «земних» для світності (a = d·√L), альбедо → інсоляція, рівноважна температура
   const dS = nrm('відстань до зорі', 402, 80, [0.45, 0.62, 0.75, 0.88, 1, 1.13, 1.3, 1.55, 2.4]);
   const albedo = nrm('альбедо', 403, 50, [0.05, 0.1, 0.15, 0.22, 0.3, 0.38, 0.5, 0.65, 0.8]);
   const aAU = dS * nsqrt(Ltot);
   let Sins = 1 / (dS * dS);
-  for (const e of extra) if (!e.close) { e.S = e.L / (e.a2 * e.a2); Sins += e.S; }
+  // далека — за межею стійкості Хілла: планета не далі половини радіуса Хілла групи (a2 ≥ 3·a·(M₂/M_групи)^⅓)
+  for (const e of extra) if (!e.close) {
+    const h = 3 * aAU * ncbrt(e.M / Mtot);
+    e.a2 = Math.max(e.ka * nsqrt(Ltot), h); e.S = e.L / (e.a2 * e.a2); Sins += e.S;
+  }
   const Teq = tEq(Sins, albedo);
   // --- Планета (410, 411): радіус і густина → тяжіння, маса; обертання (412) не швидше за 1,25 розриву; нахил осі (413),
-  // широта ділянки (414); рік за Кеплером (земний — 400 хв гри); припливне захоплення близькою зорею (вічний день)
+  // широта ділянки (414); рік за Кеплером (земний — 400 хв гри)
   const pl = planetOf(nrm('радіус планети', 410, 60, [0.07, 0.25, 0.45, 0.8, 1, 1.2, 1.4, 1.65, 2.0]), nrm('густина планети', 411, 60, [0.3, 0.4, 0.55, 0.72, 0.8, 0.88, 1.0, 1.15, 1.45]));
-  const g0 = pl.g0, Pmin = pMin(pl.R, g0);
-  const rotH = Math.max(1.25 * Pmin, nrm('обертання', 412, 40, [2.4, 4.8, 9.6, 14.4, 24, 36, 72, 144, 288]));
-  const lock = aAU * aAU * aAU / Mtot < 0.014;
+  const g0 = pl.g0, Pmin = pMin(pl.R, g0), kep = 1.406 * nsqrt(pl.R / g0);
+  // Місяці (440…452): відстань (радіусів планети), радіус, альбедо → період за Кеплером (год); 0–3 (біля старту — один)
+  const tM = tOf(440, 50), nMoon = tM < -1 ? 0 : tM < 1 ? 1 : tM < 2.2 ? 2 : 3;
+  const moons = [];
+  for (let i = 0; i < nMoon; i++) {
+    const b = 441 + 4 * i, D = nrm(null, b, 50, [3, 5, 10, 25, 60, 90, 150, 250, 400]) * (1 + 0.6 * i);
+    const Rkm = Math.min(0.4 * pl.R * 6371, nrm(null, b + 1, 50, [5, 20, 150, 700, 1737, 2400, 3000, 4000, 5000]));
+    const alb = nrm(null, b + 2, 50, [0.03, 0.05, 0.07, 0.09, 0.12, 0.2, 0.35, 0.5, 0.8]), rm = alb > 0.3 ? 0.35 : 0.6;
+    const rr = Rkm / (pl.R * 6371), q = rm * rr * rr * rr / pl.rho;
+    moons.push({
+      D, Rkm, rr, q, albedo: alb, perH: kep * nsqrt(D * D * D / (1 + q)), dec: 0.2 * L(b + 3, 30), off: U(131 + i, 20),
+      col: alb > 0.3 ? hsl(0.55 + 0.05 * L(b + 3, 20), 0.15, 0.86) : hsl(0.08 + 0.06 * L(116 + i * 3, 40), 0.06 + 0.25 * U(117 + i * 3, 40) * (i ? 1 : 0.4), 0.74),
+    });
+  }
+  // Компаньйон (455…468): приплив f (частка g) → кутовий радіус α (f = 2·(ρк/ρп)·sin³α), тип, густина й радіус відносно
+  // планети. Не ближче дотику (1,05·(1 + Rr)) і межі Роша жорсткого тіла (1,26·R_більшого·(ρ_більш/ρ_менш)^⅓), видимий
+  // радіус — до 60°: якщо f з таким розміром недосяжний — компаньйон більший, а коли й це не допомагає, — щільніший (f і
+  // рівень закону ті самі; 13.10.2026: був на відстані, меншій за суму радіусів, — у 1,5…12 % усіх компаньйонів)
+  const tCm = tOf(455, 60), cmpT = U(456, 40), cType = cmpT < 0.45 ? 0 : cmpT < 0.8 ? 1 : 2;   // газовий, кам'яний, крижаний
+  let comp = null;
+  if (lvAbs(tCm) >= 1) {
+    const f = nrm1T('компаньйон', tCm, [0, 0.01, 0.05, 0.15, 0.3]);
+    let rhoR = [[0.12, 0.35], [0.6, 1.3], [0.3, 0.45]][cType].reduce((a, b) => a + (b - a) * U(457, 30));
+    let Rr = [[4, 12], [0.5, 2], [0.6, 2.5]][cType].reduce((a, b) => a + (b - a) * U(458, 30));
+    const lim = (R, r) => { const dc = 1.05 * (1 + R), dr = R >= 1 ? 1.26 * R * ncbrt(r) : 1.26 * ncbrt(1 / r); return Math.min(0.866, R / (dc > dr ? dc : dr)); };
+    let sa = ncbrt(f / (2 * rhoR));
+    for (let k = 0; k < 80 && sa > lim(Rr, rhoR); k++) {
+      if (sa <= 0.866 && Rr < 12) Rr *= 1.1; else { rhoR *= 1.1; sa = ncbrt(f / (2 * rhoR)); }
+    }
+    const D = Rr / sa, q = rhoR * Rr * Rr * Rr;
+    comp = { f, type: cType, rhoR, Rr, sa, D, q, perH: kep * nsqrt(D * D * D / (1 + q)), inc: 0.43 * L(459, 30), albedo: [0.5, 0.3, 0.65][cType], off: U(466, 20), hue: U(467, 30), hue2: U(468, 30) };
+  }
+  // --- Припливне захоплення (488…494; рішення користувача 13.10.2026: «як у реальному житті — важче тіло частіше
+  // захоплює легше»). s — на скільки порядків час захоплення (∝ D⁶/(q²·ρ): D — відстань у радіусах захопленого, q —
+  // відношення мас, ρ — густина захопленого) коротший за поріг — той, що й досі вирішував захоплення сонцем (a³/M = 0,014
+  // для Землі). Кубик — лише для найсильнішого тіла: сонце захоплює в 10 % (дуже рідко — інакше багато світів з вічним днем
+  // чи ніччю), решта — резонанс 3:2 (як Меркурій: сонячна доба — 2 роки); компаньйон чи місяць — p = 0,8·clamp(s/8)
+  // (компаньйон-гігант ~80 %, місяць — рідко, як Харон — Плутон). Захоплене тіло стоїть на небі: обертання = його період.
+  // Компаньйона захоплює наша планета (завжди повернутий одним боком — видно з візерунка) — окремий кубик за s′
+  const sOf = (D, q, rho) => { const D3 = D * D * D; return nlog10(LAM0 * q * q * rho / (D3 * D3)); };
+  let best = { kind: 'sun', s: 2 * nlog10(0.014 * Mtot / (aAU * aAU * aAU)) };
+  if (comp) { const s = sOf(comp.D, comp.q, pl.rho); if (s > best.s) best = { kind: 'comp', s }; }
+  moons.forEach((m, i) => { const s = sOf(m.D, m.q, pl.rho); if (s > best.s) best = { kind: 'moon', i, s }; });
+  // кубики — рівномірні й на глибині (U там частіше біля країв)
+  const pLock = (s) => 0.8 * clamp01(s / 8), dice = (i) => qOf(lane(ds, i, n, 60));
+  const held = best.s <= 0 ? null : best.kind === 'sun' ? (dice(488) < 0.1 ? 'sun' : 'res') : dice(489) < pLock(best.s) ? best.kind : null;
+  if (comp) {
+    comp.s2 = sOf(comp.D / comp.Rr, 1 / comp.q, comp.rhoR * pl.rho);
+    comp.face = dice(490) < pLock(comp.s2);                                        // завжди повернутий до нас одним боком
+    comp.spinH = cType === 0 ? 8 + 12 * U(491, 30) : 10 + 50 * U(491, 30);         // власне обертання (год), якщо не захоплений
+  }
+  const lock = held === 'sun', yearH = 8766 * nsqrt(aAU * aAU * aAU / Mtot);
+  const rotLaw = nrm('обертання', 412, 40, [2.4, 4.8, 9.6, 14.4, 24, 36, 72, 144, 288]);
+  const rotH = Math.max(1.25 * Pmin, held === 'comp' ? comp.perH : held === 'moon' ? moons[best.i].perH : lock ? yearH : held === 'res' ? yearH * 2 / 3 : rotLaw);
+  if (held) delete tiers['обертання'];
   if (lock) note('вічний день', 2);
+  if (held === 'res') note('резонанс 3:2', 1);
+  if (held === 'moon') note('місяць стоїть', 2);
   const obliq = lock ? 0 : nrm('нахил осі', 413, 60, [0, 0, 5, 15, 23, 30, 45, 65, 90]);
   const latD = nrm('широта', 414, 60, [0, 3, 10, 22, 38, 52, 62, 72, 85]), latR = latD * PI / 180;
   const hLock = lock ? nrm(null, 416, 60, [5, 10, 20, 30, 45, 60, 70, 80, 88]) : 0;
   const yearMin = 400 * nsqrt(aAU * aAU * aAU / Mtot);
+  // доба гри (сонячна): 24 год — 20 хв; резонанс 3:2 — 2 роки гри (рік стиснено сильніше за добу — пов'язані величини
+  // беремо в тих самих одиницях гри); сонячна доба в годинах — для коливання температури
+  const dayMin = held === 'res' ? 2 * yearMin : rotH * 20 / 24, dayH = held === 'res' ? 2 * yearH : rotH;
+  // періоди місяців і компаньйона — у добах гри; захоплене тіло — рівно 1 (стоїть), на висоті 5°…(90° − широта) над обрієм
+  for (const m of moons) m.period = m.perH * 20 / 24 / dayMin;
+  if (comp) comp.period = comp.perH * 20 / 24 / dayMin;
+  const hold = held === 'comp' ? comp : held === 'moon' ? moons[best.i] : null;
+  if (hold) { hold.period = 1; hold.fix = { u: dice(492), side: dice(493) < 0.5 ? -1 : 1 }; }
   // відцентрова: частка тяжіння на екваторі (Земля 0,0034); на ділянці — × cos²(широта)
   const cent = 1.977 * (pl.R / g0) / (rotH * rotH), cl = ncos(latR);
   const grav = g0 * (1 - cent * cl * cl);
@@ -324,33 +409,21 @@ export function lawsOf(seed, d, n) {
   const light = { az: 0.5 * L(30, 40) };   // азимут сходу (колір світла й частка розсіяного — з оптики, optics.js)
   // Небо й час (п. 4: з фізики — доба з обертання (24 год — 20 хв гри), зорі, рік і сезони, широта, місяці за Кеплером,
   // кільця, компаньйон; вигляд — sky.js bodiesOf). Ніч — не темрява (світло 0,16–0,32 денного), колір ночі, зорі, захід
-  const tM = tOf(440, 50), nMoon = tM < -1 ? 0 : tM < 1 ? 1 : tM < 2.2 ? 2 : 3;
-  const moons = [];
-  for (let i = 0; i < nMoon; i++) {
-    const b = 441 + 4 * i, D = nrm(null, b, 50, [3, 5, 10, 25, 60, 90, 150, 250, 400]) * (1 + 0.6 * i);
-    const Rkm = Math.min(0.4 * pl.R * 6371, nrm(null, b + 1, 50, [5, 20, 150, 700, 1737, 2400, 3000, 4000, 5000]));
-    const alb = nrm(null, b + 2, 50, [0.03, 0.05, 0.07, 0.09, 0.12, 0.2, 0.35, 0.5, 0.8]), rm = alb > 0.3 ? 0.35 : 0.6;
-    const rr = Rkm / (pl.R * 6371), q = rm * rr * rr * rr / pl.rho;
-    const perH = 1.406 * nsqrt(pl.R / g0) * nsqrt(D * D * D / (1 + q));
-    moons.push({
-      D, Rkm, albedo: alb, period: Math.max(0.3, perH / rotH), dec: 0.2 * L(b + 3, 30), off: U(131 + i, 20),
-      col: alb > 0.3 ? hsl(0.55 + 0.05 * L(b + 3, 20), 0.15, 0.86) : hsl(0.08 + 0.06 * L(116 + i * 3, 40), 0.06 + 0.25 * U(117 + i * 3, 40) * (i ? 1 : 0.4), 0.74),
-    });
-  }
-  const tCm = tOf(455, 60), cmpT = U(456, 40), cType = cmpT < 0.45 ? 0 : cmpT < 0.8 ? 1 : 2;   // газовий, кам'яний, крижаний
-  const comp = lvAbs(tCm) >= 1 ? {
-    f: nrm1T('компаньйон', tCm, [0, 0.01, 0.05, 0.15, 0.3]), type: cType,
-    rhoR: [[0.12, 0.35], [0.6, 1.3], [0.3, 0.45]][cType].reduce((a, b) => a + (b - a) * U(457, 30)),
-    Rr: [[4, 12], [0.5, 2], [0.6, 2.5]][cType].reduce((a, b) => a + (b - a) * U(458, 30)),
-    inc: 0.43 * L(459, 30), albedo: [0.5, 0.3, 0.65][cType], off: U(466, 20), hue: U(467, 30), hue2: U(468, 30),
-  } : null;
   const tRg = tOf(465, 60);
-  const rings = lvAbs(tRg) >= 1 ? (lv('кільця', tRg), {
+  let rings = lvAbs(tRg) >= 1 ? (lv('кільця', tRg), {
     r0: 1.5 + 0.6 * U(136, 30), w: 0.4 + 1.2 * U(137, 30), col: hsl(0.08 + 0.5 * U(138, 30) * U(138, 30), 0.15 + 0.3 * U(139, 30), 0.78),
     alpha: 0.35 + 0.45 * U(140, 30), bands: 3 + cat(U(141, 25), 8),
   }) : null;
+  // кільця — усередині орбіти найближчого тіла (13.10.2026: компаньйон перетинав кільця, а малюються вони поверх усього):
+  // зовнішній край — до 0,9 внутрішнього краю тіла; не влазять — кілець немає
+  if (rings) {
+    let inner = comp ? comp.D - comp.Rr : Infinity;
+    for (const m of moons) inner = Math.min(inner, m.D - m.rr);
+    const lim = 0.9 * inner;
+    if (rings.r0 + 0.15 > lim) { rings = null; delete tiers['кільця']; } else rings.w = Math.min(rings.w, lim - rings.r0);
+  }
   const sky = {
-    dayMin: rotH * 20 / 24, lock, lat: latR, az: light.az, off: lock ? 0.5 + hLock / 360 : 0.3 + 0.1 * L(143, 30),
+    dayMin, lock, held, lat: latR, az: light.az, off: lock ? 0.5 + hLock / 360 : 0.3 + 0.1 * L(143, 30),
     suns: [{ ...st0, main: true }, ...extra], moons, rings, comp,
     year: { min: yearMin, off: U(415, 30), obliq: obliq * PI / 180 },
     night: 0.16 + 0.16 * U(144, 30),                                   // світло вночі (частка денного): ночі не темрява
@@ -459,8 +532,8 @@ export function lawsOf(seed, d, n) {
   return {
     d, n, seed: hash3(seed, d, n), ds, weird, exotic: exotic > 0, grav, spread,
     star: { ...st0, n: nSun, d: dS, a: aAU, S: Sins, albedo, Ltot, Mtot, extra },
-    planet: { ...pl, Pmin, rot: rotH, cent, obliq, lat: latD, lock, hLock, year: yearMin },
-    clim: { Teq, Ts: Tsurf, Tpatch, ktr, lapse: atmo ? 0.052 * grav : 0, Ad: Math.min(150, 6 * nsqrt(rotH / 24) / nsqrt(Math.max(Pr / g0, 0.0004))),
+    planet: { ...pl, Pmin, rot: rotH, cent, obliq, lat: latD, lock, held, hLock, year: yearMin, yearH },
+    clim: { Teq, Ts: Tsurf, Tpatch, ktr, lapse: atmo ? 0.052 * grav : 0, Ad: Math.min(150, 6 * nsqrt(dayH / 24) / nsqrt(Math.max(Pr / g0, 0.0004))),
       As: 35 * nsin(obliq * PI / 180) * (sl < 0 ? -sl : sl) * ktr },
     comp, tanom,
     seaE, amp, wc, wh, wd, contrast, temp, wet,

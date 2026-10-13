@@ -113,7 +113,7 @@ export async function runLight() {
   LG.setDirectionalCount(1);
   const sc = dev.scope, U = (k, v) => sc.resolve(k).setValue(v);
   const Z16 = new Float32Array(16);
-  U('uMoon[0]', Z16); U('uMoonCol[0]', Z16); U('uMoon2[0]', Z16); U('uNMoon', 0); U('uAurE', 0.4); U('uMet[0]', Z16); U('uMetB[0]', Z16); U('uNMet', 0); U('uCloudC', [1e6, 0, 1, 800]);
+  U('uMoon[0]', Z16); U('uMoonCol[0]', Z16); U('uMoon2[0]', Z16); U('uMoonA[0]', Z16); U('uMoonB[0]', Z16); U('uNMoon', 0); U('uAurG', [0, 6371, 150, 0]); U('uFwd', [1, 0, 0]); U('uMet[0]', Z16); U('uMetB[0]', Z16); U('uNMet', 0); U('uCloudC', [1e6, 0, 1, 800]);
   U('uCloudMap', new pc.Texture(dev, { width: 1, height: 1, format: pc.PIXELFORMAT_R8, mipmaps: false })); U('uNSun', 1); U('uStars', [0, 0]);
   U('uCel', new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1])); U('uRing', [0, 0, 0, 0]); U('uRingCol', [0, 0, 0]); U('uPole', [0, 0, 1]);
   U('uCloud', [0, 0, 0, 0]); U('uCloudCol', [1, 1, 1]); U('uFlash', 0); U('uAur', [0, 1, 0, 0]); U('uAurCol', [0, 0, 0]);
