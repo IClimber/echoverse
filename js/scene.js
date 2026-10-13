@@ -22,7 +22,7 @@ import { SEA, MAX_AMP, L_LAVA } from './universe.js';
 import { liquidVis } from './collision.js';
 import { figureParts } from './gen/mesh.js';
 import { poseMatrices, viewArms } from './anim.js';
-import { skyState, applyWeather, lightsOf, lightSlots, pcIntensity } from './sky.js';
+import { skyState, applyWeather, CLOUD_H, lightsOf, lightSlots, pcIntensity } from './sky.js';
 import { far2, near2 } from './engine/core/frustum.js';
 import { ISO, FIRST, CAM_R, fovOf, VIEW_R, FAR_R, SEAM, viewProj, isoRadius, project, basis, aabbInView, aabbInside, LOD_R, LOD_CAP, LOD_ON, lodOf, keepLod, colDist, FLORA_NEAR, FLORA_FADE, FLORA_THIN } from './camera.js';
 import { regionOf, RS, RW, RH, PO, PQ } from './gen/pack.js';
@@ -550,7 +550,7 @@ export async function createScene(canvas, settings = {}) {
   // (до 12.10.2026 — квадрат ±6 км, за ним — хмарність у точці гравця: хмари обривались прямою лінією на 7,6° над
   // обрієм). Оновлюється частинами (2 рядки за кадр) не частіше разу на секунду чи після зсуву > 200 м; новий всесвіт —
   // одразу вся
-  const CM = 64, CMA = 3000, CMH = 800, cmBuf = new Uint8Array(CM * CM), cmP = new Float32Array(CM * CM * 2);
+  const CM = 64, CMA = 3000, CMH = CLOUD_H, cmBuf = new Uint8Array(CM * CM), cmP = new Float32Array(CM * CM * 2);
   for (let j = 0; j < CM; j++) for (let i = 0; i < CM; i++) {
     const qx = (i + 0.5) / CM * 2 - 1, qy = (j + 0.5) / CM * 2 - 1, q = Math.hypot(qx, qy), k = CMA / (1 - Math.min(q, 0.995));
     cmP[(j * CM + i) * 2] = qx * k; cmP[(j * CM + i) * 2 + 1] = qy * k;
@@ -751,7 +751,7 @@ export async function createScene(canvas, settings = {}) {
 
       const { target: t, view, laws } = st, sk = skyState(laws, st.clock || 0), wt = st.weather;
       const curve = laws.phys ? 0.5 / laws.phys.planetR : 0;   // кривизна (шейдер опускає світ на curve·d², d — від цілі)
-      if (wt) applyWeather(sk, laws, wt.W, st.clock || 0);
+      if (wt) applyWeather(sk, laws, wt.W);
       const vk = sk.visK ?? 1, iso = st.camera.mode === ISO, first = st.camera.mode === FIRST, lodOn = LOD_ON && !iso;
       const me = st.me, m = view.m, b = basis(st.camera);
       const tk = `${laws.d}:${laws.n}:${laws.ds}`;

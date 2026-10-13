@@ -204,10 +204,12 @@ function celMatrix(A, h) {
   return [...X, ...Y, ...p];
 }
 
+export const CLOUD_H = 800;   // висота шару хмар над камерою, м (карта хмар у scene.js, шейдер неба)
+
 // Погода поверх стану неба st (змінює його): серпанок — видимість (колір — оптика); хмари й опади — сіріше й темніше;
 // без повітря — без хмар; пил — колір пустелі;
-// блискавка — спалах. W — weather.js weatherAt, clock — для руху хмар. Додає st.cloud, st.flash, st.visK
-export function applyWeather(st, L, W, clock) {
+// блискавка — спалах. W — weather.js weatherAt (W.drift — рух хмар). Додає st.cloud, st.flash, st.visK
+export function applyWeather(st, L, W) {
   const A = L.air, vac = !!A.vacuum, I = Math.min(1, st.lightK[1]);   // колір неба й серпанку — уже з оптики (skyState)
   const gray = [150 * (0.2 + 0.8 * I), 156 * (0.2 + 0.8 * I), 166 * (0.22 + 0.78 * I)];
   st.horizon = mix(st.horizon, gray, W.dim * 1.2 + (1 - W.vis) * 0.4 * (1 - W.dust));
@@ -217,8 +219,10 @@ export function applyWeather(st, L, W, clock) {
   st.dimK = dimK;
   st.lightK = [st.lightK[0] * dimK + fl, st.lightK[1] * dimK + fl, st.lightK[2] * dimK + fl * 1.1];
   st.fog = st.horizon;
-  const cw = 0.0012 + 0.0004 * Math.min(1, A.wind / 6);         // хмари пливуть за вітром (зсув текстури — проти)
-  st.cloud = vac ? null : { k: W.clouds, off: [13.7 - clock * W.wind[0] * cw, 5.1 - clock * W.wind[1] * cw], dark: W.dim * 1.3, col: [255 * (0.18 + 0.82 * I), 255 * (0.18 + 0.82 * I), 255 * (0.2 + 0.8 * I)] };
+  // хмари пливуть разом з полем погоди (зсув текстури — проти): шар на висоті CLOUD_H, у шейдері uv = 0,9·r/H. Не вітер у
+  // точці × годинник — пориви (τ 3–8 с) на тисячах секунд годинника кидали хмари туди й назад на десятки кілометрів
+  const cw = 0.9 / CLOUD_H, dr = W.drift || [0, 0];
+  st.cloud = vac ? null : { k: W.clouds, off: [13.7 - dr[0] * cw, 5.1 - dr[1] * cw], dark: W.dim * 1.3, col: [255 * (0.18 + 0.82 * I), 255 * (0.18 + 0.82 * I), 255 * (0.2 + 0.8 * I)] };
   st.flash = W.flash;
   if (st.aurora) st.aurora.k *= Math.min(1, A.pressure * 2) * (1 - W.clouds * 0.8);   // без повітря — без сяйв, хмари ховають
   st.visK = vac ? 1.15 : W.vis * (1 - 0.45 * A.haze);

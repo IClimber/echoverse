@@ -397,8 +397,19 @@ test('атмосфера й погода: біля старту — придат
   assert.equal(localWeather(L, D, false, false, false).type, null);              // пилова буря — лише в сухому
   // без повітря — чорне небо із зорями вдень
   const noon = (0.5 - L.sky.off + 1) % 1 * L.sky.dayMin * 60 / L.phys.time, Lv = { ...L, air: { ...L.air, pressure: 0, vacuum: true } };
-  const st = skyState(L, noon), sv = applyWeather(skyState(Lv, noon), Lv, { ...W, precip: 0, clouds: 0.5, dim: 0 }, 0);
+  const st = skyState(L, noon), sv = applyWeather(skyState(Lv, noon), Lv, { ...W, precip: 0, clouds: 0.5, dim: 0 });
   assert.ok(sv.zenith[2] < st.zenith[2] * 0.4 && sv.stars > 0.5 && !sv.cloud, 'без повітря');
+  // хмари неба пливуть рівномірно за полем погоди: за секунду — мало й в один бік, хоч вітер у точці поривчастий
+  let prevD = null;
+  for (let t = 50000; t < 50000 + 600; t += 1) {
+    const o = applyWeather(skyState(L, t), L, weatherAt(L, t)).cloud.off;
+    if (prevD) {
+      const d = [o[0] - prevD[2], o[1] - prevD[3]];
+      assert.ok(Math.hypot(d[0], d[1]) < 0.01, `хмари стрибнули на ${Math.hypot(d[0], d[1]).toFixed(3)} за 1 с`);
+      if (prevD[0] !== undefined) assert.ok(d[0] * prevD[0] + d[1] * prevD[1] >= 0, 'хмари повернули назад');
+      prevD = [d[0], d[1], o[0], o[1]];
+    } else prevD = [undefined, undefined, o[0], o[1]];
+  }
   assert.ok(W_STORM === 3);
 });
 

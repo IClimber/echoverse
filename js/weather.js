@@ -66,7 +66,8 @@ export function prevailing(L, clock = 0) {
   return { dir: [A.e[0] * dx + A.nn[0] * dy, A.e[1] * dx + A.nn[1] * dy], calm: 0.5 + 0.5 * ss(0, 5, Math.min(r, W - r)) };
 }
 
-// Погода в точці (x, y) у мить clock: {kind, clouds, vis, precip, dust, dim, wind [x, y] (м/с, рівнина), windK, flash, q};
+// Погода в точці (x, y) у мить clock: {kind, clouds, vis, precip, dust, dim, wind [x, y] (м/с, рівнина), windK, flash, q,
+// drift [x, y] (м) — на скільки поле хмар зсунулось за вітром від clock 0: хмари неба пливуть з ним рівномірно};
 // prev — попередній результат у цій точці (гістерезис назви: біля порогу й першу хвилину стану — як була)
 // Поля погоди в точці: хмарне q, туман qf, пил qd (рівномірні 0…1) і параметри вигляду P (плавно через пороги)
 function fields(L, clock, x, y, only) {
@@ -93,7 +94,7 @@ function prevailingC(L, clock) {
 }
 
 export function weatherAt(L, clock, x = 0, y = 0, prev = null) {
-  if (L.air.vacuum) return { kind: W_CLEAR, clouds: 0, vis: 1, precip: 0, dust: 0, dim: 0, wind: [0, 0], windK: 0, flash: 0, q: 0, since: clock };
+  if (L.air.vacuum) return { kind: W_CLEAR, clouds: 0, vis: 1, precip: 0, dust: 0, dim: 0, wind: [0, 0], windK: 0, flash: 0, q: 0, since: clock, drift: [0, 0] };
   const { q, qf, qd, P, Th, Pw, t, sx, sy, st, v0 } = fields(L, clock, x, y), [t1, t2, t3] = Th.t;
   // назва: за порогами з гістерезисом (поруч із межею — як була)
   const kindQ = (h) => q < t1 + h[0] ? W_CLEAR : q < t2 + h[1] ? W_CLOUDY : q < t3 + h[2] ? W_RAIN : W_STORM;
@@ -111,7 +112,8 @@ export function weatherAt(L, clock, x = 0, y = 0, prev = null) {
   const ws = v0 * P.wind * Pw.calm * (0.8 + 0.4 * day) * Math.max(0.4, gust);
   const dev = 0.7 * fbm3(L.ds ^ 0x4d1, sx * 0.5, sy * 0.5, st * 0.5, 2), c = Math.cos(dev), s = Math.sin(dev);
   const wx = Pw.dir[0] * c - Pw.dir[1] * s, wy = Pw.dir[0] * s + Pw.dir[1] * c;
-  return { kind, clouds: P.clouds, vis: P.vis, precip: P.precip, dust: P.dust, dim: P.dim, wind: [wx * ws, wy * ws], windK: ws, flash: 0, q, since };
+  return { kind, clouds: P.clouds, vis: P.vis, precip: P.precip, dust: P.dust, dim: P.dim, wind: [wx * ws, wy * ws], windK: ws, flash: 0, q, since,
+    drift: [Pw.dir[0] * v0 * 0.5 * t, Pw.dir[1] * v0 * 0.5 * t] };
 }
 
 // Вітер на висоті й відкритості: × clamp(1 + 0,35·(z − z̄)/32, 0,6…1,6) × (1 + висота над морем / 2000); z̄ — середня
