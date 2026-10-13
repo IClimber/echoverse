@@ -21,6 +21,10 @@
 import { pc } from './app.js';
 
 export const MAT_N = 32;
+// Час у шейдер — уже загорнутими фазами (materials.js setFrame, подвійна точність): вітер — sin(WIND_W·t + фаза точки),
+// фаза — t·WIND_W mod 2π (для аномалій — t·k·WIND_W); плин — зсув текстури τ·FLOW_UV, τ = t·w mod FLOW_P (w — плин
+// матеріалу, eco_mat.w): FLOW_P·FLOW_UV — цілі, тож загортання зсуває текстуру на цілу кількість клітинок (непомітно)
+export const WIND_W = 1.9, FLOW_UV = [0.05, 0.03], FLOW_P = 100;
 
 // ---------------- GLSL ----------------
 const DECL_VS = `
@@ -62,10 +66,10 @@ const TRANSFORM_ADD = `
 	#ifdef ECO_WIND
 		float eco_wm = mod(floor(vertex_position.w * 65535.0 + 0.5), 32.0);
 		if (eco_mat[int(eco_wm)].y > 0.5) {
-			float eco_ph = posW.x * 0.9 + posW.z * 1.3 + posW.y * 0.7, eco_s = sin(eco_wind.z * 1.9 + eco_ph);
-			if (eco_tanom.z > 0.5) {   // часові аномалії: суміш трьох часів (t, t·k_п, t·k_ш) з вагами плям
+			float eco_ph = posW.x * 0.9 + posW.z * 1.3 + posW.y * 0.7, eco_s = sin(eco_wind.z + eco_ph);
+			if (eco_tanom.z > 0.5) {   // часові аномалії: суміш трьох фаз (час t, t·k_п, t·k_ш) з вагами плям
 				vec2 eco_tw = textureLod(eco_tanomMap, (posW.xz - eco_tanomO) / eco_tanom.w, 0.0).rg;
-				eco_s = eco_s * (1.0 - eco_tw.r - eco_tw.g) + eco_tw.r * sin(eco_wind.z * eco_tanom.x * 1.9 + eco_ph) + eco_tw.g * sin(eco_wind.z * eco_tanom.y * 1.9 + eco_ph);
+				eco_s = eco_s * (1.0 - eco_tw.r - eco_tw.g) + eco_tw.r * sin(eco_tanom.x + eco_ph) + eco_tw.g * sin(eco_tanom.y + eco_ph);
 			}
 			posW.xz += eco_wind.xy * (0.55 + 0.45 * eco_s);
 		}
@@ -82,7 +86,7 @@ uniform vec2 eco_tanomO;
 uniform sampler2D eco_tanomMap;
 uniform vec3 eco_target;
 uniform float eco_seam;
-uniform float eco_time;
+uniform vec4 eco_flow[${MAT_N}];
 uniform float eco_minLight;
 uniform vec4 eco_mat[${MAT_N}];
 uniform vec3 eco_eye;
@@ -110,10 +114,11 @@ void getAlbedo() {
     if (length(vPositionW.xz - eco_target.xz) < eco_seam) discard;
   #endif
   float eco_m = floor(vEcoMat + 0.5);   // стала на трикутнику, але інтерполяція дає 18,9999 замість 19 — int() взяв би сусідній матеріал (мерехтіння)
-  vec4 eco_p = eco_mat[int(min(eco_m, ${MAT_N - 1}.0))];
+  int eco_i = int(min(eco_m, ${MAT_N - 1}.0));
+  vec4 eco_p = eco_mat[eco_i], eco_fl = eco_flow[eco_i];
   vec3 an = abs(vNormalW), tp = vPositionW;
   vec2 uv = an.y >= max(an.x, an.z) ? tp.xz : (an.x >= an.z ? vec2(tp.z, -tp.y) : vec2(tp.x, -tp.y));
-  uv += eco_time * eco_p.w * vec2(0.05, 0.03);
+  uv += eco_fl.x * vec2(${FLOW_UV});
   vec2 g1 = dFdx(uv), g2 = dFdy(uv), cell = floor(uv), f = uv - cell - 0.5;
   if (eco_p.z < 1.5) {
     float h = fract(sin(dot(vec3(cell, eco_m), vec3(12.9898, 78.233, 37.719))) * 43758.5453);
@@ -128,7 +133,7 @@ void getAlbedo() {
     vec2 eco_tw = textureLod(eco_tanomMap, (vPositionW.xz - eco_tanomO) / eco_tanom.w, 0.0).rg;
     float eco_w = eco_tw.r + eco_tw.g;
     if (eco_w > 0.002) {
-      vec2 uv2 = uv + eco_time * ((eco_tw.r > eco_tw.g ? eco_tanom.x : eco_tanom.y) - 1.0) * eco_p.w * vec2(0.05, 0.03);
+      vec2 uv2 = uv + ((eco_tw.r > eco_tw.g ? eco_fl.y : eco_fl.z) - eco_fl.x) * vec2(${FLOW_UV});
       eco_col = mix(eco_col, vVertexColor.rgb * textureGrad(uTexArr, vec3(fract(uv2), eco_m), g1, g2).rgb * 4.595, eco_w);
     }
   }
@@ -240,10 +245,10 @@ const TRANSFORM_ADD_W = `
 		let eco_wm: f32 = eco_wr - floor(eco_wr / 32.0) * 32.0;
 		if (uniform.eco_mat[i32(eco_wm)].y > 0.5) {
 			let eco_ph: f32 = posW.x * 0.9 + posW.z * 1.3 + posW.y * 0.7;
-			var eco_s: f32 = sin(uniform.eco_wind.z * 1.9 + eco_ph);
+			var eco_s: f32 = sin(uniform.eco_wind.z + eco_ph);
 			if (uniform.eco_tanom.z > 0.5) {
 				let eco_tw: vec2f = textureSampleLevel(eco_tanomMap, eco_tanomMapSampler, (posW.xz - uniform.eco_tanomO) / uniform.eco_tanom.w, 0.0).rg;
-				eco_s = eco_s * (1.0 - eco_tw.r - eco_tw.g) + eco_tw.r * sin(uniform.eco_wind.z * uniform.eco_tanom.x * 1.9 + eco_ph) + eco_tw.g * sin(uniform.eco_wind.z * uniform.eco_tanom.y * 1.9 + eco_ph);
+				eco_s = eco_s * (1.0 - eco_tw.r - eco_tw.g) + eco_tw.r * sin(uniform.eco_tanom.x + eco_ph) + eco_tw.g * sin(uniform.eco_tanom.y + eco_ph);
 			}
 			eco_s = 0.55 + 0.45 * eco_s;
 			posW.x = posW.x + uniform.eco_wind.x * eco_s;
@@ -264,7 +269,7 @@ var eco_tanomMap: texture_2d<f32>;
 var eco_tanomMapSampler: sampler;
 uniform eco_target: vec3f;
 uniform eco_seam: f32;
-uniform eco_time: f32;
+uniform eco_flow: array<vec4f, ${MAT_N}>;
 uniform eco_minLight: f32;
 uniform eco_mat: array<vec4f, ${MAT_N}>;
 uniform eco_eye: vec3f;
@@ -284,11 +289,13 @@ var<private> eco_col: vec3f;
 const DIFFUSE_PS_W = `
 fn getAlbedo() {
   let eco_m: f32 = floor(vEcoMat + 0.5);   // див. GLSL: інтерполяція сталої не точна
-  let eco_p: vec4f = uniform.eco_mat[i32(min(eco_m, ${MAT_N - 1}.0))];
+  let eco_i: i32 = i32(min(eco_m, ${MAT_N - 1}.0));
+  let eco_p: vec4f = uniform.eco_mat[eco_i];
+  let eco_fl: vec4f = uniform.eco_flow[eco_i];
   let an: vec3f = abs(vNormalW);
   let tp: vec3f = vPositionW;
   var uv: vec2f = select(select(vec2f(tp.x, -tp.y), vec2f(tp.z, -tp.y), an.x >= an.z), tp.xz, an.y >= max(an.x, an.z));
-  uv = uv + uniform.eco_time * eco_p.w * vec2f(0.05, 0.03);
+  uv = uv + eco_fl.x * vec2f(${FLOW_UV});
   var g1: vec2f = dpdx(uv);
   var g2: vec2f = dpdy(uv);
   let cell: vec2f = floor(uv);
@@ -308,7 +315,7 @@ fn getAlbedo() {
     let eco_tw: vec2f = textureSampleLevel(eco_tanomMap, eco_tanomMapSampler, (vPositionW.xz - uniform.eco_tanomO) / uniform.eco_tanom.w, 0.0).rg;
     let eco_w: f32 = eco_tw.r + eco_tw.g;
     if (eco_w > 0.002) {
-      let uv2: vec2f = uv + uniform.eco_time * (select(uniform.eco_tanom.y, uniform.eco_tanom.x, eco_tw.r > eco_tw.g) - 1.0) * eco_p.w * vec2f(0.05, 0.03);
+      let uv2: vec2f = uv + (select(eco_fl.z, eco_fl.y, eco_tw.r > eco_tw.g) - eco_fl.x) * vec2f(${FLOW_UV});
       eco_col = mix(eco_col, vVertexColor.rgb * textureSampleGrad(uTexArr, uTexArrSampler, fract(uv2), i32(eco_m), g1, g2).rgb * 4.595, eco_w);
     }
   }

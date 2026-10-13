@@ -794,7 +794,7 @@ export async function createScene(canvas, settings = {}) {
       }
       const slots = lightSlots(laws);
       if (fresh) { lawsKey = tk; LG.setDirectionalCount(slots); LG.invalidate(); }
-      const lt = (st.clock || 0) * (laws.phys ? laws.phys.time : 1) % 3000;
+      const lt = (st.clock || 0) * (laws.phys ? laws.phys.time : 1);   // фази вітру й плину загортає materials.js setFrame
 
       // плаваючий початок (регіони, світла, плитки — на подію 'origin')
       if (G.setOrigin(t)) for (const f of farShown) f.e.node.setLocalPosition(f.x0 - G.O[0], f.y0 - G.O[1], 0);
@@ -849,7 +849,7 @@ export async function createScene(canvas, settings = {}) {
 
       // Уніформи кадру: вітер, кривизна, ціль, шов, час, мінімум світла, око, розчинення, «вікно»
       const wk = wt ? Math.min(0.012, 0.09 / (Math.hypot(wt.W.wind[0], wt.W.wind[1]) + 1e-6)) : 0;
-      wind4[0] = wt ? wt.W.wind[0] * wk : 0; wind4[1] = wt ? wt.W.wind[1] * wk : 0; wind4[2] = lt;
+      wind4[0] = wt ? wt.W.wind[0] * wk : 0; wind4[1] = wt ? wt.W.wind[1] * wk : 0;
       tgtPC[0] = t[0] - G.O[0]; tgtPC[1] = t[2]; tgtPC[2] = t[1] - G.O[1];
       eyePC[0] = tgtPC[0] + e[0]; eyePC[1] = tgtPC[1] + e[2]; eyePC[2] = tgtPC[2] + e[1];
       const camD = Math.hypot(...e);
