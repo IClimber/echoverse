@@ -16,6 +16,7 @@ import { createBolts } from './engine/graphics/bolts.js';
 import { cloudsAt, meteorsAt, boltSegs } from './weather.js';
 import { timeK } from './worldphys.js';
 import { SKY_GLSL, SKY_WGSL } from './sky-shader.js';
+import { createHorizon } from './horizon.js';
 import { CS } from './gen/chunk.js';
 import { L_LAVA, LEVEL } from './universe.js';
 import { liquidVis } from './collision.js';
@@ -511,7 +512,8 @@ export async function createScene(canvas, settings = {}) {
   // ---- небо: уніформи (sky-shader.js) через dev.scope ----
   const sc = dev.scope, U = (k) => sc.resolve(k);
   const wrapN = (v) => ((v % 256) + 256) % 256;      // період шуму неба (sky-shader.js): зсув хмар — без великих чисел
-  const SU = Object.fromEntries(['uZen', 'uHor', 'uMain', 'uDusk', 'uSun[0]', 'uSunCol[0]', 'uMoon[0]', 'uMoonCol[0]', 'uMoon2[0]', 'uMoonA[0]', 'uMoonB[0]', 'uNSun', 'uNMoon', 'uDay', 'uStars', 'uCel', 'uRing', 'uRingCol', 'uPole', 'uCloud', 'uCloudCol', 'uFlash', 'uAur', 'uAurCol', 'uAurG', 'uFwd', 'uCloudC', 'uCloudMap', 'uMet[0]', 'uMetB[0]', 'uNMet', 'eco_bakeK'].map((k) => [k, U(k)]));
+  const SU = Object.fromEntries(['uZen', 'uHor', 'uMain', 'uDusk', 'uSun[0]', 'uSunCol[0]', 'uMoon[0]', 'uMoonCol[0]', 'uMoon2[0]', 'uMoonA[0]', 'uMoonB[0]', 'uNSun', 'uNMoon', 'uDay', 'uStars', 'uCel', 'uRing', 'uRingCol', 'uPole', 'uCloud', 'uCloudCol', 'uFlash', 'uAur', 'uAurCol', 'uAurG', 'uFwd', 'uCloudC', 'uCloudMap', 'uMet[0]', 'uMetB[0]', 'uNMet', 'eco_bakeK', 'uHz[0]'].map((k) => [k, U(k)]));
+  const hzOf = createHorizon();                      // справжній обрій з ока (js/horizon.js)
   const sun4 = new Float32Array(12), sunC = new Float32Array(12), moon4 = new Float32Array(16), moonC = new Float32Array(16), moon2 = new Float32Array(16), moonA = new Float32Array(16), moonB = new Float32Array(16), cel = new Float32Array(9);
   const c3 = (v) => [v[0] / 255, v[1] / 255, v[2] / 255];
   function setSky(st, bakeK) {
@@ -824,6 +826,7 @@ export async function createScene(canvas, settings = {}) {
       const bakeK = Lt.amb / Math.max(1e-4, 0.6 * lum(sk.zenith) + 0.4 * lum(sk.horizon));
       setSky(sk, bakeK);
       SU.uFwd.setValue([-b.u[0], -b.u[1], -b.u[2]]);   // погляд камери: диски світил — у площині кадру (sky-shader.js)
+      SU['uHz[0]'].setValue(hzOf(laws, t[0] + e[0], t[1] + e[1], t[2] + e[2], curve > 0 ? laws.phys.planetR : 0, FAR_R));
       cloudMap(laws, st.clock || 0, t[0] + view.eye[0], t[1] + view.eye[1], performance.now());
       meteors(laws, st.clock || 0, 1 - sk.day);
       bolt(st.bolt, st.clock || 0, [t[0] + view.eye[0], t[1] + view.eye[1], t[2] + view.eye[2]]);

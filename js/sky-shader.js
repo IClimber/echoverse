@@ -50,6 +50,7 @@ uniform vec4 uMet[4];
 uniform vec4 uMetB[4];
 uniform int uNMet;
 uniform float eco_bakeK;
+uniform vec4 uHz[4];
 float ecoHash(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 45.164))) * 43758.5453); }
 float ecoHashN(vec2 p) { vec3 q = fract(mod(p, 256.0).xyx * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
 float ecoNoise(vec2 p) {
@@ -86,11 +87,26 @@ vec3 ecoBodyN(vec3 e, vec3 o, float s, float l2) { float D = 1.0 / sin(s); retur
 // Край тіла: згладжування на 5 % радіуса, не ширше 0,0075 рад (до 13.10.2026 — частка радіуса: край компаньйона в 54° —
 // розмитий на ~4°)
 float ecoEdge(float l2, float s) { return smoothstep(0.0, 0.05 * min(s, 0.15), s - asin(min(1.0, sqrt(l2) * sin(s)))); }
+// Справжній обрій (js/horizon.js): sin кута під горизонталлю в напрямку d — 16 азимутів від +x, лінійно між ними
+float ecoHzK(int k) { vec4 q = uHz[k / 4]; int j = k - k / 4 * 4; return j == 0 ? q.x : j == 1 ? q.y : j == 2 ? q.z : q.w; }
+float ecoHz(vec3 d) {
+  float a = atan(d.y, abs(d.x) + abs(d.y) < 1e-7 ? 1.0 : d.x) * 2.5464791 + 16.0, i = floor(a);   // 16 / 2π; a ∈ [8, 24]
+  int k = int(i) - int(i) / 16 * 16;
+  return mix(ecoHzK(k), ecoHzK(k == 15 ? 0 : k + 1), a - i);
+}
 vec3 ecoSky(vec3 d) {
-  float up = d.z, above = smoothstep(-0.02, 0.01, up);
-  vec3 c = up < 0.0 ? uHor * (1.0 + up * 0.35) : mix(uHor, uZen, smoothstep(0.0, 0.55, up));
+  // uph — висота над справжнім обрієм: з висоти він нижче горизонталі (кривизна), до нього — небо, світила й тіла;
+  // хмари й сяйво — шари над оком, від горизонталі (up); запікання розсіяного — від горизонталі, як і було
+  float up = d.z;
+#ifdef ECO_BAKE
+  float uph = up;
+#else
+  float uph = up + ecoHz(d);
+#endif
+  float above = smoothstep(-0.02, 0.01, uph);
+  vec3 c = uph < 0.0 ? uHor * (1.0 + uph * 0.35) : mix(uHor, uZen, smoothstep(0.0, 0.55, uph));
   float g = max(dot(d, uMain), 0.0);
-  c += uDusk.rgb * uDusk.a * (pow(g, 5.0) * 0.6 + pow(g, 40.0) * 0.4) * smoothstep(-0.25, 0.05, up);
+  c += uDusk.rgb * uDusk.a * (pow(g, 5.0) * 0.6 + pow(g, 40.0) * 0.4) * smoothstep(-0.25, 0.05, uph);
 #ifndef ECO_BAKE
   vec3 c0 = c;                                   // небо перед світилами (без зір)
 #endif
@@ -104,7 +120,7 @@ vec3 ecoSky(vec3 d) {
     cover = cov > 0.01 ? smoothstep(1.02 - cov * 0.75, 1.25 - cov * 0.7, f + 0.25) * smoothstep(0.0, 0.12, up) : 0.0;
   }
 #ifndef ECO_BAKE
-  if (uStars.x > 0.01 && up > -0.05) {
+  if (uStars.x > 0.01 && uph > -0.05) {
     vec3 q = d * uCel, aq = abs(q);
     vec2 uv; float f;
     if (aq.x >= aq.y && aq.x >= aq.z) { uv = q.yz / aq.x; f = sign(q.x); }
@@ -116,7 +132,7 @@ vec3 ecoSky(vec3 d) {
       vec2 ctr = cell + 0.25 + 0.5 * vec2(ecoHash(vec3(cell, f + 7.0)), ecoHash(vec3(cell, f + 13.0)));
       float br = (1.0 - smoothstep(0.0, 0.34, length(uv - ctr))) * (0.35 + 0.65 * ecoHash(vec3(cell, f + 3.0)));
       vec3 sc = mix(vec3(1.0), 0.55 + 0.45 * cos(6.2831 * (uStars.y + ecoHash(vec3(cell, f + 5.0)) * 0.3 + vec3(0.0, 0.33, 0.67))), 0.5);
-      c += sc * br * uStars.x * smoothstep(-0.05, 0.12, up);
+      c += sc * br * uStars.x * smoothstep(-0.05, 0.12, uph);
     }
   }
 #endif
@@ -133,8 +149,8 @@ vec3 ecoSky(vec3 d) {
     float cs = dot(d, uSun[i].xyz), s = uSun[i].w, th2 = max(0.0, 2.0 * (1.0 - cs));
     float disk = 1.0 - smoothstep(0.85, 1.1, ecoDisk(d, uSun[i].xyz, s).w);
     vec3 sc = uSunCol[i].rgb;
-    c = mix(c, sc / max(max(sc.r, sc.g), max(sc.b, 0.001)), disk * above * hide);
-    glow += sc * uSunCol[i].a * (exp(-th2 / (s * s * 9.0)) * 0.45 * hide + exp(-th2 / (s * s * 90.0)) * 0.12) * above;
+    c = mix(c, sc / max(max(sc.r, sc.g), max(sc.b, 0.001)), disk * hide);
+    glow += sc * uSunCol[i].a * (exp(-th2 / (s * s * 9.0)) * 0.45 * hide + exp(-th2 / (s * s * 90.0)) * 0.12);
   }
   for (int i = 0; i < 4; i++) {
     if (i >= uNMoon) break;
@@ -148,7 +164,7 @@ vec3 ecoSky(vec3 d) {
       else if (ty > 1.5 && ty < 2.5) mc = mix(mc, uMoon2[i].rgb, smoothstep(0.48, 0.56, ecoFbm(nb.xy * 3.0 + nb.z * 5.0 + 3.0)));
       else if (ty > 2.5) mc = mix(mc, uMoon2[i].rgb, 0.4 * smoothstep(0.45, 0.65, ecoFbm(nb.xy * 6.0 + nb.z * 2.0)));
       mc = mix(mc, mc * vec3(0.35, 0.12, 0.08), uMoon2[i].a);
-      c = mix(c, mix(c0, mc * (0.14 + 0.86 * lit), 1.0 - 0.45 * uDay), ecoEdge(e.w, uMoon[i].w) * above);
+      c = mix(c, mix(c0, mc * (0.14 + 0.86 * lit), 1.0 - 0.45 * uDay), ecoEdge(e.w, uMoon[i].w));
     }
   }
   c += glow;
@@ -162,7 +178,7 @@ vec3 ecoSky(vec3 d) {
         if (r > uRing.x && r < uRing.y) {
           float u = (r - uRing.x) / (uRing.y - uRing.x);
           float band = 0.5 + 0.5 * sin(u * uRing.w * 6.2831 + 1.3) * (0.6 + 0.4 * sin(u * uRing.w * 2.3));
-          float al = uRing.z * band * smoothstep(0.0, 0.06, u) * (1.0 - smoothstep(0.94, 1.0, u)) * smoothstep(-0.03, 0.04, up);
+          float al = uRing.z * band * smoothstep(0.0, 0.06, u) * (1.0 - smoothstep(0.94, 1.0, u)) * smoothstep(-0.03, 0.04, uph);
           c = mix(c, uRingCol * (0.3 + 0.7 * uDay) + uDusk.rgb * uDusk.a * 0.2, al);
         }
       }
@@ -205,13 +221,16 @@ vec3 ecoSky(vec3 d) {
     c += mix(uAurCol, uAurCol.gbr * 0.8, top / max(acc, 1e-4)) * a * 0.9;
   }
   for (int i = 0; i < 4; i++) {
-    if (i >= uNMet || up < 0.0) break;
+    if (i >= uNMet || uph < 0.0) break;
     vec3 a = normalize(uMet[i].xyz), b = normalize(uMetB[i].xyz);
     float t = uMet[i].w;
     vec3 hd = normalize(mix(a, b, t)), tl = normalize(mix(a, b, max(0.0, t - 0.35))), ab = hd - tl;
     float s = clamp(dot(d - tl, ab) / max(dot(ab, ab), 1e-8), 0.0, 1.0), dist = length(d - (tl + ab * s));
-    c += vec3(1.0, 0.95, 0.85) * uMetB[i].w * s * (1.0 - t * t) * (1.0 - smoothstep(0.0, 0.003, dist)) * smoothstep(0.0, 0.1, up);
+    c += vec3(1.0, 0.95, 0.85) * uMetB[i].w * s * (1.0 - t * t) * (1.0 - smoothstep(0.0, 0.003, dist)) * smoothstep(0.0, 0.1, uph);
   }
+  // нижче справжнього обрію — планета за краєм далечі, у тумані (колір туману — обрій, js/sky.js): закриває все небо разом —
+  // і тіла (до 14.10.2026 кожне тіло окремо: у смузі обрію крізь напівпрозорий компаньйон світило сонце), і заграву
+  c = mix(uHor, c, above);
 #endif
   if (cover > 0.0) {
     float sh = 1.0 - uCloud.w * smoothstep(0.3, 1.0, cover);
@@ -261,6 +280,7 @@ uniform uMet: array<vec4f, 4>;
 uniform uMetB: array<vec4f, 4>;
 uniform uNMet: i32;
 uniform eco_bakeK: f32;
+uniform uHz: array<vec4f, 4>;
 var uCloudMap: texture_2d<f32>;
 var uCloudMapSampler: sampler;
 fn ecoHash(p: vec3f) -> f32 { return fract(sin(dot(p, vec3f(12.9898, 78.233, 45.164))) * 43758.5453); }
@@ -323,12 +343,25 @@ fn ecoBodyN(e: vec3f, o: vec3f, s: f32, l2: f32) -> vec3f {
   return normalize((D * dot(e, o) - sqrt(max(0.0, 1.0 - l2))) * e - D * o);
 }
 fn ecoEdge(l2: f32, s: f32) -> f32 { return ecoSs(0.0, 0.05 * min(s, 0.15), s - asin(min(1.0, sqrt(l2) * sin(s)))); }
+// справжній обрій (як у GLSL)
+fn ecoHzK(k: i32) -> f32 { return uniform.uHz[k / 4][k % 4]; }
+fn ecoHz(d: vec3f) -> f32 {
+  let a = atan2(d.y, select(d.x, 1.0, abs(d.x) + abs(d.y) < 1e-7)) * 2.5464791 + 16.0;
+  let i = floor(a);
+  let k = i32(i) % 16;
+  return mix(ecoHzK(k), ecoHzK((k + 1) % 16), a - i);
+}
 fn ecoSky(d: vec3f) -> vec3f {
   let up = d.z;
-  let above = ecoSs(-0.02, 0.01, up);
-  var c: vec3f = select(mix(uniform.uHor, uniform.uZen, ecoSs(0.0, 0.55, up)), uniform.uHor * (1.0 + up * 0.35), up < 0.0);
+#ifdef ECO_BAKE
+  let uph = up;
+#else
+  let uph = up + ecoHz(d);
+#endif
+  let above = ecoSs(-0.02, 0.01, uph);
+  var c: vec3f = select(mix(uniform.uHor, uniform.uZen, ecoSs(0.0, 0.55, uph)), uniform.uHor * (1.0 + uph * 0.35), uph < 0.0);
   let g = max(dot(d, uniform.uMain), 0.0);
-  c += uniform.uDusk.rgb * uniform.uDusk.a * (pow(g, 5.0) * 0.6 + pow(g, 40.0) * 0.4) * ecoSs(-0.25, 0.05, up);
+  c += uniform.uDusk.rgb * uniform.uDusk.a * (pow(g, 5.0) * 0.6 + pow(g, 40.0) * 0.4) * ecoSs(-0.25, 0.05, uph);
 #ifndef ECO_BAKE
   let c0 = c;
 #endif
@@ -341,7 +374,7 @@ fn ecoSky(d: vec3f) -> vec3f {
     cover = select(0.0, ecoSs(1.02 - cov * 0.75, 1.25 - cov * 0.7, f + 0.25) * ecoSs(0.0, 0.12, up), cov > 0.01);
   }
 #ifndef ECO_BAKE
-  if (uniform.uStars.x > 0.01 && up > -0.05) {
+  if (uniform.uStars.x > 0.01 && uph > -0.05) {
     let q = d * uniform.uCel;
     let aq = abs(q);
     var uv: vec2f;
@@ -355,7 +388,7 @@ fn ecoSky(d: vec3f) -> vec3f {
       let ctr = cell + 0.25 + 0.5 * vec2f(ecoHash(vec3f(cell, f + 7.0)), ecoHash(vec3f(cell, f + 13.0)));
       let br = ecoSs(0.34, 0.0, length(uv - ctr)) * (0.35 + 0.65 * ecoHash(vec3f(cell, f + 3.0)));
       let sc = mix(vec3f(1.0), 0.55 + 0.45 * cos(6.2831 * (uniform.uStars.y + ecoHash(vec3f(cell, f + 5.0)) * 0.3 + vec3f(0.0, 0.33, 0.67))), 0.5);
-      c += sc * br * uniform.uStars.x * ecoSs(-0.05, 0.12, up);
+      c += sc * br * uniform.uStars.x * ecoSs(-0.05, 0.12, uph);
     }
   }
 #endif
@@ -371,8 +404,8 @@ fn ecoSky(d: vec3f) -> vec3f {
     let th2 = max(0.0, 2.0 * (1.0 - cs));
     let disk = ecoSs(1.1, 0.85, ecoDisk(d, su.xyz, s).w);
     let sc = uniform.uSunCol[i].rgb;
-    c = mix(c, sc / max(max(sc.r, sc.g), max(sc.b, 0.001)), disk * above * hide);
-    glow += sc * uniform.uSunCol[i].a * (exp(-th2 / (s * s * 9.0)) * 0.45 * hide + exp(-th2 / (s * s * 90.0)) * 0.12) * above;
+    c = mix(c, sc / max(max(sc.r, sc.g), max(sc.b, 0.001)), disk * hide);
+    glow += sc * uniform.uSunCol[i].a * (exp(-th2 / (s * s * 9.0)) * 0.45 * hide + exp(-th2 / (s * s * 90.0)) * 0.12);
   }
   for (var i = 0; i < 4; i++) {
     if (i >= uniform.uNMoon) { break; }
@@ -391,7 +424,7 @@ fn ecoSky(d: vec3f) -> vec3f {
       else if (ty > 1.5 && ty < 2.5) { mc = mix(mc, m2.rgb, ecoSs(0.48, 0.56, ecoFbm(nb.xy * 3.0 + nb.z * 5.0 + 3.0))); }
       else if (ty > 2.5) { mc = mix(mc, m2.rgb, 0.4 * ecoSs(0.45, 0.65, ecoFbm(nb.xy * 6.0 + nb.z * 2.0))); }
       mc = mix(mc, mc * vec3f(0.35, 0.12, 0.08), m2.a);
-      c = mix(c, mix(c0, mc * (0.14 + 0.86 * lit), 1.0 - 0.45 * uniform.uDay), ecoEdge(e.w, mo.w) * above);
+      c = mix(c, mix(c0, mc * (0.14 + 0.86 * lit), 1.0 - 0.45 * uniform.uDay), ecoEdge(e.w, mo.w));
     }
   }
   c += glow;
@@ -405,7 +438,7 @@ fn ecoSky(d: vec3f) -> vec3f {
         if (r > uniform.uRing.x && r < uniform.uRing.y) {
           let u = (r - uniform.uRing.x) / (uniform.uRing.y - uniform.uRing.x);
           let band = 0.5 + 0.5 * sin(u * uniform.uRing.w * 6.2831 + 1.3) * (0.6 + 0.4 * sin(u * uniform.uRing.w * 2.3));
-          let al = uniform.uRing.z * band * ecoSs(0.0, 0.06, u) * ecoSs(1.0, 0.94, u) * ecoSs(-0.03, 0.04, up);
+          let al = uniform.uRing.z * band * ecoSs(0.0, 0.06, u) * ecoSs(1.0, 0.94, u) * ecoSs(-0.03, 0.04, uph);
           c = mix(c, uniform.uRingCol * (0.3 + 0.7 * uniform.uDay) + uniform.uDusk.rgb * uniform.uDusk.a * 0.2, al);
         }
       }
@@ -466,7 +499,7 @@ fn ecoSky(d: vec3f) -> vec3f {
     c += mix(uniform.uAurCol, uniform.uAurCol.gbr * 0.8, top / max(acc, 1e-4)) * a * 0.9;
   }
   for (var i = 0; i < 4; i++) {
-    if (i >= uniform.uNMet || up < 0.0) { break; }
+    if (i >= uniform.uNMet || uph < 0.0) { break; }
     let a = normalize(uniform.uMet[i].xyz);
     let b = normalize(uniform.uMetB[i].xyz);
     let t = uniform.uMet[i].w;
@@ -475,8 +508,9 @@ fn ecoSky(d: vec3f) -> vec3f {
     let ab = hd - tl;
     let s = clamp(dot(d - tl, ab) / max(dot(ab, ab), 1e-8), 0.0, 1.0);
     let dist = length(d - (tl + ab * s));
-    c += vec3f(1.0, 0.95, 0.85) * uniform.uMetB[i].w * s * (1.0 - t * t) * ecoSs(0.003, 0.0, dist) * ecoSs(0.0, 0.1, up);
+    c += vec3f(1.0, 0.95, 0.85) * uniform.uMetB[i].w * s * (1.0 - t * t) * ecoSs(0.003, 0.0, dist) * ecoSs(0.0, 0.1, uph);
   }
+  c = mix(uniform.uHor, c, above);        // нижче справжнього обрію — планета в тумані (як у GLSL)
 #endif
   if (cover > 0.0) {
     let sh = 1.0 - uniform.uCloud.w * ecoSs(0.3, 1.0, cover);
