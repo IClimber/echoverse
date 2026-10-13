@@ -3,5 +3,13 @@
   "private": true,
   "type": "module",
   "description": "Відлуння (Echoverse) — процедурна подорож мультивсесвітом у браузері",
-  "scripts": { "test": "node --test test/*.test.mjs" }
+  "scripts": {
+    "lint": "eslint .",
+    "test": "eslint . && node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "eslint": "^9.39.1",
+    "globals": "^16.5.0"
+  }
 }

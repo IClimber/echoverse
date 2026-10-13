@@ -125,7 +125,7 @@ function boot(renderer) {
         const D = lightsOf(skyState(L, c), k).dirs, w = D.reduce((s, l) => s + l.k, 0);
         if (D.length > bn || (D.length === bn && w > bw)) { best = i / 100; bn = D.length; bw = w; }
       }
-      eco.setPhase(best);
+      window.eco.setPhase(best);
       return { phase: best, lights: bn };
     },
     // Знайти всесвіт за умовою pred(L) (закони) на глибині d від номера from (уперед, до count) і стрибнути туди: номер чи null

@@ -275,10 +275,14 @@ test('рідини: біля старту — безпечна вода; тра�
     assert.equal(q.swim, q.kind !== L_DRY && q.density >= 0.8);
   }
   assert.ok(kinds.size >= 4, `видів рідин лише ${kinds.size}`);
-  if (dry !== null) {
+  // сухі всесвіти рідкісні (з v12) — далі за ±600 (до 13.10.2026 тест тут мовчки пропускав перевірку)
+  for (let n = 601; dry === null && n < 20000; n++) if (lawsOf(seed, 0, n).liquid.kind === L_DRY) dry = n;
+  assert.ok(dry !== null && hot !== null, `сухий ${dry}, гарячий ${hot}`);
+  {
     const L = lawsOf(seed, 0, dry);
     let beds = 0;
     for (let cx = 0; cx < 6; cx++) for (const t of genChunk(L, cx, 0).t) { assert.notEqual(t, T_WATER); assert.notEqual(t, T_ICE); beds += t === T_BED; }
+    assert.ok(beds > 0, 'сухий всесвіт — без сухих русел');   // русла без рідини (T_BED) є
   }
   if (hot !== null) assert.ok(lawsOf(seed, 0, hot).liquid.danger.length > 0);
   // дно водойми — нижче поверхні (з v9 може бути й нижче нуля: глибина океанів — закон)

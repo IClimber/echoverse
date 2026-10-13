@@ -44,7 +44,7 @@ function parts(D, h) {
   return { m, w, P };
 }
 function colors(D, S, h, Kc) {
-  const { m, w, P } = parts(D, h), zen = [], hor = [], glow = [], sun = [];
+  const { w, P } = parts(D, h), zen = [], hor = [], glow = [], sun = [];
   for (let c = 0; c < 3; c++) {
     const p = P[c];
     zen[c] = S[c] * p.td * ((1 - w) * (ZMAX * (1 - Math.exp(-p.r1 * Kc.z[c] / ZMAX)) + p.a1) + w * WZ);

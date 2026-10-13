@@ -31,7 +31,7 @@ const CASC_JUMP = Math.cos(0.1 * Math.PI / 180);
 
 // G — застосунок (app.js); shadows — 'pcf3' | 'pcss' | 'off' (без тіней)
 export function createLights(G, { shadows = 'pcf3' } = {}) {
-  const { pc, app, scene, layers, O } = G;
+  const { pc, app, scene, layers } = G;
   const pcss = () => q === 'pcss' && G.info.pcss;
   let q = shadows;
   scene.clusteredLightingEnabled = true;
@@ -41,7 +41,7 @@ export function createLights(G, { shadows = 'pcf3' } = {}) {
   const LAY = [layers.world.id, layers.shadow.id, ...(layers.arms ? [layers.arms.id] : [])];
 
   // Поворот світла: +Y — до джерела (напрямлене світить уздовж −Y сутності; код _updateSunLight скрипта ProceduralSky)
-  const X = new pc.Vec3(), Z = new pc.Vec3(), S = new pc.Vec3(), M4 = new pc.Mat4(), Q = new pc.Quat();
+  const X = new pc.Vec3(), Z = new pc.Vec3(), M4 = new pc.Mat4(), Q = new pc.Quat();
   const orient = (e, src) => {
     const ref = Math.abs(src.y) > 0.99 ? pc.Vec3.RIGHT : pc.Vec3.UP;
     X.cross(src, ref).normalize(); Z.cross(X, src).normalize();
