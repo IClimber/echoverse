@@ -342,14 +342,14 @@ export function chunkMesh(C, L, { near = true, far = true } = {}) {
   // Злитий прямокутник (кути — точки ґратки [x, y, рівень], по колу назовні): у FQ, кути — у VS
   const fq = (a, b, c, d, nx, ny, nz, col, mt, ao) => { for (const p of [a, b, c, d]) markV(p[0], p[1], p[2]); FQ.push([a, b, c, d, nx, ny, nz, col, mt, ao]); };
   // Шари без граней (усе своє й сусіди — суцільне, чи твердого немає) пропускаємо: результат той самий, у рази швидше.
-  // inS[k] — твердих у шарі k (без рамки), allS[k] — з рамкою, inL[k] — рідини (без рамки); k ∈ −1…NK
-  const inS = new Int32Array(NK + 2), allS = new Int32Array(NK + 2), inL = new Int32Array(NK + 2);
+  // inS[k] — твердих у шарі k (без рамки), allS[k] — з рамкою, inL[k] — рідини (без рамки), allL[k] — з рамкою; k ∈ −1…NK
+  const inS = new Int32Array(NK + 2), allS = new Int32Array(NK + 2), inL = new Int32Array(NK + 2), allL = new Int32Array(NK + 2);
   for (let y = -1; y <= N; y++) for (let x = -1; x <= N; x++) {
     const inner = x >= 0 && y >= 0 && x < N && y < N, o = bi(x, y, -1);
     for (let k = 0; k < NK + 2; k++) {
       const b = B[o + k];
       if (SOL[b]) { allS[k]++; if (inner) inS[k]++; }
-      else if (b === B_LIQ && inner) inL[k]++;
+      else if (b === B_LIQ) { allL[k]++; if (inner) inL[k]++; }
     }
   }
   // Маска граней шару: fm[y·CS + x] — біт 1 << d, якщо блок твердий, а сусід у напрямку d — ні; rows[d·CS + r] — є
@@ -496,6 +496,22 @@ export function chunkMesh(C, L, { near = true, far = true } = {}) {
       if (dx) { const X = dx > 0 ? x + 1 : x; W.quad([X, y, top], [X, y + 1, top], [X, y + 1, z0], [X, y, z0], dx, 0, 0, sc, LM, la); }
       else { const Y = dy > 0 ? y + 1 : y; W.quad([x, Y, top], [x + 1, Y, top], [x + 1, Y, z0], [x, Y, z0], 0, dy, 0, sc, LM, la); }
     }
+  }
+  // Берег: площина води тягнеться й над твердими клітинками поруч (8 сусідів) з відкритою рідиною на тому самому рівні.
+  // Земля плавна (Surface Nets) і на березі опускається нижче води в сусідній клітинці — без цього там видно сухий схил,
+  // а край води йде сходинками по клітинках; так лінія берега — перетин площини з землею, решту площини ховає земля
+  // (13.10.2026, скарга «стики води й землі»)
+  if (ST === 1) for (let k = 0; k < NK; k++) for (let y = 0; y < CS; y++) for (let x = 0; x < CS; x++) {
+    if (!allL[k + 1]) break;                             // рідина — і в сусідніх стовпцях (рамка): берег на межі чанків
+    const b = B[bi(x, y, k)];
+    if (b === B_AIR || b === B_LIQ || !SOL[b]) continue;
+    let n = -1;
+    for (let dy = -1; dy <= 1 && n < 0; dy++) for (let dx = -1; dx <= 1; dx++) {
+      if ((dx || dy) && B[bi(x + dx, y + dy, k)] === B_LIQ && B[bi(x + dx, y + dy, k + 1)] === B_AIR) { n = cix(x + dx, y + dy); break; }
+    }
+    if (n < 0) continue;
+    const top = (k + 1) * LEVEL - 0.15, c = mixc(P.liquid, P.liquidDeep, Math.min(1, C.v[n] / 160)), la = TOP ? Math.round(255 * skyK(TOP[cix(x, y)] - (K0 + k + 1))) : 255;
+    W.quad([x, y, top], [x + 1, y, top], [x + 1, y + 1, top], [x, y + 1, top], 0, 0, 1, c, LM, la);
   }
   else {
     // груба: верх рідини власних точок — точно на рівні, квадрати ST×ST, вирівняні з секцією; ряд однакових — одним

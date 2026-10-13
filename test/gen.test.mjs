@@ -208,6 +208,58 @@ test('левітуючі породи: біля старту немає; тра�
   assert.ok(B_FLOAT > 0);
 });
 
+// Сухі «дірки» біля берега: точки (сітка 0,1 м) стовпця (cx, cy), де перше влучання вниз у тверде — нижче площини води
+// поруч (до 1,5 м), а води над точкою немає. Меші 3 × 3 стовпців разом — межі чанків теж
+async function shoreHoles(L, cx0, cy0) {
+  const { genCol, genSection, SEC } = await import('../js/gen/chunk.js');
+  const { objPose } = await import('../js/gen/mesh.js');
+  const { LEVEL } = await import('../js/universe.js');
+  const { createList, pushTri, rayCast } = await import('../js/engine/physics/collide.js');
+  const S = createList(1 << 16), Q = [];
+  for (let cx = cx0 - 1; cx <= cx0 + 1; cx++) for (let cy = cy0 - 1; cy <= cy0 + 1; cy++) {
+    const col = genCol(L, cx, cy), ox = cx * CS, oy = cy * CS;
+    for (const o of col.obj) objPose(col, L, o);
+    for (let cz = Math.floor(col.hmin / SEC) - 1; cz <= Math.floor(col.hmax / SEC) + 1; cz++) {
+      const sec = genSection(L, col, cz);
+      if (sec.empty) continue;
+      const m = chunkMesh({ cx, cy, h: col.h, bm: col.bm, v: col.v, top: col.top, sky: col.sky, b: sec.b, k0: sec.k0, nk: sec.nk, obj: col.obj, sp: col.sp }, L);
+      const oz = cz * SEC * LEVEL, P = m.solid.pos, I = m.solid.idx;
+      for (let i = 0; i < m.solid.count; i += 3) { const a = I[i] * 3, b = I[i + 1] * 3, c = I[i + 2] * 3; pushTri(S, P[a] + ox, P[a + 1] + oy, P[a + 2] + oz, P[b] + ox, P[b + 1] + oy, P[b + 2] + oz, P[c] + ox, P[c + 1] + oy, P[c + 2] + oz); }
+      if (!m.liquid) continue;
+      const WP = m.liquid.pos, WI = m.liquid.idx, WN = m.liquid.nor;
+      for (let i = 0; i < m.liquid.count; i += 6) {
+        if (WN[WI[i] * 3 + 2] < 100) continue;                             // лише верх (бічні грані — печери)
+        let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+        for (let j = 0; j < 6; j++) { const v = WI[i + j] * 3; x0 = Math.min(x0, WP[v]); x1 = Math.max(x1, WP[v]); y0 = Math.min(y0, WP[v + 1]); y1 = Math.max(y1, WP[v + 1]); }
+        Q.push([x0 + ox, y0 + oy, x1 + ox, y1 + oy, WP[WI[i] * 3 + 2] + oz]);
+      }
+    }
+  }
+  let holes = 0, near = 0;
+  const hit = {};
+  for (let y = cy0 * CS + 0.05; y < (cy0 + 1) * CS; y += 0.1) for (let x = cx0 * CS + 0.05; x < (cx0 + 1) * CS; x += 0.1) {
+    let zw = null, cov = false;
+    for (const q of Q) {
+      if (x < q[0] - 1.5 || x > q[2] + 1.5 || y < q[1] - 1.5 || y > q[3] + 1.5) continue;
+      if (x >= q[0] && x <= q[2] && y >= q[1] && y <= q[3]) cov = true;
+      zw = zw === null ? q[4] : Math.max(zw, q[4]);
+    }
+    if (zw === null || cov) continue;
+    near++;
+    if (rayCast(S, x, y, zw + 3, 0, 0, -1, 6, hit) && 3 - hit.t < -0.01) holes++;
+  }
+  return { holes, near };
+}
+
+test('берег: площина води доходить до плавної землі — біля води немає сухих дірок нижче її рівня (і на межах чанків)', async () => {
+  // місце зі скарги (зерно «1qgt24p», всесвіт −4047) і берег еталонного зерна; до 13.10.2026 — 316 і 924 точки по 0,01 м²
+  for (const [s, n, cx, cy] of [['1qgt24p', -4047, 37, 25], ['test', 0, 0, 0]]) {
+    const r = await shoreHoles(lawsOf(hashStr(s), 0, n), cx, cy);
+    assert.ok(r.near > 1000, `${s}: біля води лише ${r.near} точок — берега немає`);
+    assert.equal(r.holes, 0, `${s}: сухих дірок ${r.holes}`);
+  }
+});
+
 test('рідини: біля старту — безпечна вода; трапляються інші; сухий всесвіт — русла без рідини; гаряча — небезпечна; дно — не порожнеча', async () => {
   const { L_WATER, L_DRY, HOT } = await import('../js/universe.js');
   const { T_BED, T_ICE } = await import('../js/gen/chunk.js');
