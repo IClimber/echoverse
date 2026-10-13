@@ -86,8 +86,12 @@ export async function createApp(canvas, { device = 'webgl2', maxPixelRatio = 2, 
   // Заміри покадрово (?dev, test/perf.mjs): інтервал між кадрами (мітки rAF), CPU такту PlayCanvas (від frameupdate до
   // frameend: гра + рендер), CPU рендера PlayCanvas, CPU гри (оновлення, малювання — main.js), GPU кадру (профайлер; з
   // запізненням на кілька кадрів), викликів
+  // розмір полотна (CSS-пікселі) — раз на такт, на його початку: читання clientWidth примушує браузер перевірити розкладку,
+  // а гра питає розмір сотні разів за кадр (проєкції коробок; профіль CPU 13.10.2026 — ~4 % кадру); у межах такту розмір
+  // той самий, що прочитає й PlayCanvas (updateCanvasSize перед рендером)
+  let cw = canvas.clientWidth || innerWidth, chh = canvas.clientHeight || innerHeight;
   let tickT = 0, prevT = 0;
-  app.on('frameupdate', () => { tickT = performance.now(); });
+  app.on('frameupdate', () => { tickT = performance.now(); cw = canvas.clientWidth || innerWidth; chh = canvas.clientHeight || innerHeight; });
   app.on('frameend', () => {
     const S = R.sampler, t = app._time;
     if (S && prevT) S.push(t - prevT, performance.now() - tickT, app.stats.cpuRenderTime || 0, R.upd, R.drw, app.stats.gpuFrameTime ?? -1, app.stats.drawCallCount);
@@ -114,7 +118,7 @@ export async function createApp(canvas, { device = 'webgl2', maxPixelRatio = 2, 
     on: (name, f) => ev.on(name, f), fire: (name, ...a) => ev.fire(name, ...a),
     setOrigin, toPC, dirToPC, matToPC,
     onFrame(f) { next = f; }, setProfiler,
-    get width() { return canvas.clientWidth || innerWidth; }, get height() { return canvas.clientHeight || innerHeight; },
+    get width() { return cw; }, get height() { return chh; },
     info: {
       device: dev.isWebGPU ? 'webgpu' : 'webgl2', webgpu: 'gpu' in navigator,
       multiDraw: dev.isWebGPU ? 'drawIndirect' : !!dev.extMultiDraw, floatRT, floatFilter, pcss: floatRT && floatFilter,

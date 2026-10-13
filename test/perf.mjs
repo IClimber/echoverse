@@ -76,13 +76,17 @@ const SC = String(arg('scenes', 'plain,forest,mount,cave,first,iso,suns3,shaft,g
 const VIEWS = String(arg('views', '32,16,8')).split(',').map(Number), SHS = String(arg('shadows', 'off,pcf3,pcss')).split(',');
 const RUNS = +arg('runs', 3), MS = +arg('ms', 2500), PROF = arg('prof', '1') !== '0';
 const OUT = arg('out', `${tmpdir()}/echoverse-perf-${API}.json`);
-const P = await launch({ port: 9340 + (VISIBLE ? 1 : 0), dir: `${tmpdir()}/echoverse-perf-profile-${API}`, visible: VISIBLE });
-const results = [], t0 = Date.now();
-const save = () => writeFileSync(OUT, JSON.stringify({ api: API, ports: PORTS, scenes: SC, views: VIEWS, shadows: SHS, runs: RUNS, ms: MS, results, errs: P.errs }, null, 0));
+// браузер — новий на кожну версію в кожному прогоні: за годину перезавантажень сторінок один Chrome із WebGPU тримав
+// ~22 ГБ пам'яті ядра (драйвер звільняє її лише з процесом), і OOM-killer убив вкладку посеред заміру (13.10.2026)
+const launchP = () => launch({ port: 9340 + (VISIBLE ? 1 : 0), dir: `${tmpdir()}/echoverse-perf-profile-${API}`, visible: VISIBLE });
+let P = null;
+const results = [], t0 = Date.now(), errs = [];
+const save = () => writeFileSync(OUT, JSON.stringify({ api: API, ports: PORTS, scenes: SC, views: VIEWS, shadows: SHS, runs: RUNS, ms: MS, results, errs }, null, 0));
 const bySeed = SC.reduce((m, k) => { (m[SCENES[k].seed] ||= []).push(k); return m; }, {});
 for (let run = 0; run < RUNS; run++) {
   const order = run % 2 ? [...PORTS].reverse() : PORTS;
   for (const port of order) {
+    P = await launchP();
     for (const seed in bySeed) {
       const device = await openGame(P, port, { gpu: API, view: VIEWS[0], seed });
       const px = await P.ev("[eco.renderer.G.dev.width, eco.renderer.G.dev.height, devicePixelRatio, (() => { const c = document.createElement('canvas').getContext('webgl2'), e = c && c.getExtension('WEBGL_debug_renderer_info'); return e ? c.getParameter(e.UNMASKED_RENDERER_WEBGL) : '?'; })()]");
@@ -117,11 +121,10 @@ for (let run = 0; run < RUNS; run++) {
         save();
       }
     }
-    await P.send('Page.navigate', { url: 'about:blank' }); await wait(1500);
+    errs.push(...P.errs); P.quit(); await wait(2500);
   }
 }
 save();
-console.log(`результати: ${OUT}; помилок у консолі: ${P.errs.length}`); for (const e of P.errs.slice(0, 10)) console.log(e);
-P.quit();
+console.log(`результати: ${OUT}; помилок у консолі: ${errs.length}`); for (const e of errs.slice(0, 10)) console.log(e);
 compare(OUT);
 process.exit(0);
