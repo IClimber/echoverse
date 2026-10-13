@@ -63,13 +63,13 @@ function histogram(title, vals, tiers, log) {
 
 // Картка всесвіту: усе в одиницях
 function card(L, seedText) {
-  const S = L.star, P = L.planet, A = L.air, C = L.clim, ph = physOf(L);
+  const S = L.star, P = L.planet, A = L.air, C = L.clim, ph = physOf(L), held = heldText(L);
   const rows = [
     ['адреса', `зерно «${seedText}», глибина ${L.d}, всесвіт ${fmtN(L.n)} · ${STRANGE_NAMES[L.strange.cls]}${Object.keys(L.tiers).length ? ': ' + Object.entries(L.tiers).map(([k, t]) => `${k} — ${TIER_NAMES[t]}`).join(', ') : ''}`],
     ['зорі', starsText(L).join(' · ')],
     ['орбіта', `відстань ${fx(S.d)} земної (${fx(S.a)} а. о.), інсоляція ${fx(S.S)} земної, рік ${P.lock ? '—' : (P.year / 400).toPrecision(3).replace('.', ',') + ' земного'}`],
     ['планета', `R ${(P.R * 6371).toFixed(0)} км, ρ ${fx(P.rho * 5.51)} г/см³, M ${fx(P.M)} M⊕, g ${fx(L.grav)} (${fx(L.grav * 9.81)} м/с²), v₂ ${fx(P.vEsc, 1)} км/с`],
-    ['обертання', `${P.lock ? 'вічний день' : `${fx(P.rot, 1)} год (доба гри ${fx(L.sky.dayMin, 1)} хв)`}, нахил ${P.obliq.toFixed(0)}°, широта ${P.lat.toFixed(0)}°${heldText(L) ? ' · ' + heldText(L) : ''}`],
+    ['обертання', `${P.lock ? 'вічний день' : `${fx(P.rot, 1)} год (доба гри ${fx(L.sky.dayMin, 1)} хв)`}, нахил ${P.obliq.toFixed(0)}°, широта ${P.lat.toFixed(0)}°${held ? ' · ' + held : ''}`],
     ['повітря', A.vacuum ? `майже немає (${A.pressure.toPrecision(2)} атм)` : `${fx(A.pressure)} атм, ${Object.entries(A.comp).filter(([, v]) => v >= 0.001).map(([k, v]) => `${k} ${fx(v * 100, 1)} %`).join(', ')}; ${A.gasName}; ρ ${fx(A.rho)} кг/м³, H ${A.H.toFixed(0)} м`],
     ['температура', `рівноважна ${fx(C.Teq - 273.15, 0)} °C, поверхні ${fx(C.Ts - 273.15, 0)} °C, ділянки ${fx(C.Tpatch - 273.15, 0)} °C; ${(C.lapse * 1000).toFixed(0)} °C/км, доба ±${C.Ad.toFixed(0)}, сезон ±${C.As.toFixed(0)}`],
     ['поле', `B ${fx(L.mag.B)} земного, сяйва ${(L.mag.k * 100).toFixed(0)} %, радіація ${(A.rad * 100).toFixed(0)} %, активність зорі ${fx(S.act, 1)}`],

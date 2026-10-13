@@ -254,13 +254,13 @@ export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
   p.noGrab = Math.max(0, (p.noGrab || 0) - dt);
   p.mantle = Math.max(0, (p.mantle || 0) - dt);
   if (p.fly) {
-    p.climb = null; p.dive = false; p.slide = false;
+    p.climb = null; p.dive = false; p.slide = false; p.tiltV = null;
     if (p.pose === 'swim') p.pose = 'crawl';
     poseTo(p, C, 'stand');
     p.h = shapeOf(p).H;
     return fly(p, ix, iy, dt, P, C, ph, mb, ctl.vert || 0, !!ctl.sprint);
   }
-  if ((ph.g ?? 1) < HOVER_G && liquidAt(P, p.x, p.y, p.z) === null) return hover(p, ix, iy, dt, P, C, ph, mb, ctl);
+  if ((ph.g ?? 1) < HOVER_G && liquidAt(P, p.x, p.y, p.z) === null) { p.tiltV = null; return hover(p, ix, iy, dt, P, C, ph, mb, ctl); }
   p.hover = false;
   // витривалість відновлюється на землі чи на плаву (після паузи)
   if (!p.climb) {
@@ -280,7 +280,7 @@ export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
       if (into) { p.climb = { kind: 'ladder', nx: n[0], ny: n[1] }; p.vz = 0; p.vx = p.vy = 0; p.jumped = false; }
     }
   }
-  if (p.climb && climbStep(p, ix, iy, jump, dt, P, C, ph, ctl)) return finish(p, dt, P, ph);
+  if (p.climb && climbStep(p, ix, iy, jump, dt, P, C, ph, ctl)) { p.tiltV = null; return finish(p, dt, P, ph); }
   // Пірнання (рідина тримає): пливеш туди, куди дивишся (W / S — уздовж погляду камери, як у Minecraft), Ctrl — униз;
   // на поверхні пірнаєш, лише коли погляд нижче DIVE_Z (30°: камера третьої особи типово дивиться на фігуру згори —
   // рішення користувача 11.10.2026); перестав пливти вниз — виштовхує (від густини), дійшов до рівня плавання — знову на
@@ -401,6 +401,7 @@ export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
     for (const [nx, ny] of walls) {                                         // складова в стіну гасне
       const d = p.vx * nx + p.vy * ny; if (d < 0) { p.vx -= d * nx; p.vy -= d * ny; }
       if (p.sv) { const e = p.sv[0] * nx + p.sv[1] * ny; if (e < 0) { p.sv[0] -= e * nx; p.sv[1] -= e * ny; } }
+      if (p.tiltV) { const e = p.tiltV[0] * nx + p.tiltV[1] * ny; if (e < 0) { p.tiltV[0] -= e * nx; p.tiltV[1] -= e * ny; } }
     }
   } else if (!p.ground && surf === null && p.jumped && (dirX || dirY) && grab(p, C, sh, dirX, dirY, ph, ctl)) return finish(p, dt, P, ph);
   // Вертикаль: під рідиною — пробіл / Ctrl, без введення — повільно вгору; у рідині, що тримає, — виштовхує до поверхні

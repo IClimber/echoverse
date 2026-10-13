@@ -71,7 +71,7 @@ vec4 ecoDisk(vec3 d, vec3 o, float s) {
   float co = dot(d, o), fo = dot(o, uFwd);
   if (co < cos(min(s * 1.3, 1.55))) return vec4(d, 2.0);
   vec3 e = d;
-  float w = smoothstep(0.2, 0.45, fo) * smoothstep(0.25, 0.15, s);
+  float w = smoothstep(0.2, 0.45, fo) * (1.0 - smoothstep(0.15, 0.25, s));
   if (w > 0.0) {
     vec3 q = d * (fo / max(dot(d, uFwd), 1e-4)) - o;
     q -= dot(q, o) / (1.0 + fo) * (uFwd + o);
@@ -114,7 +114,7 @@ vec3 ecoSky(vec3 d) {
     vec2 cell = floor(uv);
     if (ecoHash(vec3(cell, f)) > 1.0 - 0.07 * uStars.x) {
       vec2 ctr = cell + 0.25 + 0.5 * vec2(ecoHash(vec3(cell, f + 7.0)), ecoHash(vec3(cell, f + 13.0)));
-      float br = smoothstep(0.34, 0.0, length(uv - ctr)) * (0.35 + 0.65 * ecoHash(vec3(cell, f + 3.0)));
+      float br = (1.0 - smoothstep(0.0, 0.34, length(uv - ctr))) * (0.35 + 0.65 * ecoHash(vec3(cell, f + 3.0)));
       vec3 sc = mix(vec3(1.0), 0.55 + 0.45 * cos(6.2831 * (uStars.y + ecoHash(vec3(cell, f + 5.0)) * 0.3 + vec3(0.0, 0.33, 0.67))), 0.5);
       c += sc * br * uStars.x * smoothstep(-0.05, 0.12, up);
     }
@@ -131,7 +131,7 @@ vec3 ecoSky(vec3 d) {
   for (int i = 0; i < 3; i++) {
     if (i >= uNSun) break;
     float cs = dot(d, uSun[i].xyz), s = uSun[i].w, th2 = max(0.0, 2.0 * (1.0 - cs));
-    float disk = smoothstep(1.1, 0.85, ecoDisk(d, uSun[i].xyz, s).w);
+    float disk = 1.0 - smoothstep(0.85, 1.1, ecoDisk(d, uSun[i].xyz, s).w);
     vec3 sc = uSunCol[i].rgb;
     c = mix(c, sc / max(max(sc.r, sc.g), max(sc.b, 0.001)), disk * above * hide);
     glow += sc * uSunCol[i].a * (exp(-th2 / (s * s * 9.0)) * 0.45 * hide + exp(-th2 / (s * s * 90.0)) * 0.12) * above;
@@ -162,7 +162,7 @@ vec3 ecoSky(vec3 d) {
         if (r > uRing.x && r < uRing.y) {
           float u = (r - uRing.x) / (uRing.y - uRing.x);
           float band = 0.5 + 0.5 * sin(u * uRing.w * 6.2831 + 1.3) * (0.6 + 0.4 * sin(u * uRing.w * 2.3));
-          float al = uRing.z * band * smoothstep(0.0, 0.06, u) * smoothstep(1.0, 0.94, u) * smoothstep(-0.03, 0.04, up);
+          float al = uRing.z * band * smoothstep(0.0, 0.06, u) * (1.0 - smoothstep(0.94, 1.0, u)) * smoothstep(-0.03, 0.04, up);
           c = mix(c, uRingCol * (0.3 + 0.7 * uDay) + uDusk.rgb * uDusk.a * 0.2, al);
         }
       }
@@ -193,7 +193,7 @@ vec3 ecoSky(vec3 d) {
     if (min(min(s0, s1), s2) < sm && max(max(s0, s1), s2) > -sm) for (int i = 0; i < 10; i++) {
       float u = (float(i) + j) * 0.1, h = 95.0 + 160.0 * u * u, dh = 32.0 * u, q = sqrt(b * b + 2.0 * R * h + h * h);
       vec2 f = d.xy * (q - b) + pd * (h - 100.0) * 0.2;
-      float sc = dot(f, pd) - uAurG.x, env = smoothstep(W * 1.5, W * 0.5, abs(sc));
+      float sc = dot(f, pd) - uAurG.x, env = 1.0 - smoothstep(W * 0.5, W * 1.5, abs(sc));
       if (env <= 0.0) continue;
       float dt = (R + h) / q, ray = ecoN1(dot(f, qd) / 2.0 + tm * 0.1);
       float arc = mix(pow(0.5 + 0.5 * cos((sc + warp) * 0.0698), 12.0), 0.161, smoothstep(6.0, 25.0, abs((pp * dt + 0.2) * dh)));
@@ -210,7 +210,7 @@ vec3 ecoSky(vec3 d) {
     float t = uMet[i].w;
     vec3 hd = normalize(mix(a, b, t)), tl = normalize(mix(a, b, max(0.0, t - 0.35))), ab = hd - tl;
     float s = clamp(dot(d - tl, ab) / max(dot(ab, ab), 1e-8), 0.0, 1.0), dist = length(d - (tl + ab * s));
-    c += vec3(1.0, 0.95, 0.85) * uMetB[i].w * s * (1.0 - t * t) * smoothstep(0.003, 0.0, dist) * smoothstep(0.0, 0.1, up);
+    c += vec3(1.0, 0.95, 0.85) * uMetB[i].w * s * (1.0 - t * t) * (1.0 - smoothstep(0.0, 0.003, dist)) * smoothstep(0.0, 0.1, up);
   }
 #endif
   if (cover > 0.0) {
@@ -227,7 +227,8 @@ vec3 ecoSky(vec3 d) {
 }
 `;
 
-// WGSL: smoothstep зі зворотними межами (як GLSL на практиці) — ecoSs
+// WGSL: ecoSs — smoothstep, що допускає зворотні межі (вбудований при edge0 ≥ edge1 невизначений — у GLSL-гілці
+// там 1 − smoothstep з прямими межами)
 export const SKY_WGSL = `
 uniform uZen: vec3f;
 uniform uHor: vec3f;

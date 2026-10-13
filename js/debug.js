@@ -66,10 +66,10 @@ function starLine(L) {
 }
 // Планета: радіус, густина, тяжіння (база й тут), маса, друга космічна, обертання (доба гри), нахил, широта, рік, сезон
 function planetLine(L, g) {
-  const P = L.planet, Y = L.sky.year, ph = Y && !P.lock ? yearPhase(L, g.clock || 0) : null;
+  const P = L.planet, Y = L.sky.year, ph = Y && !P.lock ? yearPhase(L, g.clock || 0) : null, H = heldText(L);
   return `R ${f0(P.R * 6371)} км, ρ ${f2(P.rho * 5.51)} г/см³, g₀ ${f2(P.g0)} → ${f2(L.grav)} g (відцентрова ${pc(P.cent)}), M ${f2(P.M)} M⊕, v₂ ${f1(P.vEsc)} км/с`
     + ` · обертання ${f1(P.rot)} год (мін. ${f1(P.Pmin)}), нахил ${f0(P.obliq)}°, широта ${f0(P.lat)}°`
-    + ` · рік ${f0(P.year)} хв${ph !== null ? `, фаза ${f2(ph)}` : ''}${heldText(L) ? ' · ' + heldText(L) : ''}`;
+    + ` · рік ${f0(P.year)} хв${ph !== null ? `, фаза ${f2(ph)}` : ''}${H ? ' · ' + H : ''}`;
 }
 // Повітря: тиск, склад, μ, густина, висота однорідної атмосфери, парникова товща, температури, градієнт
 function airLine(L) {

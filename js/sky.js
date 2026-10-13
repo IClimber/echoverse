@@ -201,7 +201,8 @@ export function skyState(L, clock) {
   // світлішає понад денне); main — сонце з найбільшим внеском (з затемненням): від нього захід, фази місяців, тінь планети
   // (без повітря — заходу немає)
   let C = 0, cMax = -1, main = suns[0];
-  for (const s of suns) { const c = sunDay(s); C += c; if (c > cMax) { cMax = c; main = s; } }
+  const cs = suns.map(sunDay);
+  suns.forEach((s, i) => { const c = cs[i]; C += c; if (c > cMax) { cMax = c; main = s; } });
   for (const m of moons) {
     const anti = [-main.dir[0], -main.dir[1], -main.dir[2]];
     m.eclipse = Math.max(0, Math.min(1, (sh(m) + m.size - angle(m.dir, anti)) / (2 * m.size)));
@@ -217,8 +218,8 @@ export function skyState(L, clock) {
   if (suns.length > 1 && C > 0) {
     const z = [0, 0, 0], h = [0, 0, 0];
     let am = 0;
-    for (const s of suns) {
-      const w = sunDay(s) / C;
+    for (let i = 0; i < suns.length; i++) {
+      const s = suns[i], w = cs[i] / C;
       if (w < 1e-4) continue;
       const Os = s === main ? O : skyOptics(L, s.col, alt(s, 0.035));
       for (let k = 0; k < 3; k++) { z[k] += w * (Os.zen[k] / 255) ** 2.2; h[k] += w * (Os.hor[k] / 255) ** 2.2; }
@@ -356,7 +357,8 @@ export function lightsOf(sk, max = 3) {
   const S = (sk.I * (sk.dimK ?? 1)) ** 2.2, rho = sk.amb / (sk.amb + (1 - sk.amb) * REF_Z);
   const Ea = S * rho ** 2.2, Ed = S * (1 - rho ** 2.2) / REF_Z, P = C > 0 ? CP / C : 0, Pm = (1 - P) * tw * Mm;
   let K = 0;
-  for (const l of L) { l.k = l.sun ? Ed * l.p / C : Ed * Pm * l.b / Bm; K += l.k; }
+  // C = 0 при сонці над обрієм — великий диск (s > 0,1) ще не зайшов, але sunDay уже 0: прямого світла немає (не 0 / 0)
+  for (const l of L) { l.k = l.sun ? (C > 0 ? Ed * l.p / C : 0) : Ed * Pm * l.b / Bm; K += l.k; }
   // розсіяне, якби всі світила світили прямо; світило, чия тінь на екрані непомітна, і понад max — у розсіяне
   const A = Ea + REF_Z * (Ed - K), A0 = A ** (1 / 2.2), dirs = [];
   let used = 0;
