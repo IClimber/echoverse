@@ -683,3 +683,17 @@ test('об\'єм кидачів тіні: кожна точка, з якої п�
   assert.ok(boxOut(P, 0, np, ...p, ...p), 'з площинами силуету — відкинута');
   assert.ok(!boxOut(P0, 0, np0, ...p, ...p), 'без них — ні (надмірно)');
 });
+
+test('генератор: виняток у роботі не ламає черги, робота більше не запитується', async () => {
+  const { createGen } = await import('../js/gen/client.js');
+  const got = [], err = console.error; let logged = 0;
+  console.error = () => { logged++; };
+  try {
+    const g = createGen(12345, (key) => got.push(key));
+    const bad = new Proxy({ type: 'col', d: 0, n: 0 }, { get: (t, k) => { if (k === 'cx') throw new Error('збій'); return t[k]; } });
+    g.want('bad', bad, 0); g.want('ok', { type: 'col', d: 0, n: 0, cx: 0, cy: 0 }, 1);
+    g.tick(1e4);
+    assert.deepEqual(got, ['ok']); assert.equal(logged, 1); assert.equal(g.pending, 0); assert.equal(g.stats().failed, 1);
+    g.want('bad', bad, 0); assert.equal(g.pending, 0);
+  } finally { console.error = err; }
+});

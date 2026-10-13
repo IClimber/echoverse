@@ -4,6 +4,7 @@
 // решта чекає в черзі: так новий важливіший запит (секція під ногами) не стоїть за сотнею далеких.
 // Запит q = {type: 'col' (зведення стовпця) | 'sec' (секція з мешем) | 'far' (плитка далечі), d, n, cx, cy, cz}.
 // Немає module worker (чи всі впали) — генерує в головному потоці (по кілька робіт за кадр).
+// Робота з винятком (генерація детермінована — повтор дасть те саме) — у консоль раз, далі не запитується; воркер живий.
 import { lawsOf } from '../universe.js';
 import { runJob } from './job.js';
 import { createQueue, workerOf } from './queue.js';
@@ -16,6 +17,12 @@ export function createGen(seed, onDone) {
   const busy = new Map();           // id → {key, q, w}
   const inWork = new Map();         // key → id
   const done = { col: 0, sec: 0, far: 0 };
+  const failed = new Set();         // ключі робіт з винятком
+  const jobError = (key, q, err) => {
+    if (failed.size > 4096) failed.clear();
+    failed.add(key);
+    console.error(`генератор: робота ${key} (${q.type}) — виняток`, err);
+  };
   let nextId = 1, ws = [], queue;
 
   const finish = (b, data, mesh, ms) => { done[b.q.type] = (done[b.q.type] || 0) + 1; onDone(b.key, b.q, data, mesh, ms); };
@@ -27,7 +34,10 @@ export function createGen(seed, onDone) {
       const worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' }), W = { w, worker, ok: true, n: 0 };
       worker.onmessage = (e) => {
         const b = busy.get(e.data.id);
-        if (b) { busy.delete(e.data.id); inWork.delete(b.key); W.n--; finish(b, e.data.data, e.data.mesh, e.data.ms); }
+        if (b) {
+          busy.delete(e.data.id); inWork.delete(b.key); W.n--;
+          if (e.data.err) jobError(b.key, b.q, e.data.err); else finish(b, e.data.data, e.data.mesh, e.data.ms);
+        }
         pump();
       };
       worker.onerror = (e) => fail(W, e);
@@ -79,7 +89,7 @@ export function createGen(seed, onDone) {
   return {
     // Запит; повторний — лише оновлює пріоритет (менше — раніше)
     want(key, q, pri) {
-      if (inWork.has(key)) return;
+      if (inWork.has(key) || failed.has(key)) return;
       queue.want(key, q, pri, ws.length ? workerOf(q, ws.length) : 0);
     },
     // Прибрати з черги все, чого вже не треба
@@ -91,12 +101,14 @@ export function createGen(seed, onDone) {
       while (queue.size && performance.now() - t0 < budgetMs) {
         const t = queue.take(0);
         if (!t) break;
-        const [key, q] = t, t1 = performance.now(), r = runJob(lawsOf(seed, q.d, q.n), q, cache);
+        const [key, q] = t, t1 = performance.now();
+        let r;
+        try { r = runJob(lawsOf(seed, q.d, q.n), q, cache); } catch (err) { jobError(key, q, err); continue; }
         finish({ key, q }, r.data, r.mesh || null, performance.now() - t1);
       }
     },
     get pending() { return queue.size + busy.size; },
-    stats: () => ({ workers: alive().length, inflight: busy.size, queued: queue.size, done }),
+    stats: () => ({ workers: alive().length, inflight: busy.size, queued: queue.size, done, failed: failed.size }),
     stop() { for (const W of ws) W.worker.terminate(); ws = []; queue = createQueue(1); busy.clear(); inWork.clear(); },
   };
 }

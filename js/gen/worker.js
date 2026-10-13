@@ -11,9 +11,11 @@ function lawsFor(seed, d, n) {
   return L;
 }
 
+// Виняток у роботі — відповідь з помилкою (воркер живий: інакше та сама робота, передана наступному, валила б і його)
 onmessage = (e) => {
   const { id, seed, q } = e.data;
   const t0 = performance.now();
-  const r = runJob(lawsFor(seed, q.d, q.n), q, cols);
+  let r;
+  try { r = runJob(lawsFor(seed, q.d, q.n), q, cols); } catch (err) { postMessage({ id, err: String(err && err.stack || err) }); return; }
   postMessage({ id, data: r.data, mesh: r.mesh || null, ms: performance.now() - t0 }, r.bufs);
 };

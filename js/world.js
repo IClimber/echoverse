@@ -256,7 +256,7 @@ export function createWorld(seed, onMesh, opts = {}) {
     stats: () => {
       const now = performance.now();
       while (colTimes.length && now - colTimes[0] > 1000) colTimes.shift();
-      return { cols: nCols, secs: nSecs, genMs: genN ? genMs / genN : 0, pending: gen.pending, colsPerSec: colTimes.length, workers: gen.stats().workers };
+      return { cols: nCols, secs: nSecs, genMs: genN ? genMs / genN : 0, pending: gen.pending, colsPerSec: colTimes.length, workers: gen.stats().workers, failed: gen.stats().failed };
     },
     stop() { gen.stop(); },
   };
