@@ -48,7 +48,6 @@ const PART = {
   dust: { box: [16, 7], fall: 0.25, len: 0, size: 0.045, dens: 1, col: [0.8, 0.7, 0.5, 0.5], tex: 'dot' },
 };
 const PARTICLES = 6000;
-const concatU8 = (...a) => { const o = new Uint8Array(a.reduce((s, x) => s + x.length, 0)); let p = 0; for (const x of a) { o.set(x, p); p += x.length; } return o; };
 const rkey = (rx, ry, rz) => ((rx + 0x20000) * 0x40000 + (ry + 0x20000)) * 256 + (rz + 128);
 // Списки діапазонів на кадр: 0 — тверде біля «вікна», 1 — тверде, 2 — тверде на шві далечі (0–2 — з відсіканням задніх
 // граней), 3 — рідина, 4 — рідина на шві, 5 — рослини зблизька, 6–8 — далекі рослини й каміння секцій (пара до 0–2, без
@@ -59,14 +58,11 @@ const FALLBACK = [[1, 2], [0, 2], [1, 0]];     // рівень деталіза�
 // Сітки камери регіону: вид → арена, матеріал, список кадру
 const KINDS = {
   solidC: ['op', 'solidC', L_CUT], solid: ['op', 'solid', L_PLAIN], solidR: ['op', 'solidR', L_RING],
-  objC: ['of', 'objC', L_OBJ + L_CUT], obj: ['of', 'obj', L_OBJ + L_PLAIN], objR: ['of', 'objR', L_OBJ + L_RING], objF: ['of', 'objF', L_OBJF],
+  objC: ['op', 'objC', L_OBJ + L_CUT], obj: ['op', 'obj', L_OBJ + L_PLAIN], objR: ['op', 'objR', L_OBJ + L_RING], objF: ['op', 'objF', L_OBJF],
   liq: ['liq', 'liq', L_LIQ], liqR: ['liq', 'liqR', L_LIQR], fl: ['fl', 'fl', L_FL], flB: ['fl', 'obj', L_FLB],
 };
-// Арени регіону: op — тверде секцій (і обрізи грубих), of — далекі рослини й каміння секцій, liq — рідина, fl — рослини
-// зблизька. Тверде й далекі рослини — в окремих аренах: тверде сусідніх секцій лягає поруч, і видимі діапазони зливаються в
-// один піддрав multi-draw (у WebGPU PlayCanvas кожен піддрав — окремий drawIndirect; до 13.10.2026 між твердим сусідніх
-// секцій лежали їхні далекі рослини — піддрав на секцію)
-// Кидачі тіней — по блоку BS×BS стовпців регіону (regions.js), матеріал без відсікання граней
+// Кидачі тіней — по блоку BS×BS стовпців регіону (regions.js): 0 — тверде з далекими рослинами й камінням секції (в арені
+// поруч — один діапазон; матеріал без відсікання граней), 2 — рослини зблизька
 const BS = 2, NB = RS / BS;
 // Тіні за відстанню (як LOD тіней у рушіях: дальні каскади — грубші кидачі; 13.10.2026, рішення користувача): каскади 0–1
 // (тіні до ~33 м) — повна будова рослин зблизька, 2–3 (до 128 м) — тінь дерева від його спрощеної будови, малої рослини —
@@ -74,7 +70,7 @@ const BS = 2, NB = RS / BS;
 // каскади), спрощені рослини стовпців з повними (дальні), великі рослини зблизька й покрив (ближні), тіні малих рослин
 // (дальні)
 const SH_ALL = 255, SH_NEAR = 0b0011, SH_FAR = 0b1100;
-const C_GROUND = 0, C_SIMPLE = 1, C_BIG = 2, C_COVER = 3, C_SHADE = 4, C_SIMPLEA = 5, NKC = 6;
+const C_GROUND = 0, C_SIMPLE = 1, C_BIG = 2, C_COVER = 3, C_SHADE = 4, NKC = 5;
 
 // settings: { gpu: 'webgl2' | 'webgpu', shadows: 'off' | 'pcf3' | 'pcss' }
 export async function createScene(canvas, settings = {}) {
@@ -108,9 +104,9 @@ export async function createScene(canvas, settings = {}) {
   const stats = { draws: 0, tris: 0, shTris: 0, shDraws: 0, up: 0, upBytes: 0, gpuBytes: 0, arenaBytes: 0, arenaUsed: 0, full: 0 };
   // види кидачів (CASTERS): матеріал і каскади (shLod — ?dev: false — усе в усі каскади, як до тіней за відстанню)
   const CASTERS = [
-    { arena: 'op', material: mats.obj, cascades: SH_ALL }, { arena: 'of', material: mats.obj, cascades: SH_FAR },
+    { arena: 'op', material: mats.obj, cascades: SH_ALL }, { arena: 'op', material: mats.obj, cascades: SH_FAR },
     { arena: 'fl', material: mats.fl, cascades: SH_NEAR }, { arena: 'fl', material: mats.fl, cascades: SH_NEAR },
-    { arena: 'fl', material: mats.fl, cascades: SH_FAR }, { arena: 'of', material: mats.obj, cascades: SH_ALL },
+    { arena: 'fl', material: mats.fl, cascades: SH_FAR },
   ];
   const RG = createRegions(G, { size: [RW, RW, RH], PO, PQ, format: FMT, kinds, casters: CASTERS, arena0: ARENA0, arenaMax: ARENA_MAX, stats });
 
@@ -255,8 +251,7 @@ export async function createScene(canvas, settings = {}) {
   const removeSlot = (U, k, lod) => {
     const Gr = U.slots.get(k), E = Gr && Gr.secs.get(k), sl = E && E.L[lod];
     if (!sl) return;
-    if (sl.off >= 0) RG.free(Gr.R, 'op', sl.off, sl.ns + sl.nc);
-    if (sl.foff >= 0) RG.free(Gr.R, 'of', sl.foff, sl.nf);
+    if (sl.off >= 0) RG.free(Gr.R, 'op', sl.off, sl.ns + sl.nf + sl.nc);
     if (sl.loff >= 0) RG.free(Gr.R, 'liq', sl.loff, sl.nl);
     E.L[lod] = null; E.n--; nL[lod]--;
     Gr.shDirty = true;
@@ -284,14 +279,10 @@ export async function createScene(canvas, settings = {}) {
     const [rx, ry, rz] = regionOf(q.cx, q.cy, q.cz), Gr = region(U, rx, ry, rz);
     let E = Gr.secs.get(k);
     if (!E) { E = { cx: q.cx, cy: q.cy, cz: q.cz, L: [null, null, null], n: 0 }; Gr.secs.set(k, E); U.slots.set(k, Gr); }
-    const nc = mesh.nc || 0, sl = { off: -1, foff: -1, ns: mesh.ns, nf: mesh.nf, nc, loff: -1, nl: mesh.nl, bb: mesh.bb, lbb: mesh.lbb };
-    // mesh.op: тверде (ns), далекі рослини (nf), обрізи (nc) → op: тверде й обрізи, of: далекі рослини
-    const op = mesh.op && new Uint8Array(mesh.op.buffer || mesh.op, mesh.op.byteOffset || 0);
-    if (mesh.ns + nc) sl.off = RG.put(Gr.R, 'op', nc ? concatU8(op.subarray(0, mesh.ns * 16), op.subarray((mesh.ns + mesh.nf) * 16, (mesh.ns + mesh.nf + nc) * 16)) : op, mesh.ns + nc);
-    if (mesh.nf) sl.foff = RG.put(Gr.R, 'of', op.subarray(mesh.ns * 16, (mesh.ns + mesh.nf) * 16), mesh.nf);
+    const nc = mesh.nc || 0, sl = { off: -1, ns: mesh.ns, nf: mesh.nf, nc, loff: -1, nl: mesh.nl, bb: mesh.bb, lbb: mesh.lbb };
+    if (mesh.ns + mesh.nf + nc) sl.off = RG.put(Gr.R, 'op', mesh.op, mesh.ns + mesh.nf + nc);
     if (mesh.nl) sl.loff = RG.put(Gr.R, 'liq', mesh.liq, mesh.nl);
-    if (sl.off < 0) sl.ns = sl.nc = 0;
-    if (sl.foff < 0) sl.nf = 0;
+    if (sl.off < 0) sl.ns = sl.nf = sl.nc = 0;
     if (sl.loff < 0) sl.nl = 0;
     grow(Gr.bb, mesh.bb); grow(Gr.bb, mesh.lbb); RG.setBounds(Gr.R, Gr.bb);
     E.L[lod] = sl; E.n++; nL[lod]++;
@@ -328,14 +319,13 @@ export async function createScene(canvas, settings = {}) {
   };
   // Арена зайнята менш ніж на чверть — у менший буфер (той самий меш), живі діапазони підряд
   const compact = (Gr) => {
-    for (const kind of ['op', 'of', 'liq', 'fl']) {
+    for (const kind of ['op', 'liq', 'fl']) {
       const A = Gr.R.ar[kind];
       if (!A || A.a.cap <= 65536 || A.a.used >= A.a.cap / 4) continue;
       let cap2 = 65536;
       while (cap2 < A.a.used * 1.5) cap2 *= 2;
       const live = [];
-      if (kind === 'op') { for (const E of Gr.secs.values()) for (const sl of E.L) if (sl && sl.off >= 0) live.push([sl, 'off', sl.ns + sl.nc]); }
-      else if (kind === 'of') { for (const E of Gr.secs.values()) for (const sl of E.L) if (sl && sl.foff >= 0) live.push([sl, 'foff', sl.nf]); }
+      if (kind === 'op') { for (const E of Gr.secs.values()) for (const sl of E.L) if (sl && sl.off >= 0) live.push([sl, 'off', sl.ns + sl.nf + sl.nc]); }
       else if (kind === 'liq') { for (const E of Gr.secs.values()) for (const sl of E.L) if (sl && sl.loff >= 0) live.push([sl, 'loff', sl.nl]); }
       else for (const f of Gr.fls.values()) if (f.off >= 0) live.push([f, 'off', f.n]);
       A.repack(cap2, live);
@@ -463,13 +453,12 @@ export async function createScene(canvas, settings = {}) {
     for (let b = 0; b < NB * NB; b++) SB.set([Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity], b * 6);
     for (const E of Gr.secs.values()) {
       const sl = E.L[0];
-      if (!sl || !sl.bb || !(sl.ns || sl.nf)) continue;
+      if (!sl || sl.off < 0 || !sl.bb) continue;
       const b = blockOf(Gr, E.cx, E.cy) * NKC;
       // є повні рослини — тінь у ближніх каскадах від них (і в смузі переходу), у дальніх — від спрощених
       const full = colDist(E.cx, E.cy, t) < FLORA_NEAR && nearFlora(U, ck(E.cx, E.cy)), nf = full ? 0 : sl.nf;
-      if (sl.ns) pushS(b + C_GROUND, sl.off, sl.ns);
-      if (nf) pushS(b + C_SIMPLEA, sl.foff, nf);
-      if (full && sl.nf && shLod) pushS(b + C_SIMPLE, sl.foff, sl.nf);
+      if (sl.ns + nf) pushS(b + C_GROUND, sl.off, sl.ns + nf);
+      if (full && sl.nf && shLod) pushS(b + C_SIMPLE, sl.off + sl.ns, sl.nf);
       if (sl.ns || sl.nf) growB(b / NKC, sl.bb);
     }
     for (const f of Gr.fls.values()) {
@@ -670,15 +659,12 @@ export async function createScene(canvas, settings = {}) {
       for (const Un of [...unis.values()]) {
         const secs = [], fls = [], empty = [];
         for (const Gr of Un.regions.values()) {
-          const op = Gr.R.ar.op, of = Gr.R.ar.of, lq = Gr.R.ar.liq, fa = Gr.R.ar.fl;
+          const op = Gr.R.ar.op, lq = Gr.R.ar.liq, fa = Gr.R.ar.fl;
           for (const [k, E] of Gr.secs) for (let lod = 0; lod < 3; lod++) {
             const sl = E.L[lod];
             if (!sl) continue;
             const mesh = { ns: sl.ns, nf: sl.nf, nc: sl.nc, nl: sl.nl, bb: sl.bb, lbb: sl.lbb, op: null, liq: null };
-            if (sl.off < 0) mesh.ns = mesh.nc = 0;
-            if (sl.foff < 0) mesh.nf = 0;
-            const so = sl.off >= 0 ? op.u8.subarray(sl.off * 16, (sl.off + sl.ns + sl.nc) * 16) : new Uint8Array(0);
-            mesh.op = concatU8(so.subarray(0, mesh.ns * 16), sl.foff >= 0 ? of.u8.subarray(sl.foff * 16, (sl.foff + sl.nf) * 16) : new Uint8Array(0), so.subarray(mesh.ns * 16));
+            if (sl.off >= 0) mesh.op = op.u8.slice(sl.off * 16, (sl.off + sl.ns + sl.nf + sl.nc) * 16); else mesh.ns = mesh.nf = mesh.nc = 0;
             if (sl.loff >= 0) mesh.liq = lq.u8.slice(sl.loff * 16, (sl.loff + sl.nl) * 16); else mesh.nl = 0;
             secs.push([k, { cx: E.cx, cy: E.cy, cz: E.cz, lod }, mesh]);
           }
@@ -942,7 +928,7 @@ export async function createScene(canvas, settings = {}) {
             if (!sl) continue;
             if (E.n > 1 && lod === want) for (let l = 0; l < 3; l++) if (l !== want && E.L[l] && !keepLod(dn, l)) trim.push(k, l);
             const ring = farOn && Math.hypot(Math.max(-ax, ax + CS), Math.max(-ay, ay + CS)) > SEAM;
-            if ((sl.ns || sl.nf || sl.nc) && sl.bb) {
+            if (sl.off >= 0 && sl.bb) {
               const c = sl.bb;
               if (vis(inside, ox, oy, oz, c)) {
                 // є повні рослини: стовпець увесь до смуги переходу — спрощених не малюємо, у смузі — проступають (objF)
@@ -955,8 +941,8 @@ export async function createScene(canvas, settings = {}) {
                 const jc = !ring && cut && (iso || dn <= camD + 8) && cutHit(m, cut, ox + c[0], oy + c[1], oz + c[2], ox + c[3], oy + c[4], oz + c[5], curve) ? L_CUT : j;
                 const js = iso ? jc : j;
                 if (sl.ns) pushR(js, seg[js * 2], sl.off, sl.ns);
-                if (nc) pushR(js, seg[js * 2], sl.off + sl.ns, nc);
-                if (nf) { const jo = fx ? L_OBJF : L_OBJ + jc; pushR(jo, seg[jo * 2], sl.foff, nf); }
+                if (nc) pushR(js, seg[js * 2], sl.off + sl.ns + sl.nf, nc);
+                if (nf) { const jo = fx ? L_OBJF : L_OBJ + jc; pushR(jo, seg[jo * 2], sl.off + sl.ns, nf); }
               }
             }
             if (sl.loff >= 0 && sl.lbb) {
