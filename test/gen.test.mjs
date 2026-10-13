@@ -300,7 +300,7 @@ test('біоми й види: у всесвіті багато біомів і �
 
 test('рослини: дерева не впритул (між стовбурами — прохід), трава не заважає; шаблони всіх форм — валідні й у бюджеті', async () => {
   const { O_TREE, O_COVER, solidMask } = await import('../js/gen/chunk.js');
-  const { template } = await import('../js/gen/plants.js');
+  const { template, footprint } = await import('../js/gen/plants.js');
   const { FORMS } = await import('../js/gen/flora.js');
   const seed = hashStr('ліс');
   let trees = 0, cover = 0;
@@ -327,6 +327,11 @@ test('рослини: дерева не впритул (між стовбура�
       // спрощений — той самий скелет, грубіші примітиви: не більший за повний
       assert.ok(T.verts <= (lod ? Math.min(1800, template(g, i % 3, 0).verts) : FORMS[form].big ? 3000 : 1200), `${form} lod ${lod}: ${T.verts} вершин`);
       for (const v of T.p) assert.ok(Number.isFinite(v) && Math.abs(v) < 20, form);
+    }
+    // перешкода велетня — стовбур (радіус trunkR, нахил до 0,08 на метр), не коріння (до 2,4 trunkR)
+    if (form === 'giant') {
+      const T = template(g, i % 3, 0), tr = g.h * (0.06 + 0.03 * p[17]);
+      assert.ok(T.noFoot && footprint(T).r <= tr * 1.05 + 0.08 * p[23] + 0.01, `велетень: перешкода ${footprint(T).r.toFixed(2)}, стовбур ${tr.toFixed(2)}`);
     }
   }
 });

@@ -25,7 +25,7 @@ const UP = [0, 0, 1];
 // менше граней, без нижньої кришки, найтонші пропущено; грудка — октаедр). Форми бачать lod = 0 (11.10.2026, скарга:
 // здалеку дерево нахилене в інший бік і з іншими гілками, ніж зблизька — спрощений будувався з іншого зерна й варіанта)
 class Geo {
-  constructor(R, lod) { this.p = []; this.n = []; this.c = []; this.m = []; this.R = R; this.lod = 0; this.cheap = lod; this.flatUp = false; }
+  constructor(R, lod) { this.p = []; this.n = []; this.c = []; this.m = []; this.R = R; this.lod = 0; this.cheap = lod; this.flatUp = false; this.noFoot = null; }
   tri(a, b, c, col, mat, ref) {
     const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
     let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
@@ -43,7 +43,7 @@ class Geo {
   finish() {
     const n = new Int8Array(this.n.length);
     for (let i = 0; i < n.length; i++) n[i] = Math.round(this.n[i] * 127);
-    return { p: new Float32Array(this.p), n, c: new Uint8Array(this.c), m: new Uint8Array(this.m), verts: this.p.length / 3 };
+    return { p: new Float32Array(this.p), n, c: new Uint8Array(this.c), m: new Uint8Array(this.m), verts: this.p.length / 3, noFoot: this.noFoot };
   }
 }
 
@@ -170,9 +170,13 @@ function tree(G, g, o) {
   };
   const trunkLen = H * o.trunkF, az = R() * TAU;
   const tdir = norm([Math.cos(az) * o.lean, Math.sin(az) * o.lean, 1]);
-  if (o.roots && !lod) for (let k = 0, n = 3 + (R() * 3 | 0); k < n; k++) {
-    const a = k * TAU / n + R() * 0.5, top = [0, 0, trunkLen * 0.22];
-    prism(G, top, [Math.cos(a) * o.trunkR * 2.4, Math.sin(a) * o.trunkR * 2.4, -0.05], o.trunkR * 0.55, o.trunkR * 0.25, 4, barkCol, barkMat);
+  if (o.roots && !lod) {
+    const v0 = G.p.length / 3;
+    for (let k = 0, n = 3 + (R() * 3 | 0); k < n; k++) {
+      const a = k * TAU / n + R() * 0.5, top = [0, 0, trunkLen * 0.22];
+      prism(G, top, [Math.cos(a) * o.trunkR * 2.4, Math.sin(a) * o.trunkR * 2.4, -0.05], o.trunkR * 0.55, o.trunkR * 0.25, 4, barkCol, barkMat);
+    }
+    G.noFoot = [v0, G.p.length / 3];                               // коріння — не перешкода (footprint)
   }
   let series = 0;
   for (let l = 0; l < o.levels; l++) series += Math.pow(o.lenR, l);
@@ -539,14 +543,16 @@ export function template(g, variant, lod, style) {
   return T;
 }
 
-// Перешкода, яку дає шаблон (для зіткнень): r — радіус основи (стовбур з корінням, стебло, камінь) на висоті тіла
-// гравця, top — верх твердих частин (кора, стебла, кристали, камінь; листя й квіти — ні). Кеш у шаблоні
+// Перешкода, яку дає шаблон (для зіткнень): r — радіус основи (стовбур, стебло, камінь) на висоті тіла гравця, top — верх
+// твердих частин (кора, стебла, кристали, камінь; листя й квіти — ні). Коріння (T.noFoot) — ні: призма перешкоди — на всю
+// висоту, і з корінням вона була втричі ширша за стовбур — між велетнями не пройти. Кеш у шаблоні
 const SOFT = new Set([M_LEAF, M_PETAL, M_BLADE]);
 export function footprint(T) {
   if (T.foot) return T.foot;
   let r = 0, top = 0;
+  const nf = T.noFoot;
   for (let i = 0, j = 0; i < T.verts; i++, j += 3) {
-    if (SOFT.has(T.m[i])) continue;
+    if (SOFT.has(T.m[i]) || nf && i >= nf[0] && i < nf[1]) continue;
     const z = T.p[j + 2];
     if (z > top) top = z;
     if (z < 1) r = Math.max(r, Math.hypot(T.p[j], T.p[j + 1]));
