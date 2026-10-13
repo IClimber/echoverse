@@ -269,8 +269,8 @@ export function lightsOf(sk, max = 3) {
   const dirs = L.filter((l) => l.k > 0);
   return { dirs, amb: Ea + Ed * REF_Z * (1 - (Bs > 0 ? P : 0) - (Bm > 0 ? Pm : 0)) + (sk.flash ? (sk.flash * 1.6) ** 2.2 : 0), min: MIN_LIGHT ** 2.2 };
 }
-// Лінійна сила → intensity PlayCanvas: менша за 1 множить колір до переведення в лінійне ((колір·i)^2,2), тож корінь
-// 2,2-го степеня; від 1 — як є (src/scene/light.js, Light._updateLinearColor)
 // Кількість напрямлених світел (слотів) всесвіту: сонця + місяці + компаньйон, 1…3 (зміна — перекомпіляція)
 export const lightSlots = (L) => { const B = bodiesOf(L); return Math.max(1, Math.min(3, B.suns.length + B.moons.length)); };
+// Лінійна сила → intensity PlayCanvas: менша за 1 множить колір до переведення в лінійне ((колір·i)^2,2), тож корінь
+// 2,2-го степеня; від 1 — як є (src/scene/light.js, Light._updateLinearColor)
 export const pcIntensity = (k) => k < 1 ? k ** (1 / 2.2) : k;
