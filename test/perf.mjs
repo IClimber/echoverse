@@ -74,7 +74,9 @@ if (arg('compare')) { compare(arg('compare'), arg('ref')); process.exit(0); }
 const API = arg('api', 'webgpu'), VISIBLE = !!arg('visible'), PORTS = String(arg('ports', '8125,8124')).split(',').map(Number);
 const SC = String(arg('scenes', 'plain,forest,mount,cave,first,iso,suns3,shaft,grove,fly,spin')).split(',').filter((k) => SCENES[k]);
 const VIEWS = String(arg('views', '32,16,8')).split(',').map(Number), SHS = String(arg('shadows', 'off,pcf3,pcss')).split(',');
-const RUNS = +arg('runs', 3), MS = +arg('ms', 2500), PROF = arg('prof', '1') !== '0';
+const RUNS = +arg('runs', 3), MS = +arg('ms', 2500);
+// профайлер GPU: один для всіх версій чи свій для кожного порту (--prof=1,0 — ціна самого профайлера на тій самій версії)
+const PROFS = String(arg('prof', '1')).split(','), PROF = (port) => (PROFS[PORTS.indexOf(port)] ?? PROFS[0]) !== '0';
 const OUT = arg('out', `${tmpdir()}/echoverse-perf-${API}.json`);
 // браузер — новий на кожну версію в кожному прогоні: за годину перезавантажень сторінок один Chrome із WebGPU тримав
 // ~22 ГБ пам'яті ядра (драйвер звільняє її лише з процесом), і OOM-killer убив вкладку посеред заміру (13.10.2026)
@@ -91,7 +93,7 @@ for (let run = 0; run < RUNS; run++) {
       const device = await openGame(P, port, { gpu: API, view: VIEWS[0], seed });
       const px = await P.ev("[eco.renderer.G.dev.width, eco.renderer.G.dev.height, devicePixelRatio, (() => { const c = document.createElement('canvas').getContext('webgl2'), e = c && c.getExtension('WEBGL_debug_renderer_info'); return e ? c.getParameter(e.UNMASKED_RENDERER_WEBGL) : '?'; })()]");
       console.log(`${port}: ${device}, полотно ${px[0]}×${px[1]} (DPR ${px[2]}), ${px[3]}`);
-      await P.ev(`eco.gpuProf(${PROF})`);
+      await P.ev(`eco.gpuProf(${PROF(port)})`);
       for (const name of bySeed[seed]) {
         const S = SCENES[name];
         if (!(await placeScene(P, S))) { results.push({ port, run, scene: name, skip: 'місце не знайдено' }); continue; }
