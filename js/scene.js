@@ -512,7 +512,7 @@ export async function createScene(canvas, settings = {}) {
   // ---- небо: уніформи (sky-shader.js) через dev.scope ----
   const sc = dev.scope, U = (k) => sc.resolve(k);
   const wrapN = (v) => ((v % 256) + 256) % 256;      // період шуму неба (sky-shader.js): зсув хмар — без великих чисел
-  const SU = Object.fromEntries(['uZen', 'uHor', 'uMain', 'uDusk', 'uSun[0]', 'uSunCol[0]', 'uMoon[0]', 'uMoonCol[0]', 'uMoon2[0]', 'uMoonA[0]', 'uMoonB[0]', 'uNSun', 'uNMoon', 'uDay', 'uStars', 'uCel', 'uRing', 'uRingCol', 'uPole', 'uCloud', 'uCloudCol', 'uFlash', 'uAur', 'uAurCol', 'uAurG', 'uFwd', 'uCloudC', 'uCloudMap', 'uMet[0]', 'uMetB[0]', 'uNMet', 'eco_bakeK', 'uHz[0]'].map((k) => [k, U(k)]));
+  const SU = Object.fromEntries(['uZen', 'uHor', 'uMain', 'uDusk', 'uSun[0]', 'uSunCol[0]', 'uMoon[0]', 'uMoonCol[0]', 'uMoon2[0]', 'uMoonA[0]', 'uMoonB[0]', 'uShade', 'uNSun', 'uNMoon', 'uDay', 'uStars', 'uCel', 'uRing', 'uRingCol', 'uPole', 'uCloud', 'uCloudCol', 'uFlash', 'uAur', 'uAurCol', 'uAurG', 'uFwd', 'uCloudC', 'uCloudMap', 'uMet[0]', 'uMetB[0]', 'uNMet', 'eco_bakeK', 'uHz[0]'].map((k) => [k, U(k)]));
   const hzOf = createHorizon();                      // справжній обрій з ока (js/horizon.js)
   const sun4 = new Float32Array(12), sunC = new Float32Array(12), moon4 = new Float32Array(16), moonC = new Float32Array(16), moon2 = new Float32Array(16), moonA = new Float32Array(16), moonB = new Float32Array(16), cel = new Float32Array(9);
   const c3 = (v) => [v[0] / 255, v[1] / 255, v[2] / 255];
@@ -525,11 +525,13 @@ export async function createScene(canvas, settings = {}) {
     [...st.suns].sort((a, b) => (b.dist ?? 0) - (a.dist ?? 0)).forEach((s, i) => { sun4.set([...s.dir, s.size], i * 4); sunC.set([...c3(s.lit || s.col), s.bright], i * 4); });
     [...st.moons].sort((a, b) => b.D - a.D).forEach((m, i) => {
       if (i > 3) return;
-      moon4.set([...m.dir, m.size], i * 4); moonC.set([...c3(m.col), m.comp || 0], i * 4); moon2.set([...c3(m.col2 || m.col), m.eclipse || 0], i * 4);
-      moonA.set(m.fa || st.pole, i * 4); moonB.set(m.fb || [1, 0, 0], i * 4);
+      moon4.set([...m.dir, m.size], i * 4); moonC.set([...c3(m.col), m.comp || 0], i * 4);
+      const Dm = 1 / Math.sin(m.size);   // тінь планети (sky-shader.js): відстань до тіла й радіус планети — у радіусах тіла
+      moon2.set([...c3(m.col2 || m.col), Dm * Math.sin(m.shadow || 0)], i * 4);
+      moonA.set([...(m.fa || st.pole), m.pen || 0], i * 4); moonB.set([...(m.fb || [1, 0, 0]), Dm], i * 4);
     });
     SU['uSun[0]'].setValue(sun4); SU['uSunCol[0]'].setValue(sunC); SU['uMoon[0]'].setValue(moon4); SU['uMoonCol[0]'].setValue(moonC); SU['uMoon2[0]'].setValue(moon2);
-    SU['uMoonA[0]'].setValue(moonA); SU['uMoonB[0]'].setValue(moonB);
+    SU['uMoonA[0]'].setValue(moonA); SU['uMoonB[0]'].setValue(moonB); SU.uShade.setValue([...(st.shade || [0, 0, 0])]);
     SU.uNSun.setValue(st.suns.length); SU.uNMoon.setValue(Math.min(4, st.moons.length));
     SU.uDay.setValue(st.day); SU.uStars.setValue([st.stars, st.starHue]);
     cel.set(st.cel); SU.uCel.setValue(cel);
@@ -823,7 +825,9 @@ export async function createScene(canvas, settings = {}) {
         if (!lampL) lampL = LG.addLight({ type: 'spot', pos: lp.pos, dir: lp.dir, color: LAMP.color, intensity: LAMP.intensity, range: LAMP.range, inner: LAMP.inner, outer: LAMP.outer, castShadows: false, moving: true, bias: LAMP.bias, normalBias: LAMP.normalBias, layers: [G.layers.world.id, G.layers.shadow.id, G.layers.arms.id] });
         lampL.set({ pos: lp.pos, dir: lp.dir, castShadows: lp.shadow && LG.quality !== 'off', enabled: true });
       } else if (lampL && lampL.e.enabled) lampL.set({ enabled: false });
-      const bakeK = Lt.amb / Math.max(1e-4, 0.6 * lum(sk.zenith) + 0.4 * lum(sk.horizon));
+      // небо в запіканні — не темніше 0,02 (sky-shader.js): без повітря вночі воно чорне, а розсіяне — з lightsOf
+      const fl = (c) => c.map((v) => Math.max(v, 0.02 * 255));
+      const bakeK = Lt.amb / Math.max(1e-4, 0.6 * lum(fl(sk.zenith)) + 0.4 * lum(fl(sk.horizon)));
       setSky(sk, bakeK);
       SU.uFwd.setValue([-b.u[0], -b.u[1], -b.u[2]]);   // погляд камери: диски світил — у площині кадру (sky-shader.js)
       SU['uHz[0]'].setValue(hzOf(laws, t[0] + e[0], t[1] + e[1], t[2] + e[2], curve > 0 ? laws.phys.planetR : 0, FAR_R));

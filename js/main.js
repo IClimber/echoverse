@@ -176,6 +176,23 @@ function boot(renderer) {
       }
       return null;
     },
+    // Найближча (до 400 діб уперед) мить, коли тінь планети найближче до середини тіла (компаньйон, інакше місяць i) і
+    // падає на нього: годинник — на неї; кутова відстань тіні від середини тіла в його радіусах чи null
+    moonShadow(i) {
+      const L = g.world.laws(g.d, g.n), step = L.sky.dayMin * 60 / (L.phys ? L.phys.time : 1) / 2000;
+      const pick = (s) => (i === undefined ? s.moons.find((m) => m.comp) || s.moons[0] : s.moons[i]);
+      let best = null, bc = 0;
+      for (let c = g.clock, end = g.clock + step * 2000 * 400; c < end; c += step) {
+        const s = skyState(L, c), m = pick(s);
+        if (!m || m.dir[2] < 0.1) continue;
+        const a = Math.acos(Math.max(-1, Math.min(1, -(m.dir[0] * s.main.dir[0] + m.dir[1] * s.main.dir[1] + m.dir[2] * s.main.dir[2])))) / m.size;
+        if (best === null || a < best) { best = a; bc = c; }
+        if (best < 0.02) break;
+      }
+      if (best === null || best > 1 + pick(skyState(L, bc)).shadow / pick(skyState(L, bc)).size) return null;
+      g.clock = bc;
+      return best;
+    },
     // Погода для замірів: тип опадів ('rain' | 'snow' | 'dust' | 'acid'), сила 1; 'clear' — ясно; null — як є
     weather(type) { wOver = type === undefined ? null : type; return wOver; },
     // Буря зорі сили I (0…1) зараз; null — як за законами

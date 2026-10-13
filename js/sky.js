@@ -165,7 +165,7 @@ export function skyState(L, clock) {
       dist = s.a * (1 + dot(o, se));
     }
     const b = s.L / (dist * dist) / Bo.Fref;
-    return { dir, dist, role: s.role, col: s.col, size: s.size, bright: b ** (1 / 2.2), eclipse: 0 };
+    return { dir, dist, role: s.role, col: s.col, size: s.size, ang: 0.00465 * s.R / dist, bright: b ** (1 / 2.2), eclipse: 0 };
   });
   // місяці й компаньйон: відстають від сонця на оберт за свій період (фази); склонення — з екліптики (довгота сонця +
   // відставання) і нахилу орбіти (затемнення — лише біля вузлів). Захоплене тіло (fix) стоїть на небесному екваторі на
@@ -187,9 +187,8 @@ export function skyState(L, clock) {
     return { dir, col: m.col, col2: m.col2, size: m.size, albedo: m.albedo, D: m.D, comp: m.comp || 0, eclipse: 0, fa, fb, fix: !!m.fix };
   });
   // затемнення: сонце під диском місяця, компаньйона чи ближчого сонця — його світло × (1 − частка; повне — 0, рішення
-  // користувача 13.10.2026: закрите світило не світить); bright0 — незатемнене (ним світять місяці); місяць у тіні планети
-  // (кутовий радіус тіні — 1 / D, у видимих розмірах ×10, як і місяці; компаньйон — справжній) — темніє
-  const sh = (m) => (m.comp ? 1 : 10) / m.D;
+  // користувача 13.10.2026: закрите світило не світить); bright0 — незатемнене (ним світять місяці)
+  const k10 = (m) => (m.comp ? 1 : 10), sh = (m) => k10(m) / m.D;
   for (const s of suns) {
     let f = 0;
     for (const m of moons) f = Math.max(f, covered(s.size, m.size, angle(s.dir, m.dir)));
@@ -203,9 +202,13 @@ export function skyState(L, clock) {
   let C = 0, cMax = -1, main = suns[0];
   const cs = suns.map(sunDay);
   suns.forEach((s, i) => { const c = cs[i]; C += c; if (c > cMax) { cMax = c; main = s; } });
+  // тінь планети на тілі — циліндр радіусом з планету від головного сонця з півтінню (у шейдері — попіксельно, sky-shader.js):
+  // shadow — кутовий радіус тіні на відстані тіла (1 / D; місяці — у видимих розмірах ×10, компаньйон — справжній), pen —
+  // півширина півтіні (справжній кутовий радіус сонця, у тих самих розмірах); eclipse — частка диска в тіні (світло місяця)
   for (const m of moons) {
     const anti = [-main.dir[0], -main.dir[1], -main.dir[2]];
-    m.eclipse = Math.max(0, Math.min(1, (sh(m) + m.size - angle(m.dir, anti)) / (2 * m.size)));
+    m.shadow = sh(m); m.pen = k10(m) * main.ang;
+    m.eclipse = covered(m.size, m.shadow, angle(m.dir, anti));
   }
   const dayT = C ** (1 / 2.2), day = Math.min(1, dayT);
   const air = L.air || {}, tauAir = air.vacuum ? 0 : 0.097 * (air.pressure || 0) / Math.max(0.02, L.grav) + (air.tauA || 0);
@@ -214,6 +217,10 @@ export function skyState(L, clock) {
   // внеску (13.10.2026, вимога користувача: колір кожної зорі — у загальний колір з урахуванням яскравості), захід — від головного
   const alt = (s, lo) => Math.max(lo, Math.asin(Math.max(-1, Math.min(1, s.dir[2]))));
   for (const s of suns) s.lit = skyOptics(L, s.col, alt(s, 0.02)).sun;
+  // світло в тіні планети: заломлене повітрям на краю диска планети — колір заходу, пройдений двічі (червоніше); без
+  // повітря тінь чорна. Сила — 0,3 при земній товщі повітря (τ ≈ 0,1)
+  const ls = main.lit.map((v) => (v / 255) ** 2), lm = Math.max(...ls, 1e-6), shadeK = 0.3 * clamp01(tauAir / 0.1);
+  const shade = ls.map((v) => v / lm * shadeK);
   const O = skyOptics(L, main.col, alt(main, 0.035));
   if (suns.length > 1 && C > 0) {
     const z = [0, 0, 0], h = [0, 0, 0];
@@ -238,11 +245,18 @@ export function skyState(L, clock) {
   for (const m of moons) if (m.dir[2] > 0) { const k = (1 - day) * 0.5 * m.size / 0.08; lx += m.dir[0] * k; ly += m.dir[1] * k; lz += m.dir[2] * k; }
   let light = norm([lx, ly, Math.max(lz, 0.25 * Math.hypot(lx, ly) + 0.05)]);
   if (light[2] < 0.25) light = norm([light[0], light[1], 0.25]);
-  const I = S.night + (1 - S.night) * dayT;
+  // ніч: з повітрям — світло ночі законів (частка денного, ночі безпечні) і колір нічного неба; без повітря (14.10.2026,
+  // рішення користувача) — як у реальності: небо чорне, світять лише місяці й компаньйон своїм справжнім відбитим світлом
+  // (moonLight, лінійне; повний компаньйон — до ~0,05 сонця, без них — темрява до мінімуму MIN_LIGHT). Між — плавно за
+  // товщею повітря (airN: τ 0 … 0,05; Земля — 1); інакше без повітря ніч і затемнення світліші за денні тіні й синє небо
+  const airN = clamp01(tauAir / 0.05), Bsun = (main.bright0 ?? main.bright) ** 2.2;
+  let Bm = 0;
+  for (const m of moons) { m.light = moonLight(m, main, Bsun); Bm += m.light; }
+  const nl = S.night * airN, I = ((nl + (1 - nl) * dayT) ** 2.2 + (1 - airN) * Bm) ** (1 / 2.2);
   const nightTint = [0.62, 0.72, 1.0];
   const tint = mix(nightTint, sunCol, day);   // повний колір зорі (13.10.2026, рішення користувача; було 60 % + 40 % білого)
-  // небо: удень — оптика, уночі — колір ночі законів; захід — сяйво біля сонця
-  const nZ = S.nightCol, nH = [S.nightCol[0] * 1.7 + 10, S.nightCol[1] * 1.7 + 10, S.nightCol[2] * 1.6 + 12];
+  // небо: удень — оптика, уночі — колір ночі законів (× airN); захід — сяйво біля сонця
+  const nZ = S.nightCol.map((v) => v * airN), nH = [(S.nightCol[0] * 1.7 + 10) * airN, (S.nightCol[1] * 1.7 + 10) * airN, (S.nightCol[2] * 1.6 + 12) * airN];
   const horizon = mix(mix(nH, O.hor, day), O.glow, dusk * 0.6), zenith = mix(mix(nZ, O.zen, day), O.glow, dusk * 0.15);
   // полярне сяйво (М5): овал на магнітній широті 67° (буря — до 20° ближче до екватора); у шейдері — завіси в шарі
   // 100–260 км над планетою (sky-shader.js), тож видно до ~2000 км від овалу — у бік полюса низько над обрієм, в овалі —
@@ -259,7 +273,7 @@ export function skyState(L, clock) {
   // зорі вдень видно, якщо небо темне (розріджене повітря, вакуум, повне затемнення)
   const dark = clamp01(1 - Math.max(...zenith) / 90);
   return {
-    phase, day, dusk, suns, moons, main, bary: c0, light, lightK: [tint[0] * I, tint[1] * I, tint[2] * I], amb: O.amb, I, tint, lock: !!S.lock, storm: I0,
+    phase, day, dusk, suns, moons, main, shade, airN, bary: c0, light, lightK: [tint[0] * I, tint[1] * I, tint[2] * I], amb: O.amb, I, tint, lock: !!S.lock, storm: I0,
     aurora, zenith, horizon, fog: horizon, duskCol: O.glow, stars: Math.max(S.stars * (1 - day) * (1 - dusk * 0.5), 0.9 * dark), starHue: S.starHue, rings: S.rings, pole: A.pole, cel,
   };
 }
@@ -329,6 +343,12 @@ export function applyWeather(st, L, W) {
 export const REF_Z = 0.77, MIN_LIGHT = 0.03, NIGHT_TINT = [0.62, 0.72, 1.0], MOON_ALBEDO = 0.12, DIRECT_Z = 0.2, TWILIGHT_Z = 0.1;
 // Внесок сонця в денне світло, лінійно (головне в зеніті — 1): яскравість (з затемненням) × сутінки (світить і трохи
 // під обрієм — розсіяне небом)
+// Відбите місяцем (компаньйоном) світло головного сонця, лінійне (сонце в зеніті — 1): незатемнене сонце × альбедо ×
+// кутовий радіус² × освітлена частка (фаза) × частка диска над обрієм × (1 − 0,95 · частка диска в тіні планети)
+export function moonLight(m, M, Bsun) {
+  const lit = (1 - (m.dir[0] * M.dir[0] + m.dir[1] * M.dir[1] + m.dir[2] * M.dir[2])) / 2;
+  return Bsun * (m.albedo ?? MOON_ALBEDO) * m.size * m.size * lit * aboveHorizon(m.dir[2], m.size) * (1 - 0.95 * (m.eclipse || 0));
+}
 export const sunDay = (s) => (s.bright * smooth(-0.1, 0.22, s.dir[2])) ** 2.2;
 // Частка диска над обрієм: z — синус висоти центру, r — кутовий радіус (сегмент круга)
 export function aboveHorizon(z, r) {
@@ -352,14 +372,16 @@ export function lightsOf(sk, max = 3) {
   const M = sk.main, Bsun = (M.bright0 ?? M.bright) ** 2.2, tw = Wt > 0 ? Tw / Wt : 1;
   for (const m of sk.moons) {
     const lit = (1 - (m.dir[0] * M.dir[0] + m.dir[1] * M.dir[1] + m.dir[2] * M.dir[2])) / 2;   // фаза: повня — навпроти сонця
-    const vis = aboveHorizon(m.dir[2], m.size), b = Bsun * (m.albedo ?? MOON_ALBEDO) * m.size * m.size * lit * vis * (1 - 0.95 * (m.eclipse || 0));
+    const vis = aboveHorizon(m.dir[2], m.size), b = m.light ?? moonLight(m, M, Bsun);
     if (b > 0) { L.push({ dir: m.dir, b, sun: false, col: NIGHT_TINT }); Bm += b; Mm = Math.max(Mm, lit * vis); }
   }
-  const S = (sk.I * (sk.dimK ?? 1)) ** 2.2, rho = sk.amb / (sk.amb + (1 - sk.amb) * REF_Z);
-  const Ea = S * rho ** 2.2, Ed = S * (1 - rho ** 2.2) / REF_Z, P = C > 0 ? CP / C : 0, Pm = (1 - P) * tw * Mm;
+  // без повітря (airN < 1) у рівні I є справжнє світло місяців (skyState): ця частина — пряма від них (EdX), решта — частка
+  // нічного рівня, як з повітрям
+  const S = (sk.I * (sk.dimK ?? 1)) ** 2.2, rho = sk.amb / (sk.amb + (1 - sk.amb) * REF_Z), X = (1 - (sk.airN ?? 1)) * Bm * (sk.dimK ?? 1) ** 2.2;
+  const Ea = S * rho ** 2.2, Ed = S * (1 - rho ** 2.2) / REF_Z, EdX = X * (1 - rho ** 2.2) / REF_Z, P = C > 0 ? CP / C : 0, Pm = (1 - P) * tw * Mm;
   let K = 0;
   // C = 0 при сонці над обрієм — великий диск (s > 0,1) ще не зайшов, але sunDay уже 0: прямого світла немає (не 0 / 0)
-  for (const l of L) { l.k = l.sun ? (C > 0 ? Ed * l.p / C : 0) : Ed * Pm * l.b / Bm; K += l.k; }
+  for (const l of L) { l.k = l.sun ? (C > 0 ? (Ed - EdX) * l.p / C : 0) : (Ed - EdX) * Pm * l.b / Bm + EdX * l.b / Bm; K += l.k; }
   L.sort((a, b) => b.k - a.k || b.b - a.b);
   // розсіяне, якби всі світила світили прямо; світило, чия тінь на екрані непомітна, і понад max — у розсіяне
   const A = Ea + REF_Z * (Ed - K), A0 = A ** (1 / 2.2), dirs = [];

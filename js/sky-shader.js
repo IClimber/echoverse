@@ -1,11 +1,12 @@
 // js/sky-shader.js — небо гри: функція ecoSky(d) у GLSL і WGSL для engine/graphics/sky.js (skyboxPS PlayCanvas і запікання
 // розсіяного світла). d — одиничний напрям у світі гри (z угору); результат — лінійний колір (кольори неба в законах —
 // екранні, тож ^2,2). З ECO_BAKE (запікання): без дисків і ореолів сонць, місяців, зір, сяйва, спалаху; нижче обрію —
-// колір обрію × 0,3 (земля відбиває менше за небо); × eco_bakeK (калібрування сили розсіяного, js/scene.js).
+// колір обрію × 0,3 (земля відбиває менше за небо); не темніше 0,02 (чорне небо без повітря — не нуль); × eco_bakeK (калібрування сили розсіяного, js/scene.js).
 // Уніформи — через dev.scope (js/scene.js): uZen, uHor, uMain, uDusk (rgb, сила), uSun[3] (напрям, кутовий радіус),
 // uSunCol[3] (колір прямого світла зорі — диск її кольору, яскравість), uMoon[4] (місяці й компаньйон), uMoonCol[4] (rgb, тип: 0 — місяць, 1 — газовий гігант,
-// 2 — кам'яний, 3 — крижаний), uMoon2[4] (другий колір візерунка, затемнення 0…1), uMoonA[4] / uMoonB[4] (вісь і нульовий
-// меридіан тіла: візерунок компаньйона — у його системі — повернутий до нас одним боком чи крутиться), uNSun, uNMoon, uDay, uStars (яскравість, відтінок),
+// 2 — кам'яний, 3 — крижаний), uMoon2[4] (другий колір візерунка, радіус планети в радіусах тіла), uMoonA[4] / uMoonB[4]
+// (вісь і нульовий меридіан тіла: візерунок компаньйона — у його системі — повернутий до нас одним боком чи крутиться;
+// .w — півширина півтіні, кутова, і відстань до тіла в його радіусах), uShade (світло в тіні планети: заломлене повітрям; без повітря — 0), uNSun, uNMoon, uDay, uStars (яскравість, відтінок),
 // uCel (обертання зоряного неба), uRing (r0, r1, непрозорість, смуг), uRingCol, uPole, uCloud (хмарність, зсув x, y,
 // темність), uCloudCol, uFlash, uAur (напрям на магнітний полюс x, y, сила, час), uAurCol, uAurG (відстань до середини овалу вздовж uAur.xy, км;
 // радіус планети, км; півширина овалу, км), uFwd (погляд камери — диски світил у площині кадру), uCloudC
@@ -29,6 +30,7 @@ uniform vec4 uMoonCol[4];
 uniform vec4 uMoon2[4];
 uniform vec4 uMoonA[4];
 uniform vec4 uMoonB[4];
+uniform vec3 uShade;
 uniform int uNSun;
 uniform int uNMoon;
 uniform float uDay;
@@ -163,8 +165,15 @@ vec3 ecoSky(vec3 d) {
       if (ty > 0.5 && ty < 1.5) mc = mix(mc, uMoon2[i].rgb, smoothstep(0.3, 0.7, 0.5 + 0.5 * sin(nb.z * 16.0 + ecoFbm(nb.xy * 4.0 + nb.z * 3.0) * 2.5)));
       else if (ty > 1.5 && ty < 2.5) mc = mix(mc, uMoon2[i].rgb, smoothstep(0.48, 0.56, ecoFbm(nb.xy * 3.0 + nb.z * 5.0 + 3.0)));
       else if (ty > 2.5) mc = mix(mc, uMoon2[i].rgb, 0.4 * smoothstep(0.45, 0.65, ecoFbm(nb.xy * 6.0 + nb.z * 2.0)));
-      mc = mix(mc, mc * vec3(0.35, 0.12, 0.08), uMoon2[i].a);
-      c = mix(c, mix(c0, mc * (0.14 + 0.86 * lit), 1.0 - 0.45 * uDay), ecoEdge(e.w, uMoon[i].w));
+      // тінь планети: циліндр радіусом Rp від головного сонця. Точка тіла (у радіусах тіла від ока) — Dm·o + n, центр
+      // планети — під оком на Rp; t — глибина за планетою, r — відстань від осі тіні; півтінь — ±t·(кутовий радіус сонця)
+      // (не вужча за піксель); затемнення — від краю півтіні до тіні, глибше за вершину конуса тіні — частка (Rp / w)².
+      // Rp, Dm — з CPU (uMoon2.a, uMoonB.w): на піксель диска — кілька множень
+      float Dm = uMoonB[i].w, Rp = uMoon2[i].a;
+      vec3 Q = Dm * uMoon[i].xyz + n + vec3(0.0, 0.0, Rp);
+      float t = -dot(Q, uMain), r = length(Q + t * uMain), w = max(t * uMoonA[i].w, 0.002 * Dm);
+      float sha = t > 0.0 ? smoothstep(0.0, 1.0, (Rp + w - r) / (2.0 * max(min(Rp, w), 1e-6))) * min(1.0, Rp * Rp / (w * w)) : 0.0;
+      c = mix(c, mix(c0, mc * (0.14 + 0.86 * lit * mix(vec3(1.0), uShade, sha)), 1.0 - 0.45 * uDay), ecoEdge(e.w, uMoon[i].w));
     }
   }
   c += glow;
@@ -238,7 +247,7 @@ vec3 ecoSky(vec3 d) {
   }
 #ifdef ECO_BAKE
   if (up < 0.0) c = uHor * 0.3;
-  return pow(max(c, vec3(0.0)), vec3(2.2)) * eco_bakeK;
+  return pow(max(c, vec3(0.02)), vec3(2.2)) * eco_bakeK;   // не нуль: чорне небо без повітря — розсіяне з калібрування (scene.js)
 #else
   c += vec3(0.85, 0.88, 1.0) * uFlash * (0.5 + 0.5 * cover);
   return pow(max(c, vec3(0.0)), vec3(2.2));
@@ -260,6 +269,7 @@ uniform uMoonCol: array<vec4f, 4>;
 uniform uMoon2: array<vec4f, 4>;
 uniform uMoonA: array<vec4f, 4>;
 uniform uMoonB: array<vec4f, 4>;
+uniform uShade: vec3f;
 uniform uNSun: i32;
 uniform uNMoon: i32;
 uniform uDay: f32;
@@ -423,8 +433,15 @@ fn ecoSky(d: vec3f) -> vec3f {
       if (ty > 0.5 && ty < 1.5) { mc = mix(mc, m2.rgb, ecoSs(0.3, 0.7, 0.5 + 0.5 * sin(nb.z * 16.0 + ecoFbm(nb.xy * 4.0 + nb.z * 3.0) * 2.5))); }
       else if (ty > 1.5 && ty < 2.5) { mc = mix(mc, m2.rgb, ecoSs(0.48, 0.56, ecoFbm(nb.xy * 3.0 + nb.z * 5.0 + 3.0))); }
       else if (ty > 2.5) { mc = mix(mc, m2.rgb, 0.4 * ecoSs(0.45, 0.65, ecoFbm(nb.xy * 6.0 + nb.z * 2.0))); }
-      mc = mix(mc, mc * vec3f(0.35, 0.12, 0.08), m2.a);
-      c = mix(c, mix(c0, mc * (0.14 + 0.86 * lit), 1.0 - 0.45 * uniform.uDay), ecoEdge(e.w, mo.w));
+      let Dm = uniform.uMoonB[i].w;
+      let Rp = m2.a;
+      let Q = Dm * mo.xyz + n + vec3f(0.0, 0.0, Rp);
+      let t = -dot(Q, uniform.uMain);
+      let r = length(Q + t * uniform.uMain);
+      let w = max(t * uniform.uMoonA[i].w, 0.002 * Dm);
+      var sha = 0.0;
+      if (t > 0.0) { sha = smoothstep(0.0, 1.0, (Rp + w - r) / (2.0 * max(min(Rp, w), 1e-6))) * min(1.0, Rp * Rp / (w * w)); }
+      c = mix(c, mix(c0, mc * (0.14 + 0.86 * lit * mix(vec3f(1.0), uniform.uShade, sha)), 1.0 - 0.45 * uniform.uDay), ecoEdge(e.w, mo.w));
     }
   }
   c += glow;
@@ -518,7 +535,7 @@ fn ecoSky(d: vec3f) -> vec3f {
   }
 #ifdef ECO_BAKE
   if (up < 0.0) { c = uniform.uHor * 0.3; }
-  return pow(max(c, vec3f(0.0)), vec3f(2.2)) * uniform.eco_bakeK;
+  return pow(max(c, vec3f(0.02)), vec3f(2.2)) * uniform.eco_bakeK;
 #else
   c += vec3f(0.85, 0.88, 1.0) * uniform.uFlash * (0.5 + 0.5 * cover);
   return pow(max(c, vec3f(0.0)), vec3f(2.2));
