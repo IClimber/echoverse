@@ -10,8 +10,7 @@ import { hash3, unit } from './rng.js';
 import { fbm3, noise2 } from './noise.js';
 import { tile, T_DESERT, T_DRY } from './gen/chunk.js';
 import { dayPhase, skyAxes, skyState } from './sky.js';
-import { LEVEL } from './iso.js';
-import { SEA } from './universe.js';
+import { SEA, LEVEL } from './universe.js';
 
 export const W_CLEAR = 0, W_CLOUDY = 1, W_RAIN = 2, W_STORM = 3, W_FOG = 4, W_DUST = 5;
 const KINDS = ['clear', 'cloudy', 'rain', 'storm', 'fog', 'dust'];

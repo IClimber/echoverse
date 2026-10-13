@@ -7,11 +7,11 @@
 // плитки нового всесвіту немає — та сама плитка попереднього (схожий рельєф: горизонт не порожніє).
 // Рівні деталізації (третя особа): секції стовпців далі LOD_R[0] — грубі (робота lod, без блоків), рівень — від відстані.
 import { CS, SEC } from './gen/chunk.js';
-import { LEVEL } from './iso.js';
+import { LEVEL } from './universe.js';
 import { FT } from './gen/far.js';
 import { ck, sk } from './world.js';
 import { landingChunks } from './device.js';
-import { ISO, VIEW_R, FAR_R, SEAM, boxInView, LOD_ON, lodOf, colDist, FLORA_NEAR } from './camera.js';
+import { pitchOf, VIEW_R, FAR_R, SEAM, boxInView, LOD_ON, lodOf, colDist, FLORA_NEAR } from './camera.js';
 
 const ZR = [-200, 2100];                 // висоти (од.) для піраміди видимості ще не згенерованого стовпця
 const ZR_FAR = [-200, 2050];             // те саме для плитки далечі
@@ -35,7 +35,7 @@ export const colPri = (dist, inF) => dist * (inF || dist < 48 ? 1 : 3);
 // й у піраміді видимості (як в update) без зведення плюс їхні секції з поверхнею й островами, яких ще немає в GPU (черга
 // завантаження не рахується). Рослини зблизька й плитки далечі — не рахуються
 export function visibleMissing(g, camera, renderer) {
-  const W = g.world, t = g.cam, m = g.view.m, iso = camera.mode === ISO, rad = iso ? g.view.rad : VIEW_R, lodOn = LOD_ON && !iso;
+  const W = g.world, t = g.cam, m = g.view.m, rad = VIEW_R, lodOn = LOD_ON;
   let miss = 0;
   for (const [cx, cy] of columnsInCircle(t, rad)) {
     const C = W.col(g.d, g.n, cx, cy), ax = cx * CS - t[0], ay = cy * CS - t[1];
@@ -61,17 +61,17 @@ export function createStreamer() {
     get ms() { return ms; },                // перерахунок (згладжено)
     // g — стан гри (world, me, cam, view, d, n, dev, prev); renderer — що вже в GPU. Повертає {far} — плитки далечі
     update(g, camera, renderer, now) {
-      const W = g.world, me = g.me, t = g.cam, ch = g.dev.charge, iso = camera.mode === ISO;
-      const czMe = Math.floor(Math.floor((me.z ?? 0) / LEVEL) / SEC), rad = iso ? g.view.rad : VIEW_R;
+      const W = g.world, me = g.me, t = g.cam, ch = g.dev.charge;
+      const czMe = Math.floor(Math.floor((me.z ?? 0) / LEVEL) / SEC), rad = VIEW_R;
       const tcx = Math.floor(t[0] / CS), tcy = Math.floor(t[1] / CS), chTo = ch ? `${ch.to[0]}:${ch.to[1]}` : '';
-      const L = last, lodOn = LOD_ON && !iso;
+      const L = last, lodOn = LOD_ON;
       const need = forced || !L || L.lod !== lodOn || L.d !== g.d || L.n !== g.n || L.cx !== tcx || L.cy !== tcy || L.cz !== czMe || L.ch !== chTo
-        || L.rad !== rad || L.mode !== camera.mode || Math.abs(L.yaw - camera.yaw) > TURN || Math.abs(L.pitch - (iso ? camera.pitch : camera.pitch3)) > TURN
+        || L.rad !== rad || L.mode !== camera.mode || Math.abs(L.yaw - camera.yaw) > TURN || Math.abs(L.pitch - pitchOf(camera)) > TURN
         || now - L.at > 300 || (W.dirty && now - L.at > 50);
       if (!need) { W.gen.tick(); return { far }; }
       forced = false; W.dirty = false; W.pass();
       const t0 = performance.now();
-      last = { d: g.d, n: g.n, cx: tcx, cy: tcy, cz: czMe, ch: chTo, rad, mode: camera.mode, lod: lodOn, yaw: camera.yaw, pitch: iso ? camera.pitch : camera.pitch3, at: now };
+      last = { d: g.d, n: g.n, cx: tcx, cy: tcy, cz: czMe, ch: chTo, rad, mode: camera.mode, lod: lodOn, yaw: camera.yaw, pitch: pitchOf(camera), at: now };
 
       const keys = new Set(), m = g.view.m;
       const col = (d, n, cx, cy, pri) => {
@@ -138,7 +138,7 @@ export function createStreamer() {
       };
       for (const dir of [-1, 1]) other(g.d, g.n + dir);
       if (ch && (ch.to[0] !== g.d || Math.abs(ch.to[1] - g.n) !== 1)) other(ch.to[0], ch.to[1]);   // далекий стрибок (R)
-      far = iso ? null : farTiles(g, renderer, keys, t, m, rad);
+      far = farTiles(g, renderer, keys, t, m, rad);
       W.gen.keepOnly(keys);
       W.gen.tick();
       ms = ms * 0.8 + (performance.now() - t0) * 0.2;

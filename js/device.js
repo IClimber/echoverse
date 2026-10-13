@@ -3,8 +3,7 @@
 // Координати зберігаються; якщо там, куди потрапиш, не можна стояти, — найближча клітинка, де можна, у радіусі
 // LAND_R; такої немає — вільне місце в тому самому стовпці (у рідині — пливеш, у повітрі — падаєш). Стрибок вдається завжди.
 import { standableB, hitsB, hits, settle } from './player.js';
-import { LEVEL } from './iso.js';
-import { KMIN, KMAX } from './universe.js';
+import { KMIN, KMAX, LEVEL } from './universe.js';
 
 export const CHARGE = 1.0;
 export const LAND_R = 8;

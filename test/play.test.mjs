@@ -1,7 +1,7 @@
 // Ізометрія, рух гравця, пристрій для стрибків, формат файлу збереження.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { toScreen, fromScreen, pick, LEVEL } from '../js/iso.js';
+import { LEVEL } from '../js/universe.js';
 import { step, hits, support, standable, settle, SPEED, PH1, GRAVITY, JUMP_V, FLOAT_Z, jumpHeight, SPRINT, FLY_SPEED, FLY_V, shapeOf } from '../js/player.js';
 import { landing, landingChunks, createDevice, CHARGE, HISTORY } from '../js/device.js';
 import { serialize, deserialize } from '../js/save.js';
@@ -41,32 +41,6 @@ function world(rows, liquid = { swim: true, danger: '', density: 1 }) {
 const at = (P, x, y) => { let k = 40; while (k > 0 && P.block(Math.floor(x), Math.floor(y), k - 1) === B_AIR) k--; return k * LEVEL; };
 const man = (P, x, y) => ({ x, y, z: at(P, x, y), vz: 0, ground: true });
 const run = (p, ix, iy, n, P, ph, jump = false, mb) => { for (let i = 0; i < n; i++) step(p, ix, iy, jump && i === 0, 1 / 60, P, ph, mb); };
-
-test('ізометрія: ромб 2:1, екран ↔ площина туди й назад', () => {
-  const [ax, ay] = toScreen(1, 0, 0), [bx, by] = toScreen(0, 1, 0);
-  assert.ok(Math.abs(ax - 32) < 1e-9 && Math.abs(ay - 16) < 1e-9);     // +x — униз-праворуч
-  assert.ok(Math.abs(bx + 32) < 1e-9 && Math.abs(by - 16) < 1e-9);     // +y — униз-ліворуч
-  for (const [x, y, z] of [[3.2, -7.5, 1], [0, 0, 0], [-12.25, 4, 3.5]]) {
-    const [sx, sy] = toScreen(x, y, z), [rx, ry] = fromScreen(sx, sy, z);
-    assert.ok(Math.abs(rx - x) < 1e-9 && Math.abs(ry - y) < 1e-9);
-  }
-});
-
-test('вибір клітинки: на рівнині — та, що під курсором; вежа попереду закриває ту, що позаду', () => {
-  const H = new Map([['5,5', 6]]);
-  const heightAt = (x, y) => H.get(`${x},${y}`) ?? 0;
-  const cam = [0, 0, 0];
-  for (const [x, y] of [[2, 3], [-4, 1], [0, 0]]) {
-    const [sx, sy] = toScreen(x + 0.5, y + 0.5, 0);
-    assert.deepEqual(pick(sx, sy, cam, heightAt, 10), [x, y]);
-  }
-  // клітинка (4, 4) прямо за вежею (5, 5): точка її поверхні на екрані припадає на бік вежі
-  const [sx, sy] = toScreen(4.5, 4.5, 0);
-  assert.deepEqual(pick(sx, sy, cam, heightAt, 10), [5, 5]);
-  // верх вежі
-  const [tx, ty] = toScreen(5.5, 5.5, 6 * LEVEL);
-  assert.deepEqual(pick(tx, ty, cam, heightAt, 10), [5, 5]);
-});
 
 test('рух: «праворуч» на екрані — уздовж (1, −1) світу, швидкість SPEED', () => {
   const P = world(Array(20).fill('4'.repeat(20))), p = man(P, 10.5, 10.5);
@@ -220,15 +194,9 @@ test('файл збереження: туди й назад, перевірка 
   assert.throws(() => deserialize(JSON.stringify({ format: 'echoverse', v: 1, world: { ...w, player: { d: 0, n: 0, x: 'a', y: 0 } } })), /пошкоджене/);
 });
 
-test('камера: ізометрія з азимутом 45° збігається з toScreen; базис руху; третя особа дивиться на ціль', async () => {
-  const { createCamera, viewProj, project, moveBasis, chunksInView, ISO, THIRD } = await import('../js/camera.js');
-  const c = createCamera(ISO);
-  c.zoom = 1; c.yaw = Math.PI / 4; c.pitch = Math.PI / 6;
-  const W = 1600, H = 900, { m } = viewProj(c, W, H);
-  for (const p of [[3, -2, 1], [0, 0, 0], [-7.5, 4, 2.5]]) {
-    const [sx, sy] = project(m, p, W, H), [ex, ey] = toScreen(p[0], p[1], p[2]);
-    assert.ok(Math.abs(sx - W / 2 - ex) < 1e-3 && Math.abs(sy - H / 2 - ey) < 1e-3, `${p}: ${sx - W / 2},${sy - H / 2} ≠ ${ex},${ey}`);
-  }
+test('камера: базис руху; третя особа дивиться на ціль', async () => {
+  const { createCamera, viewProj, project, moveBasis, chunksInView, THIRD } = await import('../js/camera.js');
+  const c = createCamera(THIRD), W = 1600, H = 900;                         // азимут 45° — від createCamera
   const [r, d] = moveBasis(c);
   assert.ok(Math.abs(r[0] - Math.SQRT1_2) < 1e-12 && Math.abs(r[1] + Math.SQRT1_2) < 1e-12 && Math.abs(d[0] - d[1]) < 1e-12);
   const t = createCamera(THIRD), v = viewProj(t, W, H, 6);
@@ -474,7 +442,7 @@ test('нові сили: вітер — чесний опір (на землі �
 });
 
 test('тіла: левітуюче висить на висоті появи, звичайне падає й лежить; удар — легке відлітає, важке ледь зрушить; на тіло можна стати', async () => {
-  const { configureBodies } = await import('../js/engine/physics/bodies.js'); const { solidB: sB } = await import('../js/gen/chunk.js'); const pl = await import('../js/player.js'); const { LEVEL: LV } = await import('../js/iso.js');
+  const { configureBodies } = await import('../js/engine/physics/bodies.js'); const { solidB: sB } = await import('../js/gen/chunk.js'); const pl = await import('../js/player.js'); const { LEVEL: LV } = await import('../js/universe.js');
   configureBodies({ level: LV, solid: sB, gravity: pl.GRAVITY, refMass: pl.PLAYER_MASS, refArea: pl.PLAYER_AREA });
   const { makeBody, stepBody, push, rayBody } = await import('../js/engine/physics/bodies.js'); const { HIT_IMPULSE } = pl;
   const P = world(Array(40).fill('4'.repeat(40))), env = { g: 1, vT: 20, bounce: 0, friction: 1, wind: [0, 0] };
@@ -550,7 +518,7 @@ test('вітер: затишок за стіною, деревом чи каме
 });
 
 test('тіла й вітер: сплячий левітуючий камінь вітер будить і відхиляє (легкий — далі, важкий — ледь), поле не дає відлетіти', async () => {
-  const { configureBodies } = await import('../js/engine/physics/bodies.js'); const { solidB: sB } = await import('../js/gen/chunk.js'); const pl = await import('../js/player.js'); const { LEVEL: LV } = await import('../js/iso.js');
+  const { configureBodies } = await import('../js/engine/physics/bodies.js'); const { solidB: sB } = await import('../js/gen/chunk.js'); const pl = await import('../js/player.js'); const { LEVEL: LV } = await import('../js/universe.js');
   configureBodies({ level: LV, solid: sB, gravity: pl.GRAVITY, refMass: pl.PLAYER_MASS, refArea: pl.PLAYER_AREA });
   const { makeBody, stepBody } = await import('../js/engine/physics/bodies.js');
   const P = world(Array(60).fill('4'.repeat(60))), env = { g: 1.28, vT: 40, bounce: 0, friction: 1, wind: [20, 0] };
@@ -716,10 +684,10 @@ test('камера третьої особи — куля: стіна, стов�
   cam.pitch3 = 0;
 });
 
-test('перша особа: цикл V, погляд — куди обернений гравець, кут огляду 70°, без згладжування; руки — у кутах кадру', async () => {
-  const { createCamera, viewProj, project, basis, rotate, smooth, facing, setYaw, NEXT, FIRST, THIRD, ISO, FOV1, LIMITS } = await import('../js/camera.js');
+test('перша особа: V — перша ↔ третя, погляд — куди обернений гравець, кут огляду 70°, без згладжування; руки — у кутах кадру', async () => {
+  const { createCamera, viewProj, project, basis, rotate, smooth, facing, setYaw, NEXT, FIRST, THIRD, FOV1, LIMITS } = await import('../js/camera.js');
   const { viewArms } = await import('../js/anim.js');
-    assert.deepEqual([NEXT[FIRST], NEXT[THIRD], NEXT[ISO]], [THIRD, ISO, FIRST]);
+  assert.deepEqual([NEXT[FIRST], NEXT[THIRD]], [THIRD, FIRST]);
   const c = createCamera(FIRST);
   setYaw(c, 1.2 + Math.PI);
   const f = facing(c), u = basis(c).u;
@@ -807,7 +775,6 @@ test('під рідиною: око нижче поверхні стовпця �
 test('відкритість неба фігури й тіл: як AO неба вершин землі (skyK), білінійно між клітинками; немає даних — відкрито', async () => {
   const { skyOpenAt } = await import('../js/world.js');
   const { skyK } = await import('../js/gen/mesh.js');
-  const { LEVEL } = await import('../js/iso.js');
   // клітинки x < 0 — під стелею на висоті 10 (печера), x ≥ 0 — відкрито (верх укриття — земля на 0)
   const top = (x) => x < 0 ? 10 : 0;
   assert.equal(skyOpenAt(top, 5.5, 0.5, 0.5), 1);
@@ -886,7 +853,7 @@ test('опір повітря: стрибок 1,15 м і 0,97 с при 1 g і 1
 });
 
 test('тіла: тертя Кулона (гальмівний шлях v²/(2μg)), межа падіння — від площі проєкції й маси, вітер зрушує понад μ·m·g', async () => {
-  const { configureBodies } = await import('../js/engine/physics/bodies.js'); const { solidB: sB } = await import('../js/gen/chunk.js'); const pl = await import('../js/player.js'); const { LEVEL: LV } = await import('../js/iso.js');
+  const { configureBodies } = await import('../js/engine/physics/bodies.js'); const { solidB: sB } = await import('../js/gen/chunk.js'); const pl = await import('../js/player.js'); const { LEVEL: LV } = await import('../js/universe.js');
   configureBodies({ level: LV, solid: sB, gravity: pl.GRAVITY, refMass: pl.PLAYER_MASS, refArea: pl.PLAYER_AREA });
   const { makeBody, stepBody, windMoves } = await import('../js/engine/physics/bodies.js');
   const P = world(Array(40).fill('4'.repeat(40)));

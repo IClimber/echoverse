@@ -52,7 +52,6 @@ export const SCENES = {
   plain: { seed: '1hsb1wu', n: 1, x: -52, y: -45, ph: 0.4, cam: 'third', look: [0.8, 0.35, 7] },
   rain: { seed: '1hsb1wu', n: 1, x: -52, y: -45, ph: 0.4, cam: 'third', look: [0.8, 0.35, 7], weather: 'rain' },
   night: { seed: '1hsb1wu', n: 1, x: -52, y: -45, ph: 0.0, cam: 'third', look: [0.8, 0.35, 7] },
-  iso: { seed: '1hsb1wu', n: 1, x: -52, y: -45, ph: 0.4, cam: 'iso' },
   cave: { seed: '1hsb1wu', n: 1, x: -52, y: -45, ph: 0.4, cam: 'third', look: [0.8, 0.35, 4], cave: true },
   forest: { seed: '1hsb1wu', n: -60813, x: -478, y: -107, ph: 0.4, cam: 'third', look: [0.8, 0.35, 7] },
   first: { seed: '1hsb1wu', n: -60813, x: -478, y: -107, ph: 0.4, cam: 'first', look: [0.8, 0.1] },

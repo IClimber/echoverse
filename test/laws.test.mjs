@@ -178,7 +178,7 @@ test('зворотна гравітація: тіло піднімається �
   const { makeBody, stepBody, configureBodies } = await import('../js/engine/physics/bodies.js');
   const { step, GRAVITY, PLAYER_MASS, PLAYER_AREA } = await import('../js/player.js');
   const { solidB, B_STONE, B_AIR } = await import('../js/gen/chunk.js');
-  const { LEVEL } = await import('../js/iso.js');
+  const { LEVEL } = await import('../js/universe.js');
   configureBodies({ level: LEVEL, solid: solidB, gravity: GRAVITY, refMass: PLAYER_MASS, refArea: PLAYER_AREA });
   // всесвіт із зворотною гравітацією й точка в плямі з k₀ < 0
   let L = null, pt = null;

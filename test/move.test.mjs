@@ -1,7 +1,7 @@
 // Рух п. 3 roadmap: пози (присів, лежить), край, сповзання, лазіння (стіна, драбина, ліана), пірнання, політ.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { LEVEL } from '../js/iso.js';
+import { LEVEL } from '../js/universe.js';
 import { step, hits, shapeOf, slideZ, SPEED, SNEAK, PH1, FOOT, CLIMB_V, SPRINT, FLY_SPEED, FLY_FAST, FLOAT_Z } from '../js/player.js';
 import { B_AIR, B_LIQ, B_GRASS, B_STONE, B_ICE, B_LADDER, B_VINE, solidB } from '../js/gen/chunk.js';
 

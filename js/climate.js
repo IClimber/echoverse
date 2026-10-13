@@ -2,8 +2,7 @@
 // дозволено). Генерація бере лише температуру ділянки й градієнт (L.temp, L.clim.lapse у gen/chunk.js tile); тут —
 // те саме плюс доба, сезон, погода, без обмеження ±2,5 одиниць (Венера в HUD — сотні градусів).
 import { fbm3 } from './noise.js';
-import { SEA } from './universe.js';
-import { LEVEL } from './iso.js';
+import { SEA, LEVEL } from './universe.js';
 import { dayPhase, yearPhase } from './sky.js';
 
 const TAU = Math.PI * 2;

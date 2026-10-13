@@ -143,8 +143,8 @@ void getEmission() {
 `;
 // Розчинення й «вікно». Дизеринг PlayCanvas (opacityDitherPS) відкидає піксель, коли alpha < шум^2,2 (шум рівномірний),
 // тож лишається частка alpha^(1/2,2): частка t — alpha = t^2,2 (половина пікселів — 0,5^2,2 = 0,2176).
-// eco_fade — від, до (відстань від ока); вимкнено — (−2, −1). eco_cut: xyz — точка гравця, w — cos кута конуса
-// (перспектива) чи радіус (орто); eco_cut2: xyz — напрям погляду (орто), w — 0 вимкнено, 1 перспектива, 2 орто;
+// eco_fade — від, до (відстань від ока); вимкнено — (−2, −1). eco_cut: xyz — точка гравця, w — cos півкута конуса від ока;
+// eco_cut2: w — 0 вимкнено, 1 увімкнено (xyz не використовується; був напрям погляду виду згори, прибраного 13.10.2026);
 // eco_cut3: x — як eco_cut.w для рослин (ширше), y — висота колін (PlayCanvas y)
 const OPACITY_PS = `
 uniform float material_alphaDitherScale;
@@ -174,9 +174,7 @@ void getOpacity() {
       #else
         float eco_k = eco_cut.w;
       #endif
-      bool eco_in = eco_cut2.w < 1.5 ? dot(normalize(vPositionW - eco_eye), normalize(eco_cut.xyz - eco_eye)) > eco_k
-                                     : length(cross(vPositionW - eco_cut.xyz, eco_cut2.xyz)) < eco_k;
-      if (eco_in) dAlpha = min(dAlpha, 0.2176);
+      if (dot(normalize(vPositionW - eco_eye), normalize(eco_cut.xyz - eco_eye)) > eco_k) dAlpha = min(dAlpha, 0.2176);
     }
   #endif
   #endif
@@ -357,10 +355,7 @@ fn getOpacity() {
       #else
         let eco_k: f32 = uniform.eco_cut.w;
       #endif
-      var eco_in: bool;
-      if (uniform.eco_cut2.w < 1.5) { eco_in = dot(normalize(vPositionW - uniform.eco_eye), normalize(uniform.eco_cut.xyz - uniform.eco_eye)) > eco_k; }
-      else { eco_in = length(cross(vPositionW - uniform.eco_cut.xyz, uniform.eco_cut2.xyz)) < eco_k; }
-      if (eco_in) { dAlpha = min(dAlpha, 0.2176); }
+      if (dot(normalize(vPositionW - uniform.eco_eye), normalize(uniform.eco_cut.xyz - uniform.eco_eye)) > eco_k) { dAlpha = min(dAlpha, 0.2176); }
     }
   #endif
   #endif

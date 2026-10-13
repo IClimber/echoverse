@@ -5,8 +5,7 @@
 // з масивом b — швидкий шлях), laws (для chunkMesh; геометрія від законів не залежить), ver (лічильник даних світу).
 import { chunkMesh } from './gen/mesh.js';
 import { CS, CW, FR, SEC, bv, solidB, B_STONE, B_LIQ } from './gen/chunk.js';
-import { LEVEL } from './iso.js';
-import { lawsOf } from './universe.js';
+import { lawsOf, LEVEL } from './universe.js';
 import { pushTri, prismTris, boxTris } from './engine/physics/collide.js';
 
 const MAX_SECS = 128;                // секцій у кеші (найдавніша — геть)

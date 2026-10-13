@@ -1,22 +1,20 @@
-// aim.js — ціль гравця (п. 3 roadmap): промінь з ока (перша й третя особа — уздовж погляду камери, як у Minecraft) чи з
-// курсора (згори) до першого, у що влучає: видима поверхня (тоді блок — DDA по блоках від точки влучання: поверхня
-// плавна, блок під нею — той, що зміниться в п. 6), тіло, предмет (стовбур, крона, трава, камінь — циліндри з даних
-// стовпця). Без DOM.
+// aim.js — ціль гравця (п. 3 roadmap): промінь з ока уздовж погляду камери (як у Minecraft) до першого, у що влучає:
+// видима поверхня (тоді блок — DDA по блоках від точки влучання: поверхня плавна, блок під нею — той, що зміниться
+// в п. 6), тіло, предмет (стовбур, крона, трава, камінь — циліндри з даних стовпця). Без DOM.
 // P — «щуп» світу (player.js); objAt(x, y) → {o, C} — предмет клітинки (world.js) чи null; o — початок, d — напрям
 // (одиничний), maxT — довжина
 import { colliderOf } from './collision.js';
 import { createList, clearList, rayCast } from './engine/physics/collide.js';
 import { solidB, CS } from './gen/chunk.js';
-import { LEVEL, S } from './iso.js';
-import { basis, fovOf, ISO } from './camera.js';
+import { LEVEL } from './universe.js';
 
 export const REACH = 3;              // досяжність рук (як удар)
 const isBody = (r) => !!r && r.hz !== undefined;
 const LST = createList(4096);
 
 // Перший твердий блок уздовж променя (Amanatides & Woo 1987, клітинка 1 × 1 × LEVEL): {x, y, k, b, t, n: [нормаль грані
-// входу]} чи null; незгенероване (−1) — стоп (null), з pass — повітря (згори промінь починається далеко за дальністю)
-export function blockDDA(P, o, d, maxT, pass = false) {
+// входу]} чи null; незгенероване (−1) — стоп (null)
+export function blockDDA(P, o, d, maxT) {
   const oz = o[2] / LEVEL, dz = d[2] / LEVEL;
   let x = Math.floor(o[0]), y = Math.floor(o[1]), k = Math.floor(oz);
   const sx = d[0] > 0 ? 1 : -1, sy = d[1] > 0 ? 1 : -1, sk = dz > 0 ? 1 : -1;
@@ -27,8 +25,8 @@ export function blockDDA(P, o, d, maxT, pass = false) {
   let t = 0, n = [0, 0, 0];
   for (let i = 0; i < 4096 && t <= maxT; i++) {
     const b = P.block(x, y, k);
-    if (b === -1 && !pass) return null;
-    if (b !== -1 && solidB(b)) return { x, y, k, b, t, n };
+    if (b === -1) return null;
+    if (solidB(b)) return { x, y, k, b, t, n };
     if (tx < ty && tx < tk) { t = tx; tx += tdx; x += sx; n = [-sx, 0, 0]; }
     else if (ty < tk) { t = ty; ty += tdy; y += sy; n = [0, -sy, 0]; }
     else { t = tk; tk += tdk; k += sk; n = [0, 0, -sk]; }
@@ -94,30 +92,4 @@ export function aimRay(P, objAt, o, d, maxT = REACH) {
   }
   if (bo) best = { kind: 'obj', t: bt, p: at(bt), obj: bo };
   return best;
-}
-
-// Промінь з курсора (sx, sy — у пікселях полотна W × H): згори — паралельний погляду, з площини на 400 від цілі;
-// перспектива — з ока. target — ціль камери, eye — око відносно цілі. {o, d}
-export function screenRay(c, target, eye, sx, sy, W, H) {
-  const { r, up, u } = basis(c);
-  if (c.mode === ISO) {
-    const k = S * c.zoom, a = (sx - W / 2) / k, b = (H / 2 - sy) / k;
-    return { o: [target[0] + r[0] * a + up[0] * b + u[0] * 400, target[1] + r[1] * a + up[1] * b + u[1] * 400, target[2] + r[2] * a + up[2] * b + u[2] * 400], d: [-u[0], -u[1], -u[2]] };
-  }
-  const f = Math.tan(fovOf(c) / 2), nx = (sx / W * 2 - 1) * f * W / H, ny = (1 - sy / H * 2) * f;
-  const d = [-u[0] + r[0] * nx + up[0] * ny, -u[1] + r[1] * nx + up[1] * ny, -u[2] + r[2] * nx + up[2] * ny], l = Math.hypot(...d);
-  return { o: [target[0] + eye[0], target[1] + eye[1], target[2] + eye[2]], d: [d[0] / l, d[1] / l, d[2] / l] };
-}
-
-// Ціль під курсором згори: довгий промінь (до 900) — спершу блоки (DDA; незгенероване — повітря: початок променя — за
-// 400 від цілі, далеко за дальністю), біля першого твердого — точно (трикутники, тіла, предмети: коробка ±1,5 уздовж
-// променя). Секції зіткнень уздовж усього променя будувати дорого
-export function isoAim(P, objAt, ray) {
-  const q = blockDDA(P, ray.o, ray.d, 900, true);
-  // DDA минає тонке (рослина, крона, тіло, плавний горб над порожнім блоком): точний пошук — від висоти 12 над першим
-  // твердим (дерева вищі — рідко) до 1,5 за ним
-  const t0 = Math.max(0, (q ? q.t : 900) - Math.min(40, 12 / Math.max(0.3, Math.abs(ray.d[2])))), o = [ray.o[0] + ray.d[0] * t0, ray.o[1] + ray.d[1] * t0, ray.o[2] + ray.d[2] * t0];
-  const a = aimRay(P, objAt, o, ray.d, (q ? q.t - t0 : 0) + 1.5);
-  if (a) { a.t += t0; return a; }
-  return q ? { kind: 'block', t: q.t, p: [ray.o[0] + ray.d[0] * q.t, ray.o[1] + ray.d[1] * q.t, ray.o[2] + ray.d[2] * q.t], n: q.n, x: q.x, y: q.y, k: q.k, b: q.b } : null;
 }

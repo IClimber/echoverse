@@ -9,9 +9,9 @@ const OUT = arg('out', `${tmpdir()}/echoverse-shots`); mkdirSync(OUT, { recursiv
 const COMBOS = arg('combos', 'webgl2:pcf3:16,webgl2:pcss:16,webgl2:off:16,webgpu:pcf3:16').split(',').map((s) => s.split(':'));
 // сцена: [всесвіт, x, y, фаза доби ('best' — найбільше світил), особливе]. Порядок важливий: сцени того самого всесвіту
 // й місця — підряд без телепорту; печера — остання з них (переносить гравця під землю), далі — стрибок в інший всесвіт
-// особливе: rain — дощ, iso — згори, first — перша особа, grass / grass3 — трава впритул (перша / третя особа), coll — каркас зіткнень (?dev showColl), cave — печера (перша особа:
+// особливе: rain — дощ, first — перша особа, grass / grass3 — трава впритул (перша / третя особа), coll — каркас зіткнень (?dev showColl), cave — печера (перша особа:
 // firstcave)
-const ALL = { plain: [1, -52, -45, 0.4], night: [1, -52, -45, 0.0], rain: [1, -52, -45, 0.4, 'rain'], iso: [1, -52, -45, 0.4, 'iso'],
+const ALL = { plain: [1, -52, -45, 0.4], night: [1, -52, -45, 0.0], rain: [1, -52, -45, 0.4, 'rain'],
   first: [1, -52, -45, 0.4, 'first'], under: [1, -52, -45, 0.4, 'under'], slope: [33281, -61, -2, 0.4, 'slope'], trunk: [-60813, -478, -107, 0.4, 'trunk'], coll: [1, -52, -45, 0.4, 'coll'], grass: [1, -52, -45, 0.4, 'grass'], grass3: [1, -52, -45, 0.4, 'grass3'], cave: [1, -52, -45, 0.4, 'cave'], firstcave: [1, -52, -45, 0.4, 'firstcave'], fgrass: [-60813, -478, -107, 0.4, 'grass'], mount: [33281, -61, -2, 0.4], forest: [-60813, -478, -107, 0.4], suns3: [784, -52, -45, 'best'] };
 const SCENES = arg('scenes', Object.keys(ALL).join(',')).split(',').filter((k) => ALL[k]);   // --scenes=none — лише стенд
 // Стенд руху ?move (gen/stand.js): сцена — дії через ?dev (eco.spot — місце, eco.key — клавіші, eco.look — камера)
@@ -28,7 +28,6 @@ const MOVE = {
   maimo: ["eco.setCam('first'); eco.spot('E'); eco.g.me.x = 76.2; eco.g.me.y = 32.2;", 400, 'eco.look(Math.atan2(30.5 - 32.2, 78.5 - 76.2), 0.1);', 1200, 'shot'],
   maimbody: ["eco.setCam('third'); eco.spot('bodies'); eco.look(0, 0.45, 5);", 1000, 'shot'],
   mcarry: ["eco.setCam('third'); eco.spot('bodies'); eco.look(0, 0.45, 5);", 800, K('KeyF'), 50, K('KeyF', false), 800, 'eco.look(-1.4, 0.3, 4);', 800, 'shot', K('KeyF'), 50, K('KeyF', false)],
-  miso: ["eco.setCam('iso'); eco.spot('E'); eco.look(120 * Math.PI / 180);", 800, 'mouse', 600, 'shot', "eco.setCam('third');"],
 };
 const MSCENES = arg('mscenes', Object.keys(MOVE).join(',')).split(',').filter((k) => MOVE[k]);
 // Закони фізики світу (п. 4): [глибина, умова на закони (eco.findLaw; null — поточний всесвіт), фаза доби, куди дивитись
@@ -104,7 +103,7 @@ for (const [gpu, sh, view] of COMBOS) {
   await waitFor('!!(eco.g && eco.g.me.placed)'); await idle();
   for (const sc of SCENES) {
     const [n, x, y, ph, sp] = ALL[sc];
-    const mode = sp === 'iso' ? 'iso' : ['first', 'firstcave', 'under', 'grass'].includes(sp) ? 'first' : 'third', cave = sp === 'cave' || sp === 'firstcave';
+    const mode = ['first', 'firstcave', 'under', 'grass'].includes(sp) ? 'first' : 'third', cave = sp === 'cave' || sp === 'firstcave';
     await ev(`eco.setCam('${mode}'); eco.showColl(${sp === 'coll'}); eco.weather(${sp === 'rain' ? "'rain'" : 'null'}); 1`);
     await jumpTo(n, x, y);
     if (cave && last[3] !== 'cave') {             // печерні секції підвантажуються не одразу — кілька спроб
@@ -177,7 +176,6 @@ for (const [gpu, sh, view] of COMBOS) {
     for (const a of MOVE[sc]) {
       if (typeof a === 'number') await wait(a);
       else if (a === 'shot') { if (gpu !== 'webgpu') await shot(`${gpu}-${sh}-${view}-${sc}`); R.push({ gpu, sh, view, sc, device: await ev('eco.stats().device') + ' · ' + JSON.stringify(await ev('eco.pose()')) + ' · ціль ' + JSON.stringify(await ev('(() => { const a = eco.aim(); return a && [a.kind, a.mass ?? a.b ?? a.form]; })()')) }); }
-      else if (a === 'mouse') await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1280 + 260, y: 720 + 60 });
       else { await ev(`(() => { ${a} return 1; })()`); if (a.includes('eco.spot')) await idle(); }
     }
   }

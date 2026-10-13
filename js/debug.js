@@ -1,13 +1,12 @@
 // debug.js — панель F3: зерно, адреса, клітинка, чанк і його відбиток, закони всесвіту, швидкодія.
 import { CS, TYPE_NAMES, BLOCK_NAMES, O_ROCK, O_TREE, digest, tile } from './gen/chunk.js';
 import { canLift } from './carry.js';
-import { physOf, STRANGE_NAMES, TIER_NAMES, FAM_NAMES } from './universe.js';
+import { physOf, STRANGE_NAMES, TIER_NAMES, FAM_NAMES, LEVEL } from './universe.js';
 import { BIOMES } from './gen/biomes.js';
 import { regionAt, speciesOf, FORMS } from './gen/flora.js';
 import { jumpHeight } from './player.js';
 import { dayPhase, clockStr, yearPhase } from './sky.js';
 import { weatherAt, WEATHER_NAMES } from './weather.js';
-import { LEVEL } from './iso.js';
 import { LOD_ON } from './camera.js';
 import { styleOf } from './gen/mesh.js';
 import { stats as CST } from './collision.js';
@@ -129,7 +128,7 @@ export function debugText(g, perf, meshCount, cam, R, lod) {
     `фізика     тертя ${L.phys.friction.toFixed(2)}${L.phys.friction < 1 ? ' (ковзко)' : ''}, пружність ${L.phys.bounce.toFixed(2)}, падіння до ${ph.vT.toFixed(1)} м/с, плин часу ×${L.phys.time.toFixed(2)}`,
     `небо       доба ${L.sky.lock ? 'вічна (припливне захоплення)' : (L.sky.dayMin / L.phys.time).toFixed(1) + ' хв'}, ${clockStr(dayPhase(L, g.clock || 0))}, сонць ${L.sky.suns.length}, місяців ${L.sky.moons.length}${L.comp ? ' і компаньйон' : ''}${L.sky.rings ? ', кільця' : ''} · вітер у ясну ${f1(L.air.wind)} м/с`,
     `погода     ${WEATHER_NAMES[(g.wPrev || weatherAt(L, g.clock || 0, me.x, me.y)).kind]} (плями ${(L.air.cS / 1000).toFixed(1)} км, зміна ${(L.air.cT / 60).toFixed(0)} хв; ${Object.entries(L.air.w).filter(([, v]) => v > 0.05).map(([k, v]) => k + ' ' + v.toFixed(1)).join(', ')})`,
-    `камера     ${cam.mode === 'iso' ? `згори, масштаб ${cam.zoom.toFixed(2)}` : cam.mode === 'first' ? `перша особа, око ${f2(g.eyeZ ?? 0)}` : `третя особа, відстань ${f1(g.camDist ?? cam.dist)} з ${f1(cam.dist)}`}${g.under ? ' · під рідиною' : ''}, азимут ${Math.round(cam.yaw * 180 / Math.PI) % 360}°, видно стовпців ${g.visible || 0}`,
+    `камера     ${cam.mode === 'first' ? `перша особа, око ${f2(g.eyeZ ?? 0)}` : `третя особа, відстань ${f1(g.camDist ?? cam.dist)} з ${f1(cam.dist)}`}${g.under ? ' · під рідиною' : ''}, азимут ${Math.round(cam.yaw * 180 / Math.PI) % 360}°, видно стовпців ${g.visible || 0}`,
     `зіткнення  секцій ${CST.secs}, трикутників ${(CST.tris / 1000).toFixed(1).replace('.', ',')} тис., побудов ${CST.builds} (${f1(CST.buildMs)} мс) · крок ${f1(g.stepUs || 0)} мкс${me.ground ? ` · підлога ${me.floorN ? (Math.acos(Math.min(1, me.floorN[2])) * 180 / Math.PI).toFixed(0) + '°' : '—'}` : ''}`,
     `поза       ${poseLine(me)}`,
     `ціль       ${aimLine(g.aim, g.ph ? g.ph.g : 1)}`,

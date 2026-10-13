@@ -3,7 +3,7 @@
 // i8 ×4 (x, y, z, 0); колір — u8 ×4 (r, g, b, AO: 255 — відкрито, 0 — темно). Кожен елемент — по 4 Б (PlayCanvas, WebGPU). Регіон — RS×RS стовпців × RS секцій (128 × 128 клітинок × 64 од.). Діапазон локальних: x, y ∈ [−192, 320),
 // z ∈ [−64, 448) — запас на крони й велетнів, що виходять за регіон; точність 1/128. Лише вигляд (Math.round можна).
 import { CS, SEC } from './chunk.js';
-import { LEVEL } from '../iso.js';
+import { LEVEL } from '../universe.js';
 
 export const VB = 16, PQ = 128, PO = [192, 192, 64], RS = 8, RW = RS * CS, RH = RS * SEC * LEVEL;
 export const regionOf = (cx, cy, cz) => [Math.floor(cx / RS), Math.floor(cy / RS), Math.floor(cz / RS)];

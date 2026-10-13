@@ -2,10 +2,9 @@
 // промінь з курсора (згори й у перспективі — той самий, що малюється), тіло в руках (чи піднімеш, утримання, кидок).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { LEVEL } from '../js/iso.js';
+import { LEVEL } from '../js/universe.js';
 import { B_AIR, B_STONE, solidB } from '../js/gen/chunk.js';
-import { aimRay, blockDDA, isoAim, screenRay, REACH } from '../js/aim.js';
-import { createCamera, setYaw, viewProj, project, ISO, THIRD } from '../js/camera.js';
+import { aimRay, blockDDA, REACH } from '../js/aim.js';
 import { makeBody, stepBody, configureBodies } from '../js/engine/physics/bodies.js';
 import { GRAVITY, PLAYER_MASS, PLAYER_AREA, HIT_IMPULSE } from '../js/player.js';
 import { canLift, holdBody, throwBody, THROW_V, LIFT_W } from '../js/carry.js';
@@ -56,52 +55,6 @@ test('ціль: тіло перед стіною — тіло; рослина п
   // стіна за 4 — далі досяжності
   assert.equal(aimRay(P, null, [5.0, 0.5, 3], [1, 0, 0], REACH), null);
   assert.ok(aimRay(P, null, [5.0, 0.5, 3], [1, 0, 0], 5).kind === 'block');
-});
-
-test('промінь з курсора — той самий, що малюється (згори при 30°, 45°, 135°; третя особа); згори ціль — як перебором', () => {
-  // вежа 2×2 до k = 10 на підлозі k < 2; світ — ±60 (початок променя — за 400 від цілі, там не згенеровано)
-  const tower = (x, y, k) => (k < 2 || (x >= 3 && x <= 4 && y >= 3 && y <= 4 && k < 11) ? B_STONE : B_AIR);
-  const P = world(tower, [], 60), W = 1600, H = 900, target = [4, 4, 1];
-  for (const az of [30, 45, 135]) {
-    const c = createCamera(ISO);
-    setYaw(c, az * Math.PI / 180);
-    const { m } = viewProj(c, W, H);
-    let hits = 0, n = 0;
-    for (let gy = -3; gy <= 10; gy++) for (let gx = -3; gx <= 10; gx++) {
-      // центр верхньої грані: вежа — z 5,5, підлога — z 1
-      const top = tower(gx, gy, 2) ? 5.5 : 1, Q = [gx + 0.5, gy + 0.5, top];
-      const s = project(m, [Q[0] - target[0], Q[1] - target[1], Q[2] - target[2]], W, H);
-      const ray = screenRay(c, target, null, s[0], s[1], W, H);
-      // промінь проходить через Q
-      const t = (Q[0] - ray.o[0]) * ray.d[0] + (Q[1] - ray.o[1]) * ray.d[1] + (Q[2] - ray.o[2]) * ray.d[2];
-      const e = Math.hypot(ray.o[0] + ray.d[0] * t - Q[0], ray.o[1] + ray.d[1] * t - Q[1], ray.o[2] + ray.d[2] * t - Q[2]);
-      assert.ok(e < 1e-3, `азимут ${az}: промінь мимо на ${e}`);
-      // перебір: перший твердий блок кроком 0,01
-      let bx = null;
-      for (let u = 0; u < 900; u += 0.01) {
-        const p = [ray.o[0] + ray.d[0] * u, ray.o[1] + ray.d[1] * u, ray.o[2] + ray.d[2] * u];
-        const b = P.block(Math.floor(p[0]), Math.floor(p[1]), Math.floor(p[2] / LEVEL));
-        if (b === -1) continue;                     // незгенероване — повітря (як isoAim)
-        if (solidB(b)) { bx = [Math.floor(p[0]), Math.floor(p[1]), Math.floor(p[2] / LEVEL)]; break; }
-      }
-      if (!bx) continue;
-      const a = isoAim(P, null, ray);
-      n++;
-      if (a && a.kind === 'block' && a.x === bx[0] && a.y === bx[1] && a.k === bx[2]) hits++;
-    }
-    // розбіжність — лише біля граней вежі (поверхня плавна: фаска вже за краєм блоку)
-    assert.ok(n > 150 && hits / n > 0.93, `азимут ${az}: ${hits} / ${n}`);
-  }
-  // третя особа: промінь з ока через точку, що малюється в (sx, sy)
-  const c = createCamera(THIRD);
-  setYaw(c, 1.1);
-  c.pitch3 = 0.4;
-  const { m, eye } = viewProj(c, W, H);
-  for (const Q of [[1, 2, 0.5], [-3, 1, 2], [0.5, -2, -1]]) {
-    const s = project(m, Q, W, H), ray = screenRay(c, [0, 0, 0], eye, s[0], s[1], W, H);
-    const v = [Q[0] - ray.o[0], Q[1] - ray.o[1], Q[2] - ray.o[2]], l = Math.hypot(...v);
-    assert.ok(Math.abs((v[0] * ray.d[0] + v[1] * ray.d[1] + v[2] * ray.d[2]) / l - 1) < 1e-6, `третя особа: ${Q}`);
-  }
 });
 
 test('тіло в руках: чи піднімеш — від ваги (маса · g · (1 − підйом)); утримання без тяжіння; кидок — уздовж погляду, ≤ THROW_V', () => {

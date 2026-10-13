@@ -7,8 +7,7 @@ import { packMesh, concat, frameOf, RS } from './pack.js';
 import { farMesh, FT } from './far.js';
 import { standCol, standSection, standFar } from './stand.js';
 import { secOccluders } from './vis.js';
-import { L_DRY, SEA } from '../universe.js';
-import { LEVEL } from '../iso.js';
+import { SEA, LEVEL } from '../universe.js';
 
 const ISL_CZ = [2, 3, 4, 5];                  // секції смуги ширяючих островів (блоки 44…84)
 

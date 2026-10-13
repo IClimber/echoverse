@@ -9,22 +9,21 @@ import { colliderOf, underLiquid } from './collision.js';
 import { createList } from './engine/physics/collide.js';
 import { createDevice, landing, landingChunks, CHARGE } from './device.js';
 import { step, standableB, settle, hits, SHAPE, windShelter, SPRINT, GRAVITY, FOOT, BODY, PLAYER_MASS, HIT_IMPULSE } from './player.js';
-import { stepBody, windMoves, push, rayBody, collideBodies } from './engine/physics/bodies.js';
-import { initInput, moveAxis, turnAxis, sprintHeld, crouchHeld, vertAxis, takeActions, takeWheel, takeDrag, clearInput, lockPointer, unlockPointer, locked, cursor, devKey } from './input.js';
+import { stepBody, windMoves, push, collideBodies } from './engine/physics/bodies.js';
+import { initInput, moveAxis, turnAxis, sprintHeld, crouchHeld, vertAxis, takeActions, takeWheel, takeDrag, clearInput, lockPointer, unlockPointer, locked, devKey } from './input.js';
 import { listWorlds, putWorld, deleteWorld, serialize, deserialize, newId } from './save.js';
 import { hashStr } from './rng.js';
-import { GEN, SEA, physOf, gravityAt } from './universe.js';
+import { GEN, SEA, physOf, gravityAt, LEVEL } from './universe.js';
 import { physAt3, timeK } from './worldphys.js';
 import { tempAt, tempParts, snowy, radNow, airAt } from './climate.js';
-import { CS, SEC, B_LIQ, B_MAGMA, solidB, BLOCK_NAMES } from './gen/chunk.js';
-import { LEVEL } from './iso.js';
+import { CS, SEC, B_LIQ, B_MAGMA, solidB } from './gen/chunk.js';
 import { debugText, fmtN } from './debug.js';
 import { animate, VIEW_KEYS } from './anim.js';
 import { clockStr, skyState, lightsOf, lightSlots, stormAt, setStormOverride } from './sky.js';
-import { weatherAt, localWeather, areaClimate, reliefAt, windHeightK, lightningNear, meteorsAt } from './weather.js';
-import { createCamera, rotate, wheel, smooth, moveBasis, camHead, camCollide, camDist, facing, setYaw, basis, pitchOf, setViewChunks, setLod, setFloraNear, ISO, THIRD, FIRST, NEXT, LIMITS, HEAD, EYE, EYE_OF, HEAD_OF, VIEW_R } from './camera.js';
+import { weatherAt, localWeather, areaClimate, reliefAt, windHeightK, lightningNear } from './weather.js';
+import { createCamera, rotate, wheel, smooth, moveBasis, camHead, camCollide, camDist, facing, setYaw, basis, pitchOf, setViewChunks, setLod, setFloraNear, THIRD, FIRST, NEXT, LIMITS, EYE, EYE_OF, HEAD_OF, VIEW_R } from './camera.js';
 import { createStreamer, visibleMissing } from './stream.js';
-import { aimRay, isoAim, screenRay, REACH } from './aim.js';
+import { aimRay, REACH } from './aim.js';
 import { canLift, weightOf, throwBody, holdBody, LIFT_W } from './carry.js';
 import { STAND_SPOTS, standBodies, standBlock } from './gen/stand.js';
 import { makeBody } from './engine/physics/bodies.js';
@@ -61,7 +60,7 @@ function boot(renderer) {
 
   let g = null;                              // поточна гра
   let occOff = QS.get('occ') === '0';        // ?occ=0 — без відсікання закритого (порівняння)
-  const camera = createCamera([ISO, FIRST].includes(load(CAM_KEY)) ? load(CAM_KEY) : THIRD);
+  const camera = createCamera(load(CAM_KEY) === FIRST ? FIRST : THIRD);   // збережене 'iso' (вид згори прибрано) — третя особа
   const streamer = createStreamer();
   const physT = createTicker(PHYS_DT), aiT = createTicker(AI_DT, 4);
   // Дальність (8–32 чанки): камера, ліміти пам'яті світу, стрімінг. Пам'ять GPU — скільки потребує коло дальності (без
@@ -219,13 +218,13 @@ function boot(renderer) {
     },
     // Стенд «на око»: каркас трикутників зіткнень навколо гравця (радіус 4, зелений; тіла й предмети — жовтий) і капсула (блакитна)
     showColl(on = true) { g.showColl = !!on; return g.showColl; },
-    // Камера: режим ('first' | 'third' | 'iso') — через цикл V; напрям погляду (азимут від +x, нахил: + — униз), радіани;
+    // Камера: режим ('first' | 'third') — через V; напрям погляду (азимут від +x, нахил: + — униз), радіани;
     // dist — відстань третьої особи
-    setCam(mode) { for (let i = 0; i < 3 && camera.mode !== mode; i++) toggleCam(); return camera.mode; },
+    setCam(mode) { if (camera.mode !== mode && NEXT[camera.mode] === mode) toggleCam(); return camera.mode; },
     look(yaw, pitch, dist) {
       setYaw(camera, yaw + Math.PI);
       if (dist !== undefined) camera.dist = camera.distT = dist;
-      if (pitch !== undefined) { if (camera.mode === FIRST) camera.pitch1 = camera.pitch1T = pitch; else if (camera.mode === THIRD) camera.pitch3 = camera.pitch3T = pitch; else camera.pitch = camera.pitchT = pitch; }
+      if (pitch !== undefined) { if (camera.mode === FIRST) camera.pitch1 = camera.pitch1T = pitch; else camera.pitch3 = camera.pitch3T = pitch; }
       return [camera.yaw, camera.mode === FIRST ? camera.pitch1 : camera.pitch3];
     },
     // Скинути кільця замірів (інтервали кадрів, час GPU) — заміри з чистого аркуша
@@ -315,16 +314,14 @@ function boot(renderer) {
     return { dirLights: i && i.lights ? i.lights.dir : null, locals: i && i.lights ? i.lights.local : null, gpuP99: p99, device: i ? i.device : 'webgl2-old', shadowsQ: i ? i.shadows : null };
   }
   let wOver = null;                                // ?dev: перевизначена погода
-  // V: перша особа → третя → згори
+  // V: перша особа ↔ третя (нахил переноситься)
   function toggleCam() {
     const was = camera.mode;
     camera.mode = NEXT[was];
-    if (was === ISO) setYaw(camera, g.me.yaw + Math.PI);                  // туди, куди обернений гравець (у третій — за спину)
     if (was === FIRST) camera.pitch3 = camera.pitch3T = Math.min(LIMITS.third.pitch[1], Math.max(LIMITS.third.pitch[0], camera.pitch1));
-    if (camera.mode === ISO && locked()) { unlockQuiet = true; unlockPointer(); }
+    else camera.pitch1 = camera.pitch1T = Math.min(LIMITS.first.pitch[1], Math.max(LIMITS.first.pitch[0], camera.pitch3));
     store(CAM_KEY, camera.mode);
-    toast({ first: 'Камера: перша особа', third: 'Камера: третя особа', iso: 'Камера: згори' }[camera.mode]);
-    $('mouseHint').hidden = !(camera.mode !== ISO && !locked());
+    toast({ first: 'Камера: перша особа', third: 'Камера: третя особа' }[camera.mode]);
   }
 
   // ================= Меню =================
@@ -385,12 +382,12 @@ function boot(renderer) {
     if (rec) startWorld(rec);
   })();
   // Третя особа: клацання по світу захоплює мишу; браузер відпустив (Esc) — меню, як і на Esc без захоплення
-  $('gl').addEventListener('mousedown', (e) => { if (e.button === 0 && g && g.me.placed && camera.mode !== ISO && $('menu').hidden) lockPointer($('gl')); });
+  $('gl').addEventListener('mousedown', (e) => { if (e.button === 0 && g && g.me.placed && $('menu').hidden) lockPointer($('gl')); });
   let unlockQuiet = false, unlockedAt = 0;
   document.addEventListener('pointerlockchange', () => {
     if (!locked() && !unlockQuiet && g && $('menu').hidden) { save(); showMenu(); unlockedAt = performance.now(); }
     unlockQuiet = false;
-    $('mouseHint').hidden = !(g && camera.mode !== ISO && !locked());
+    $('mouseHint').hidden = !(g && !locked());
   });
   // Повний екран гри (F11 чи кнопка в меню): requestFullscreen + Keyboard Lock — тоді Chrome віддає грі й Ctrl+W,
   // Ctrl+Shift+W (присідання з W не закриває вкладку). Без нього Ctrl+W закриває вкладку; у Firefox Keyboard Lock немає.
@@ -506,7 +503,7 @@ function boot(renderer) {
       g.me.yaw = 0;
     }
     streamer.force();
-    if (camera.mode !== ISO) setYaw(camera, g.me.yaw + Math.PI);
+    setYaw(camera, g.me.yaw + Math.PI);
     if (!rec.stand) putWorld(snapshot());
     hideMenu();
     $('hud').hidden = false; $('loading').hidden = false; $('debug').hidden = !showDebug;
@@ -654,23 +651,6 @@ function boot(renderer) {
     }
     if (ob) { me.x += ob.x - ox; me.y += ob.y - oy; me.z = ob.z + ob.hz; }
   }
-  // Ціль дії: перша й третя особа — з ока вздовж погляду (REACH); згори — під курсором, якщо ближче REACH + 0,5 від грудей
-  // (тоді гравець обертається до неї), інакше тост «Задалеко»
-  function actTarget() {
-    const a = g.aim, me = g.me;
-    if (!a || camera.mode !== ISO) return a;
-    if (Math.hypot(a.p[0] - me.x, a.p[1] - me.y, a.p[2] - (me.z + 0.55 * (me.h || BODY))) > REACH + 0.5) { toast('Задалеко'); return undefined; }
-    me.yaw = Math.atan2(a.p[1] - me.y, a.p[0] - me.x);
-    return a;
-  }
-  // Погляд для дій (кинути): камера; згори — до цілі під курсором чи куди обернений
-  function actDir() {
-    const me = g.me;
-    if (camera.mode !== ISO) return lookDir();
-    const a = g.aim;
-    if (a) { const d = [a.p[0] - me.x, a.p[1] - me.y, a.p[2] - (me.z + 0.55 * (me.h || BODY))], l = Math.hypot(...d) || 1; return d.map((v) => v / l); }
-    return [Math.cos(me.yaw), Math.sin(me.yaw), 0];
-  }
   function drop() { if (g.carry) { g.carry.b.held = false; g.carry.b.dirty = true; g.carry = null; } }
   // Удар (ЛКМ): з тілом у руках — кинути; ціль-тіло — поштовх; блоки й рослини не чіпає (зміни світу — п. 6)
   function hit(now) {
@@ -679,13 +659,13 @@ function boot(renderer) {
     if (g.carry) {
       const b = g.carry.b;
       g.carry = null;
-      throwBody(b, actDir());
+      throwBody(b, lookDir());
       me.throwAt = now;
       return;
     }
-    const a = actTarget();
+    const a = g.aim;
     if (!a || a.kind !== 'body') return;
-    const d = actDir();
+    const d = lookDir();
     push(a.body, [d[0] * HIT_IMPULSE, d[1] * HIT_IMPULSE, (d[2] + 0.25) * HIT_IMPULSE]);
     a.body.dirty = true;
     if (HIT_IMPULSE / a.body.mass < 0.3) toast('Камінь заважкий — ледь зрушив');
@@ -694,7 +674,7 @@ function boot(renderer) {
   function take(now) {
     const me = g.me;
     if (g.carry) { drop(); me.takeAt = now; return; }
-    const a = actTarget();
+    const a = g.aim;
     if (a === undefined) return;
     if (!a) return;
     if (a.kind !== 'body') { toast('Поки що взяти можна лише камінь'); return; }
@@ -708,7 +688,7 @@ function boot(renderer) {
   }
   // Використати (ПКМ): ціль є, дії поки немає (двері, скрині — з будуванням)
   function use(now) {
-    const a = actTarget();
+    const a = g.aim;
     if (a === undefined) return;
     g.me.useAt = now;
     toast('Нічого використати');
@@ -719,21 +699,16 @@ function boot(renderer) {
     if (!c) return;
     const gg = g.ph ? g.ph.g : 1;
     c.k = weightOf(c.b, gg) / LIFT_W;
-    if (me.climb || me.pose === 'crawl' || me.pose === 'swim' || me.dive || c.k > 1 + 1e-9 || gg <= 0 || !holdBody(c.b, me, actDir(), camera.mode === FIRST)) drop();
+    if (me.climb || me.pose === 'crawl' || me.pose === 'swim' || me.dive || c.k > 1 + 1e-9 || gg <= 0 || !holdBody(c.b, me, lookDir(), camera.mode === FIRST)) drop();
   }
-  // Ціль під поглядом (перша й третя особа — з ока гравця, як у Minecraft) чи під курсором (згори); обрис предмета —
+  // Ціль під поглядом (з ока гравця, як у Minecraft); обрис предмета —
   // повна будова з генератора (робота 'obj')
   function updateAim() {
     const me = g.me;
     g.aim = null;
     if (!me.placed || !$('menu').hidden) return;
     const P = g.world.probe(g.d, g.n), objAt = (x, y) => g.world.objAt(g.d, g.n, x, y);
-    let a;
-    if (camera.mode === ISO) {
-      const cu = cursor(), cv = $('gl').getBoundingClientRect();
-      if (!cu) return;
-      a = isoAim(P, objAt, screenRay(camera, g.cam, g.view.eye, cu[0] - cv.left, cu[1] - cv.top, cv.width, cv.height));
-    } else a = aimRay(P, objAt, [me.ix ?? me.x, me.iy ?? me.y, (me.iv ?? me.z) + (g.eyeH ?? EYE)], lookDir(), REACH);
+    let a = aimRay(P, objAt, [me.ix ?? me.x, me.iy ?? me.y, (me.iv ?? me.z) + (g.eyeH ?? EYE)], lookDir(), REACH);
     if (a && a.kind === 'body' && g.carry && a.body === g.carry.b) a = null;
     if (a && a.kind === 'obj') {
       const C = a.obj.C;
@@ -747,11 +722,9 @@ function boot(renderer) {
     const t = g.loc && g.loc.type;
     return (t === 'rain' || t === 'acid' || t === 'snow') && g.world.skyOpen(g.d, g.n, g.me.x, g.me.y, g.me.z + 0.9) > 0.5;
   }
-  // Тіло в руках: вага / межа (0…1); погляд камери (біг під рідиною): перша й третя особа — куди дивиться камера, згори —
-  // куди обернений гравець
+  // Тіло в руках: вага / межа (0…1); погляд камери (дії, пірнання) — куди дивиться камера
   const carryK = () => g.carry ? g.carry.k : 0;
   function lookDir() {
-    if (camera.mode === ISO) return [Math.cos(g.me.yaw), Math.sin(g.me.yaw), 0];
     const u = basis(camera).u;
     return [-u[0], -u[1], -u[2]];
   }
@@ -780,7 +753,7 @@ function boot(renderer) {
       else if (a === 'crouchPress') g.crouchLatch = true;
       else if (g.rec.stand && (a === 'jumpPrev' || a === 'jumpNext' || a === 'jumpRandom' || a === 'jumpRandomDepth')) toast('Стенд руху: стрибків немає');
       else if (a === 'jumpPrev' || a === 'jumpNext') { if (g.dev.start([g.d, g.n + (a === 'jumpNext' ? 1 : -1)], a) === 'cancel') toast('Стрибок скасовано'); }
-      else if (a === 'hit' || a === 'hitDev') { if (a === 'hitDev' || camera.mode === ISO || locked()) hit(now); }   // у третій особі перше клацання — захоплення миші
+      else if (a === 'hit' || a === 'hitDev') { if (a === 'hitDev' || locked()) hit(now); }   // у третій особі перше клацання — захоплення миші
       else if (a === 'take') take(now);
       else if (a === 'use') use(now);
       else if (a === 'jumpRandom' || a === 'jumpRandomDepth') {
@@ -803,7 +776,7 @@ function boot(renderer) {
         me.ground = false; me.stepOff = 0; me.vis = me.z; me.offX = me.offY = 0; me.visX = me.px = me.x; me.visY = me.py = me.y; me.pv = me.z;
         g.cam = [me.x, me.y, me.z]; me.placed = true;
         $('loading').hidden = true;
-        $('mouseHint').hidden = camera.mode === ISO || locked();
+        $('mouseHint').hidden = locked();
       }
     } else {
       // фізика — фіксованим тактом PHYS_DT (стан до кроку — для інтерполяції кадру); пробіл — «защіпка» до кроку
@@ -822,13 +795,13 @@ function boot(renderer) {
         g.stepUs = (g.stepUs || 0) * 0.95 + (performance.now() - t0) * 1000 * 0.05;   // F3: крок гравця, мкс (згладжено)
         g.jumpLatch = false; g.crouchLatch = false;
         me.run = sprint && me.moving && !me.fly;
-        if (camera.mode !== ISO && !me.climb) me.yaw = facing(camera);      // туди, куди дивиться камера (у третій — спиною до неї); S — задкує; на стіні — у стіну
+        if (!me.climb) me.yaw = facing(camera);      // туди, куди дивиться камера (у третій — спиною до неї); S — задкує; на стіні — у стіну
         simBodies(PHYS_DT, L, W);
         warnLiquid();
         if (g.dev.update(PHYS_DT)) { tryJump(); me.px = me.visX ?? me.x; me.py = me.visY ?? me.y; me.pv = me.vis ?? me.z; }   // стрибок — без «шлейфу»
         if (!me.placed) break;
       }
-      if (camera.mode !== ISO && !me.climb) me.yaw = facing(camera);       // і в кадрі без кроку фізики (камера — щокадру)
+      if (!me.climb) me.yaw = facing(camera);       // і в кадрі без кроку фізики (камера — щокадру)
       // світ, моби й NPC — тактом AI_DT; бюджет такту AI_BUDGET мс: системи, що не встигли, — на наступному
       for (let s = aiT.advance(dt); s > 0; s--) {
         const t0 = performance.now();
@@ -843,7 +816,7 @@ function boot(renderer) {
     const al = physT.alpha, lerp = (a, b) => a === undefined ? b : a + (b - a) * al;
     me.ix = lerp(me.px, me.visX ?? me.x); me.iy = lerp(me.py, me.visY ?? me.y); me.iv = lerp(me.pv, me.vis ?? me.z);
     // Ціль камери: гравець (у третій особі — його голова); плавно, по висоті — повільніше (стрибок не трусить камеру)
-    const k = Math.min(1, dt * (camera.mode === ISO ? 8 : 14)), kz = Math.min(1, dt * 5);
+    const k = Math.min(1, dt * 14), kz = Math.min(1, dt * 5);
     const foot = [me.ix ?? me.x, me.iy ?? me.y, me.iv ?? me.z ?? 0];
     // висота ока й голови — за позою (присів, лежить), плавно
     const kp = Math.min(1, dt * 12), pose = me.pose || 'stand';
@@ -869,7 +842,7 @@ function boot(renderer) {
     g.view = renderer.view(camera, g.cam, dist);
     updateAim();
     // око під рідиною (вид з-під рідини: туман і колір рідини, без неба й опадів)
-    g.under = me.placed && camera.mode !== ISO && underLiquid(g.world.probe(g.d, g.n), g.cam[0] + g.view.eye[0], g.cam[1] + g.view.eye[1], g.cam[2] + g.view.eye[2]);
+    g.under = me.placed && underLiquid(g.world.probe(g.d, g.n), g.cam[0] + g.view.eye[0], g.cam[1] + g.view.eye[1], g.cam[2] + g.view.eye[2]);
     g.far = streamer.update(g, camera, renderer, now).far;
     g.visible = streamer.visible; g.streamMs = streamer.ms;
     if (now - g.lastSave > SAVE_MS) { g.lastSave = now; save(); }
@@ -942,14 +915,10 @@ function boot(renderer) {
     let loc = localWeather(L, W, !!g.snow, !!C && C.desert, !!C && C.arid);
     if (wOver !== null) loc = { ...loc, type: wOver === 'clear' ? null : wOver || null, k: wOver === 'clear' ? 0 : 1, name: OVER_NAMES[wOver] || loc.name };
     g.loc = loc;                                     // опади тут (мокра стіна — лазіння)
-    // голова — туди, куди погляд: перша й третя особа — камера (на стіні тіло дивиться в стіну), згори — на ціль під курсором
+    // голова — туди, куди дивиться камера (на стіні тіло дивиться в стіну)
     me.carry = !!g.carry;
     const wrap = (v) => Math.atan2(Math.sin(v), Math.cos(v));
-    if (camera.mode !== ISO) me.look = { p: pitchOf(camera), y: wrap(facing(camera) - me.yaw) };
-    else if (g.aim && me.placed) {
-      const dx = g.aim.p[0] - me.x, dy = g.aim.p[1] - me.y, dz = g.aim.p[2] - (me.z + 0.9 * (me.h || BODY));
-      me.look = { p: Math.atan2(-dz, Math.hypot(dx, dy)), y: wrap(Math.atan2(dy, dx) - me.yaw) };
-    } else me.look = { p: 0, y: 0 };
+    me.look = { p: pitchOf(camera), y: wrap(facing(camera) - me.yaw) };
     const anim = animate(me, dt, now, physOf(L).speed * (me.run ? SPRINT * 0.85 : 1));
     if (!g.view) return;
     renderer.pump();

@@ -72,7 +72,7 @@ if (arg('compare')) { compare(arg('compare'), arg('ref')); process.exit(0); }
 
 // ---- заміри ----
 const API = arg('api', 'webgpu'), VISIBLE = !!arg('visible'), PORTS = String(arg('ports', '8125,8124')).split(',').map(Number);
-const SC = String(arg('scenes', 'plain,forest,mount,cave,first,iso,suns3,shaft,grove,fly,spin')).split(',').filter((k) => SCENES[k]);
+const SC = String(arg('scenes', 'plain,forest,mount,cave,first,suns3,shaft,grove,fly,spin')).split(',').filter((k) => SCENES[k]);
 const VIEWS = String(arg('views', '32,16,8')).split(',').map(Number), SHS = String(arg('shadows', 'off,pcf3,pcss')).split(',');
 const RUNS = +arg('runs', 3), MS = +arg('ms', 2500);
 // профайлер GPU: один для всіх версій чи свій для кожного порту (--prof=1,0 — ціна самого профайлера на тій самій версії)

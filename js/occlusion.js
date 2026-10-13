@@ -6,11 +6,11 @@
 // закрита вже растеризованими — без своїх заслонів (вони там марні). Грань на межі секції, за якою в сусіда зі списку
 // глибоке по всій грані (бічна маска, gen/vis.js), не растеризуємо: промінь до неї входить у глибоке сусіда крізь його
 // оболонку (сусід ближчий до ока — растеризований раніше чи закритий); так само межа суцільного сусіда, якщо в цієї
-// секції біля неї глибоке скрізь. Згори (орто) — без відсікання. Коробки (регіони, секції, рідина, рослини, плитки
+// секції біля неї глибоке скрізь. Коробки (регіони, секції, рідина, рослини, плитки
 // далечі) перевіряє box.
 import { createOccluder } from './engine/graphics/occluder.js';
 import { CS, SEC } from './gen/chunk.js';
-import { LEVEL } from './iso.js';
+import { LEVEL } from './universe.js';
 
 const OCC_R = 32;                  // заслони — із секцій ближче (м від ока по горизонталі): з 64 у шахті й лісі відсікається
                                    // лише на 5–15 % трикутників більше, а заслони вдвічі дорожчі
@@ -96,15 +96,15 @@ export function createOcclusion(W, { width = 192 } = {}) {
     // Параметри (заміри, ?dev): width — ширина буфера (клітинок), radius — заслони із секцій ближче (м)
     get params() { return { width, radius: occR }; },
     set({ width: w, radius } = {}) { if (w && w !== width) { width = w; R = make(); } if (radius) occR = radius; },
-    // Початок кадру: eye — око (світ), d, n — всесвіт, iso — згори, m — «камера × проєкція» відносно org (ціль камери),
+    // Початок кадру: eye — око (світ), d, n — всесвіт, m — «камера × проєкція» відносно org (ціль камери),
     // curve — кривизна вершинного шейдера (світ опущено на curve·d², d — від цілі по горизонталі), aspect — ширина /
     // висота кадру. Повертає, чи відсікання діє в цьому кадрі
-    begin(eye, d, n, iso, m, org, curve, aspect) {
+    begin(eye, d, n, m, org, curve, aspect) {
       t0 = performance.now();
       st.secs = st.skipped = st.solid = st.inner = 0;
       list.length = 0; inList.clear();
-      on = enabled && !iso;
-      st.on = on; st.why = !enabled ? 'вимкнено' : iso ? 'згори' : '';
+      on = enabled;
+      st.on = on; st.why = enabled ? '' : 'вимкнено';
       if (!on) { R.off(); return false; }
       D = d; N = n; E = eye; KX = Math.floor(eye[0] / CS); KY = Math.floor(eye[1] / CS); KZ = Math.floor(eye[2] / SH);
       R.begin(m, org, aspect, curve > 0 ? [curve, org[0], org[1]] : null, eye);

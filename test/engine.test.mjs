@@ -40,7 +40,7 @@ test('workerOf: стовпець і його секції — в одного, �
 
 // ================= Щільна вершина, алокатор, еталон мешів =================
 import { hashStr, rng } from '../js/rng.js';
-import { lawsOf } from '../js/universe.js';
+import { lawsOf, LEVEL } from '../js/universe.js';
 import { M_LEAF as M_LEAF_ } from '../js/gen/materials.js';
 import { genChunk, genCol, genSection, CS, SEC, FR } from '../js/gen/chunk.js';
 import { chunkMesh, objPose } from '../js/gen/mesh.js';
@@ -48,7 +48,6 @@ import { colSummary } from '../js/gen/job.js';
 import { packMesh, unpack, meshHash, meshDigest, regionOf, frameOf, packStats, VB, RS, RW, RH } from '../js/gen/pack.js';
 import { createAlloc } from '../js/engine/graphics/arena.js';
 import { SPOTS, MESH_GOLD } from '../js/golden.js';
-import { LEVEL } from '../js/iso.js';
 
 test('щільна вершина: позиції з точністю 1/256, нормаль, колір, матеріал (pos.w), AO (color.a) — точно', () => {
   const L = lawsOf(hashStr('меш'), 0, 4);
@@ -321,7 +320,7 @@ test('такт: 240 к/с → 120 Гц, alpha у [0, 1), довгий кадр �
 import { makeBody, stepBody, collideBodies, configureBodies } from '../js/engine/physics/bodies.js';
 import { GRAVITY as G_, PLAYER_MASS as PM_, PLAYER_AREA as PA_ } from '../js/player.js';
 import { solidB as SB_ } from '../js/gen/chunk.js';
-import { LEVEL as LV_ } from '../js/iso.js';
+import { LEVEL as LV_ } from '../js/universe.js';
 configureBodies({ level: LV_, solid: SB_, gravity: G_, refMass: PM_, refArea: PA_ });
 
 const AIR = { block: () => 0 }, FLOOR = { block: (x, y, k) => k < 0 ? 8 : 0 };

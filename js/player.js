@@ -6,9 +6,8 @@
 // що росте в клітинці ({cx, cy, z0, z1, r}: центр, низ і верх, півширина) або null, objR — найбільша півширина
 // перешкод (скільки клітинок навколо перевіряти), liquid — рідина всесвіту ({swim — тримає на плаву, danger}).
 // ph — рух від гравітації (physOf): up, speed, settle, g.
-import { LEVEL } from './iso.js';
 import { solidB, climbB, climbSide, B_LIQ, B_ICE } from './gen/chunk.js';
-import { KMIN } from './universe.js';
+import { KMIN, LEVEL } from './universe.js';
 import { colliderOf } from './collision.js';
 import { capsule, overlap, sweep, findFloor, floorNormal, stands, moveH, moveAir, depenetrate } from './engine/physics/character.js';
 

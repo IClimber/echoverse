@@ -362,7 +362,7 @@ test('форми рельєфу: річки (вузькі смуги рідин�
 
 test('далечінь: плитка — узгоджений меш, висоти вершин — поверхня tile', async () => {
   const { farMesh, FT } = await import('../js/gen/far.js');
-  const { LEVEL } = await import('../js/iso.js');
+  const { LEVEL } = await import('../js/universe.js');
   const { T_ICE, cliffTop } = await import('../js/gen/chunk.js');
   const L = lawsOf(hashStr('далечінь'), 0, 7);
   for (const s of [2, 4, 8]) {

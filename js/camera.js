@@ -1,19 +1,18 @@
-// camera.js — камера: перша особа (око гравця), третя особа (перспектива, за спиною) й ізометрія (орто, обертається).
+// camera.js — камера: перша особа (око гравця) і третя особа (перспектива, за спиною).
 // Лише вигляд, без DOM.
 // Камера дивиться на ціль (гравця); у шейдер ідуть координати відносно цілі. Напрям від цілі до камери —
 // азимут yaw і нахил pitch: u = (cos p · cos yaw, cos p · sin yaw, sin p). Екранні осі: праворуч r = (sin yaw, −cos yaw, 0),
-// угору up = (−sin p · cos yaw, −sin p · sin yaw, cos p). Ця трійка — дзеркальна (як і була фіксована ізометрія:
-// +x — униз-праворуч, +y — униз-ліворуч), однакова в обох режимах, тож світ при перемиканні не віддзеркалюється.
-import { S, LEVEL } from './iso.js';
+// угору up = (−sin p · cos yaw, −sin p · sin yaw, cos p). Ця трійка — дзеркальна (+x — униз-праворуч, +y — униз-ліворуч,
+// як була початкова ізометрія), однакова в обох режимах, тож світ при перемиканні не віддзеркалюється.
+import { LEVEL } from './universe.js';
 import { CS } from './gen/chunk.js';
 import { aabbInView, aabbInside } from './engine/core/frustum.js';
 import { createList, clearList, sweepSphere } from './engine/physics/collide.js';
 
-export const ISO = 'iso', THIRD = 'third', FIRST = 'first';
-export const NEXT = { first: THIRD, third: ISO, iso: FIRST };   // V: перша особа → третя → згори
+export const THIRD = 'third', FIRST = 'first';
+export const NEXT = { first: THIRD, third: FIRST };   // V: перша особа ↔ третя (вид згори прибрано 13.10.2026)
 const D2R = Math.PI / 180;
 export const LIMITS = {
-  iso: { pitch: [20 * D2R, 75 * D2R], zoom: [0.45, 2.5] },
   third: { pitch: [-70 * D2R, 80 * D2R], dist: [2.5, 16] },   // від'ємний нахил — погляд угору (eyeDir)
   first: { pitch: [-89 * D2R, 89 * D2R] },
 };
@@ -26,7 +25,7 @@ export const EYE_OF = { stand: EYE, crouch: 0.64, crawl: 0.3, swim: 0.3 };
 export let VIEW_R = 256;             // повні секції (клітинок)
 export let FAR_R = 1400;             // далечінь (плитки поверхні, gen/far.js), далі — туман і небо
 export let SEAM = VIEW_R - 8;        // шов: ближче — повні секції, далі — плитки далечі
-// Рівні деталізації секцій (третя особа; згори — усе повне): dn — від цілі камери до найближчої точки стовпця по
+// Рівні деталізації секцій (третя особа): dn — від цілі камери до найближчої точки стовпця по
 // горизонталі (colDist). Ближче LOD_R[0] — повні секції, до LOD_R[1] — груба сітка з кроком 2 блоки, далі — 4
 // (gen/chunk.js genCoarse). Меш іншого рівня тримаємо, поки він потрібен на dn ± LOD_HYST; обрізи грубої секції
 // малюємо ближче LOD_R + LOD_CAP від внутрішньої межі її рівня
@@ -57,10 +56,10 @@ export const HEAD_OF = { stand: HEAD, crouch: 0.75, crawl: 0.45, swim: 0.45 };
 // Третя й перша особа: куди дивиться камера (по горизонталі) — туди обернений гравець (у третій — спиною до камери)
 export const facing = (c) => c.yaw + Math.PI;
 
-export function createCamera(mode = ISO) {
-  const c = { mode, yaw: 0, pitch: 30 * D2R, zoom: 1.4, dist: 7, pitch3: 20 * D2R, pitch1: 0, distT: 7, zoomT: 1.4 };
+export function createCamera(mode = THIRD) {
+  const c = { mode, yaw: 0, dist: 7, pitch3: 20 * D2R, pitch1: 0, distT: 7 };
   setYaw(c, Math.PI / 4);
-  c.pitchT = c.pitch; c.pitch3T = c.pitch3; c.pitch1T = c.pitch1;
+  c.pitch3T = c.pitch3; c.pitch1T = c.pitch1;
   return c;
 }
 // Миттєво (перемикання вигляду, старт): і поточний кут, і ціль
@@ -69,7 +68,7 @@ export function setYaw(c, yaw) { c.yaw = c.yawT = yaw; }
 const SENS = 0.0022;                 // радіан на піксель руху миші
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-export const pitchOf = (c) => c.mode === ISO ? c.pitch : c.mode === FIRST ? c.pitch1 : c.pitch3;
+export const pitchOf = (c) => c.mode === FIRST ? c.pitch1 : c.pitch3;
 
 // Третя особа: напрям від цілі до ока. Нахил угору (від'ємний) не опускає камеру під землю — вона лишається за
 // спиною на висоті голови, а вгору повертається лише погляд (гравець — унизу екрана)
@@ -89,25 +88,21 @@ export function moveBasis(c) {
   return [[sy, -cy], [cy, sy]];
 }
 
-// Обертання мишею (px) і масштаб коліщатком: миша праворуч — погляд праворуч, униз — погляд униз
+// Обертання мишею (px) і відстань коліщатком (третя особа): миша праворуч — погляд праворуч, униз — погляд униз
 // Поворот задає ціль, а камера плавно її наздоганяє (smooth) — без ривків
 export function rotate(c, dx, dy) {
   c.yawT += dx * SENS;
-  if (c.mode === ISO) c.pitchT = clamp(c.pitchT + dy * SENS * 0.8, ...LIMITS.iso.pitch);
-  else if (c.mode === FIRST) c.pitch1T = clamp(c.pitch1T + dy * SENS * 0.8, ...LIMITS.first.pitch);
+  if (c.mode === FIRST) c.pitch1T = clamp(c.pitch1T + dy * SENS * 0.8, ...LIMITS.first.pitch);
   else c.pitch3T = clamp(c.pitch3T + dy * SENS * 0.8, ...LIMITS.third.pitch);
 }
 export function wheel(c, w) {
   if (c.mode === FIRST) return;
-  if (c.mode === ISO) c.zoomT = clamp(c.zoomT * Math.exp(-w * 0.0012), ...LIMITS.iso.zoom);
-  else c.distT = clamp(c.distT * Math.exp(w * 0.0012), ...LIMITS.third.dist);
+  c.distT = clamp(c.distT * Math.exp(w * 0.0012), ...LIMITS.third.dist);
 }
 export function smooth(c, dt) {
   const k = Math.min(1, dt * 10), r = Math.min(1, dt * 16);
-  c.zoom += (c.zoomT - c.zoom) * k;
   c.dist += (c.distT - c.dist) * k;
   c.yaw += (c.yawT - c.yaw) * r;
-  c.pitch += (c.pitchT - c.pitch) * r;
   c.pitch3 += (c.pitch3T - c.pitch3) * r;
   if (c.mode === FIRST) { c.yaw = c.yawT; c.pitch1 = c.pitch1T; }   // перша особа — миша без згладжування
 }
@@ -116,13 +111,6 @@ export function smooth(c, dt) {
 // dist — відстань до ока в третій особі (після зіткнення з рельєфом)
 export function viewProj(c, W, H, dist = c.dist) {
   const { r, up, u } = basis(c);
-  if (c.mode === ISO) {
-    const sx = 2 * S * c.zoom / W, sy = 2 * S * c.zoom / H, k = -1 / 400;
-    return {
-      m: new Float32Array([r[0] * sx, up[0] * sy, u[0] * k, 0, r[1] * sx, up[1] * sy, u[1] * k, 0, r[2] * sx, up[2] * sy, u[2] * k, 0, 0, 0, 0, 1]),
-      eye: [u[0] * 400, u[1] * 400, u[2] * 400], ortho: true,
-    };
-  }
   if (c.mode === FIRST) dist = 0;                                    // око — у цілі
   const e = eyeDir(c), eye = [e[0] * dist, e[1] * dist, e[2] * dist];
   const f = 1 / Math.tan(fovOf(c) / 2), near = 0.1, far = FAR_R * 1.6, A = (far + near) / (near - far), B = 2 * far * near / (near - far);
@@ -136,7 +124,7 @@ export function viewProj(c, W, H, dist = c.dist) {
       r[1] * fx, up[1] * f, u[1] * A, -u[1],
       r[2] * fx, up[2] * f, u[2] * A, -u[2],
       tr * fx, tu * f, tz * A + B, -tz,
-    ]), eye, ortho: false,
+    ]), eye,
   };
 }
 
@@ -178,18 +166,6 @@ export function boxInView(m, ax, ay, z0, z1, size = CS) {
 
 // Довільна коробка (відносно цілі): хоч частково в піраміді видимості / уся всередині — js/engine/core/frustum.js
 export { aabbInView, aabbInside };
-
-// Ізометрія: радіус, що покриває екран (кути екрана на найнижчій і найвищій площині)
-export function isoRadius(c, W, H, zr, targetZ) {
-  const { r, up, u } = basis(c), hw = W / 2 / (S * c.zoom), hh = H / 2 / (S * c.zoom);
-  let R = 0;
-  for (const sx of [-hw, hw]) for (const sy of [-hh, hh]) for (const Z of zr) {
-    const t = (Z - targetZ - sy * up[2]) / u[2];
-    const x = sx * r[0] + sy * up[0] + t * u[0], y = sx * r[1] + sy * up[1] + t * u[1];
-    R = Math.max(R, Math.hypot(x, y));
-  }
-  return R + 4;
-}
 
 // Третя особа: камера — куля CAM_R, що не проходить крізь те, з чим зіштовхується гравець (видима поверхня, стовбури,
 // каміння, тіла; src — collision.js), як SpringArm з ProbeSize в Unreal. Крона біля камери розчиняється (scene.js).

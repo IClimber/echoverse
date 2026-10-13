@@ -4,8 +4,7 @@
 // грубій ґратці 4×4×4 блоки з трилінійною інтерполяцією). Рельєф — шум від (x, y, n): сусідні номери схожі.
 import { hash2, hash3, unit } from '../rng.js';
 import { noise2, noise3, fbm3 } from '../noise.js';
-import { SEA, L_WATER, L_DRY, WORLD_H, KMIN, KMAX, floats, gravityAt } from '../universe.js';
-import { LEVEL } from '../iso.js';
+import { SEA, L_WATER, L_DRY, WORLD_H, KMIN, KMAX, floats, gravityAt, LEVEL } from '../universe.js';
 import { nsqrt } from '../num.js';
 import { BIOMES, pickBiome, Z_TEMP, Z_COLD, Z_HOT, Z_WET, Z_DRY, Z_DESERT, Z_SNOW, Z_PEAK, Z_BEACH } from './biomes.js';
 import { regionAt, speciesOf, pickSpecies } from './flora.js';

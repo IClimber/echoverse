@@ -7,12 +7,11 @@ import assert from 'node:assert/strict';
 import { secOccluders } from '../js/gen/vis.js';
 import { createOccluder } from '../js/engine/graphics/occluder.js';
 import { createOcclusion } from '../js/occlusion.js';
-import { lawsOf } from '../js/universe.js';
+import { lawsOf, LEVEL } from '../js/universe.js';
 import { hashStr, rng } from '../js/rng.js';
 import { genCol, genSection, shelterTop, bv, CS, CW, FR, SEC, B_AIR, B_STONE, solidB } from '../js/gen/chunk.js';
 import { chunkMesh } from '../js/gen/mesh.js';
 import { colSummary } from '../js/gen/job.js';
-import { LEVEL } from '../js/iso.js';
 import { aabbInView } from '../js/engine/core/frustum.js';
 
 const NK = SEC + 2 * FR;
@@ -243,7 +242,7 @@ function check(G, eyes, views, c, third) {
     const org = third ? [eye[0] + fw0[0] * 2.5, eye[1] + fw0[1] * 2.5, eye[2]] : eye;
     const cam = camera(eye, org, yaw, pitch);
     const t0 = performance.now();
-    occ.begin(eye, D, N, false, cam.m, org, c, 2);
+    occ.begin(eye, D, N, cam.m, org, c, 2);
     for (const B of world.boxes) occ.add(B.cx, B.cy, B.cz);
     occ.end();
     for (const B of world.boxes) {

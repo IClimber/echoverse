@@ -3,8 +3,7 @@
 // Світло, туман і текстуру (за матеріалом, координати — проєкцією на площину грані) додає шейдер.
 // Земля — з блоків: грань лише між твердим і порожнім.
 import { CS, FR, ci, SEC, H, O_TREE, O_FLOAT, O_COVER, solidB, B_AIR, B_LIQ, B_ICE, B_SAND, B_GRASS, B_DRY, B_DESERT, B_SNOW, B_ROCK, B_BED, B_MUD, B_SOIL, B_STONE, B_SANDSTONE, B_MAGMA, B_FLOAT, B_LADDER, B_VINE } from './chunk.js';
-import { L_LAVA, SEA, gravityAt } from '../universe.js';
-import { LEVEL } from '../iso.js';
+import { L_LAVA, SEA, gravityAt, LEVEL } from '../universe.js';
 import { template, place, footprint, extent } from './plants.js';
 import { groundTint } from './flora.js';
 import { M_FLAT, M_ROCK, M_CLIFF, M_WATER, M_LAVA, M_ICE, M_SAND, M_LUSH, M_DRY, M_DESERT, M_SNOW, M_BED, M_MUD, M_SOIL, M_SANDSIDE, M_LIP, M_BARK, M_LEAF, THIN_N } from './materials.js';

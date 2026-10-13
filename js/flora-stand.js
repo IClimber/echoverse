@@ -15,7 +15,6 @@ import { Mesh } from './gen/mesh.js';
 import { texturesOf, TEX } from './textures.js';
 import { LAYERS, MAT_TABLE, M_LUSH, M_DRY, M_DESERT, M_SNOW, M_ROCK, M_SAND } from './gen/materials.js';
 import { createCamera, basis } from './camera.js';
-import { S } from './iso.js';
 import { REF_Z, MIN_LIGHT, pcIntensity } from './sky.js';
 
 export async function runFlora() {
@@ -52,8 +51,8 @@ export async function runFlora() {
   for (let i = 0; i < LAYERS; i++) lv.push(all.subarray(i * TEX * TEX * 4, (i + 1) * TEX * TEX * 4));
   MT.setTextureArray(new pc.Texture(G.dev, { width: TEX, height: TEX, arrayLength: LAYERS, format: pc.PIXELFORMAT_SRGBA8, mipmaps: true, minFilter: pc.FILTER_LINEAR_MIPMAP_LINEAR, magFilter: pc.FILTER_NEAREST, addressU: pc.ADDRESS_REPEAT, addressV: pc.ADDRESS_REPEAT, anisotropy: 8, levels: [lv] }));
   MT.setMaterialTable(MAT_TABLE);
-  const cam = createCamera('iso');
-  cam.pitch = cam.pitchT = 24 * Math.PI / 180;
+  const cam = createCamera();                             // лише базис камери гри (нахил pitch3); проєкція стенду — орто
+  cam.pitch3 = cam.pitch3T = 24 * Math.PI / 180;
   cam.yaw = cam.yawT = Math.PI / 2;                      // ряди галереї — уздовж екрана
   const rows = Math.ceil(items.length / cols), cx = (cols - 1) * gap / 2, cy = (rows - 1) * gy / 2;
   const node = new pc.GraphNode(), mi = new pc.MeshInstance(floatMesh(G, M.finish()), mat, node);
@@ -89,8 +88,7 @@ export async function runFlora() {
     G.onFrame(frame);
     if (W === G.width && H === G.height) return;
     W = G.width; H = G.height;
-    cam.zoom = Math.min(W / (cols * gap), H / ((rows + 0.6) * gy * 0.45)) / S;
-    G.cam.orthoHeight = H / (2 * S * cam.zoom);
+    G.cam.orthoHeight = Math.max(H * cols * gap / W, (rows + 0.6) * gy * 0.45) / 2;   // уся галерея — у вікні
     labels.textContent = '';
     items.forEach((it, i) => {
       G.cam.worldToScreen(G.toPC((i % cols) * gap - cx, Math.floor(i / cols) * gy - cy + gap * 0.3, -2, P), Sc);

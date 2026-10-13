@@ -3,7 +3,7 @@
 
 const held = new Set();
 const pressed = [];                 // дії, що сталися з минулого кадру
-let wheel = 0, dragX = 0, dragY = 0, dragging = false, downX = 0, downY = 0, curX = null, curY = null;
+let wheel = 0, dragX = 0, dragY = 0, dragging = false, downX = 0, downY = 0;
 
 const ACTIONS = {
   Space: 'jump', KeyQ: 'jumpPrev', KeyE: 'jumpNext', KeyR: 'jumpRandom', KeyV: 'camera', Escape: 'menu', F3: 'debug', KeyH: 'help',
@@ -50,10 +50,8 @@ export function initInput(target = window) {
   });
   // Подія з величезним зсувом — збій захоплення миші (буває в момент захоплення): ігноруємо, інакше камеру «смикає»
   target.addEventListener('mousemove', (e) => {
-    curX = e.clientX; curY = e.clientY;
     if ((dragging || locked()) && Math.abs(e.movementX) < 250 && Math.abs(e.movementY) < 250) { dragX += e.movementX; dragY += e.movementY; }
   });
-  document.addEventListener('mouseleave', () => { curX = curY = null; });
   target.addEventListener('contextmenu', (e) => { if (!(e.target instanceof HTMLInputElement)) e.preventDefault(); });
   target.addEventListener('blur', () => { dragging = false; });
 }
@@ -75,8 +73,6 @@ export const vertAxis = () => (held.has('Space') ? 1 : 0) - (crouchHeld() ? 1 : 
 export const turnAxis = () => (held.has('KeyC') ? 1 : 0) - (held.has('KeyZ') ? 1 : 0);
 // Зсув миші з правою кнопкою з минулого кадру, px
 export function takeDrag() { const d = [dragX, dragY]; dragX = dragY = 0; return d; }
-// Курсор (px вікна; без захоплення миші — згори, ціль під курсором); поза вікном — null
-export const cursor = () => curX === null ? null : [curX, curY];
 // Дії з минулого кадру (кожну — один раз): jump — стрибок, jumpPrev / jumpNext — пристрій (номер −1 / +1),
 // jumpRandom — у випадковий всесвіт (для перевірок), jumpRandomDepth (Shift+R) — і на іншу глибину, camera — вигляд,
 // hit — удар (ЛКМ), use — використати (ПКМ), take — взяти / покласти (F), crouchPress — Ctrl натиснуто (відпустити

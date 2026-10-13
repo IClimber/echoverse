@@ -50,7 +50,7 @@ export function encodeGray(w, h, px) {
 }
 
 const API = arg('api', 'webgl2'), PORTS = arg('ports', '8125,8124').split(',').map(Number), CANON = arg('canon', '0,0').split(',').map(Number);
-const SC = arg('scenes', 'plain,night,iso,cave,forest,first,under,mount,suns3,grove,grove1,shaft,aim').split(',').filter((k) => SCENES[k]);
+const SC = arg('scenes', 'plain,night,cave,forest,first,under,mount,suns3,grove,grove1,shaft,aim').split(',').filter((k) => SCENES[k]);
 const VIEWS = arg('views', '8,32').split(',').map(Number), SHS = arg('shadows', 'off,pcf3,pcss').split(',');
 const OUT = arg('out', `${tmpdir()}/echoverse-pixels-${API}`); mkdirSync(`${OUT}/A`, { recursive: true }); mkdirSync(`${OUT}/diff`, { recursive: true });
 const NOISE = arg('noise') && existsSync(arg('noise')) ? JSON.parse(readFileSync(arg('noise'), 'utf8')) : null, SAVE = arg('save-noise');
