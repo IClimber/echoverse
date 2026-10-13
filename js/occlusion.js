@@ -24,7 +24,7 @@ export function createOcclusion(W, { width = 192 } = {}) {
   const make = () => createOccluder({ width, margin: [0.5, 0.5, 0.5 * LEVEL], edge: CS * Math.SQRT2 });
   let R = make(), occR = OCC_R;
   const xs = new Float64Array(4), ys = new Float64Array(4), zs = new Float64Array(4), list = [], inList = new Map();
-  let enabled = true, on = false, D = 0, N = 0, E = null, t0 = 0, KX = 0, KY = 0, KZ = 0, safe2 = 0;
+  let enabled = true, on = false, ended = true, D = 0, N = 0, E = null, t0 = 0, KX = 0, KY = 0, KZ = 0, safe2 = 0;
   // ключ секції відносно секції ока (±512 по осях — ціле в межах Smi)
   const keyOf = (cx, cy, cz) => ((cx - KX + 512) << 20) | ((cy - KY + 512) << 10) | (cz - KZ + 512);
   const st = { on: false, why: '', secs: 0, skipped: 0, solid: 0, inner: 0, polys: 0, hid: 0, drawn: 0, texels: 0, safe: 0, boxes: 0, culled: 0, ms: 0 };   // ms — заслони (до end)
@@ -102,7 +102,7 @@ export function createOcclusion(W, { width = 192 } = {}) {
     begin(eye, d, n, m, org, curve, aspect) {
       t0 = performance.now();
       st.secs = st.skipped = st.solid = st.inner = 0;
-      list.length = 0; inList.clear();
+      list.length = 0; inList.clear(); ended = false;
       on = enabled;
       st.on = on; st.why = enabled ? '' : 'вимкнено';
       if (!on) { R.off(); return false; }
@@ -121,7 +121,8 @@ export function createOcclusion(W, { width = 192 } = {}) {
     },
     // Кінець заслонів (перед перевірками коробок): секції ближчі першими; закрита вже растеризованими — пропустити
     end() {
-      if (!on) return;
+      if (!on || ended) return;
+      ended = true;
       list.sort((a, b) => a.d - b.d);
       safe2 = R.stats.safe * R.stats.safe;
       // усі секції списку буде оброблено (растеризовано чи закрито вже растеризованими)
@@ -137,8 +138,9 @@ export function createOcclusion(W, { width = 192 } = {}) {
       const r = R.stats;
       st.polys = r.polys; st.hid = r.hid; st.drawn = r.drawn; st.texels = r.texels; st.safe = r.safe; st.ms = performance.now() - t0;
     },
-    // Чи може бути видно щось у коробці світу (м): у кадрі й не закрита
-    box(x0, y0, z0, x1, y1, z1) { return R.box(x0, y0, z0, x1, y1, z1); },
+    // Чи може бути видно щось у коробці світу (м): у кадрі й не закрита. Кінця заслонів у кадрі не було (scene.js: у всесвіту
+    // ще немає регіонів, а плитки далечі вже є) — спершу він: без піраміди R.box падав (13.10.2026)
+    box(x0, y0, z0, x1, y1, z1) { if (!ended) this.end(); return R.box(x0, y0, z0, x1, y1, z1); },
     // Підсумок кадру (після перевірок коробок)
     finish() { if (on) { st.boxes = R.stats.boxes; st.culled = R.stats.culled; } },
     buffer: () => R.buffer(),

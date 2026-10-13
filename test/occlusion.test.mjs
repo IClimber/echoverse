@@ -291,6 +291,15 @@ test('відсікання закритого: видиме не відсіка�
   t.diagnostic(`відсічено ${(r.culledShare * 100).toFixed(0)} % секцій у піраміді видимості, заслони й перевірки ${r.ms.toFixed(2)} мс/кадр`);
 });
 
+test('відсікання закритого: коробка до кінця заслонів (у всесвіту ще немає регіонів, а плитки далечі є) — без винятку', () => {
+  const occ = createOcclusion(W), eye = [-96.24, -653.34, 9], cam = camera(eye, eye, 0.3, 0);
+  for (let f = 0; f < 2; f++) {                                           // і після кадру з іншим розміром буфера
+    occ.begin(eye, D, N, cam.m, eye, 0, f ? 1.5 : 2);
+    assert.equal(typeof occ.box(eye[0] + 50, eye[1], eye[2] - 5, eye[0] + 60, eye[1] + 10, eye[2] + 5), 'boolean');
+    occ.finish();
+  }
+});
+
 test('відсікання закритого з кривизною (мала планета, c = 1e-3): третя особа — видиме не відсікається', () => {
   const eyes = eyesOf(bucketsOf(), 8, 'occ-bend');
   for (const e of eyes.slice(0, 4)) {
