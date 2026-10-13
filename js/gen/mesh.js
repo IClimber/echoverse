@@ -610,11 +610,18 @@ function objMeshes(C, L, K0, NK, near, far, dz = 0, shade = false, lightOf = nul
 // Один предмет o стовпця C повністю (обрис цілі, scene.js): той самий шаблон, поворот, масштаб і колір, що в objMeshes;
 // позиції — у чанку (x, y 0…16), висота — від блоку 0
 export function objMesh(C, L, o) {
-  const M = new Mesh(), v = o.v, g = C.sp[o.s], { cx, cy, rot, s, cj } = objPose(C, L, o), z = o.z * LEVEL;
-  if (o.k === O_TREE) place(M, template(g, v % 3, 0), cx, cy, z, rot, s, ((v >> 2 & 7) / 7) * 0.1, cj);
-  else if (o.k === O_COVER) place(M, template(g, v & 1, 0), cx, cy, z, rot, s, 0, cj);
-  else if (o.k !== O_FLOAT) place(M, template(o.st ? stoneGenome(L, g, o.st) : g, v & 3, 0, styleOf(g, v)), cx, cy, z, rot, s, 0, cj);
+  const M = new Mesh(), { cx, cy, rot, s, cj } = objPose(C, L, o), z = o.z * LEVEL, sh = objShape(C, L, o);
+  if (sh) place(M, sh.T, cx, cy, z, rot, s, sh.tl, cj);
   return M.finish();
+}
+
+// Шаблон і нахил предмета o стовпця C (як у objMesh; ширяюче каміння — null): обрис цілі й точне прицілювання (aim.js)
+export function objShape(C, L, o) {
+  const v = o.v, g = C.sp[o.s];
+  if (o.k === O_TREE) return { T: template(g, v % 3, 0), tl: ((v >> 2 & 7) / 7) * 0.1 };
+  if (o.k === O_COVER) return { T: template(g, v & 1, 0), tl: 0 };
+  if (o.k !== O_FLOAT) return { T: template(o.st ? stoneGenome(L, g, o.st) : g, v & 3, 0, styleOf(g, v)), tl: 0 };
+  return null;
 }
 
 // Рослини й каміння зблизька всього стовпця (окрема робота: потрібні лише біля камери); висота — від блоку K0. Індекси:

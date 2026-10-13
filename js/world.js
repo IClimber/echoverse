@@ -265,12 +265,12 @@ export function createWorld(seed, onMesh, opts = {}) {
       const C = colOf(d, n, x, y);
       return C ? C.obst[(y - C.cy * CS) * CS + x - C.cx * CS] : null;
     },
-    // Предмет клітинки (x, y) — рослина, камінь (прицілювання): {o, C, i} або null
+    // Предмет клітинки (x, y) — рослина, камінь (прицілювання): {o, C, i, L} або null
     objAt(d, n, x, y) {
       const C = colOf(d, n, x, y);
       if (!C) return null;
       const i = C.objAt[(y - C.cy * CS) * CS + x - C.cx * CS];
-      return i < 0 ? null : { o: C.obj[i], C, i };
+      return i < 0 ? null : { o: C.obj[i], C, i, L: W.laws(d, n) };
     },
     // Повна будова предмета i стовпця (cx, cy) — для обрису цілі (onMesh('obj', …))
     wantObj(d, n, cx, cy, i) { const key = `o${d}:${n}:${cx}:${cy}:${i}`; gen.want(key, Q({ type: 'obj', d, n, cx, cy, i }), -1); return key; },

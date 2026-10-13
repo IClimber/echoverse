@@ -113,3 +113,42 @@ test('F3: рядок цілі — для кожного предмета буд�
   }
   assert.ok(names.size >= 1, 'каміння трапилось');
 });
+
+test('ціль: дерево й камінь — точно за трикутниками того, що малюється (обрис); повз гілки — не дерево', async () => {
+  // 13.10.2026: циліндр на розмах гілок нахиленого дерева перекривав колоду поруч — обводилось дерево, а не колода
+  const { lawsOf } = await import('../js/universe.js');
+  const { runJob } = await import('../js/gen/job.js');
+  const { O_TREE, O_COVER, O_FLOAT, CS } = await import('../js/gen/chunk.js');
+  const { objMesh } = await import('../js/gen/mesh.js');
+  const { rayTriSoup } = await import('../js/engine/physics/collide.js');
+  const P = world(() => B_AIR, [], 1e9);
+  let rnd = 12345;
+  const r = () => ((rnd = Math.imul(rnd, 1103515245) + 12345 >>> 0) / 4294967296);
+  let n = 0, hits = 0, trees = 0;
+  for (const [d, nn, cx, cy] of [[0, 0, 0, 0], [0, 51119, 290, 391], [4, 777, -111, 123], [8, -4242, 0, 0]]) {
+    const L = lawsOf(1178118268, d, nn), C = runJob(L, { type: 'col', d, n: nn, cx, cy }, new Map()).data;
+    C.cx = cx; C.cy = cy;
+    for (const o of C.obj) {
+      if (o.k === O_FLOAT || o.k === O_COVER) continue;
+      if (o.k === O_TREE) trees++;
+      const q = { o, C, L }, M = objMesh(C, L, o), p = M.pos.slice(), nv = M.count;
+      // меш у світових координатах, без індексів
+      const w = new Float64Array(nv * 3);
+      for (let i = 0; i < nv; i++) { const j = M.idx[i] * 3; w[i * 3] = p[j] + cx * CS; w[i * 3 + 1] = p[j + 1] + cy * CS; w[i * 3 + 2] = p[j + 2]; }
+      const bx = cx * CS + o.cx, by = cy * CS + o.cy, bz = o.z * LEVEL;
+      for (let k = 0; k < 40; k++) {
+        // ціль — випадкова точка в описаному циліндрі, око — за 2,5 м від неї
+        const a = r() * 6.283, rr = (o.ar + 0.3) * Math.sqrt(r()), tz = bz + r() * (o.ah + 0.2);
+        const dir = norm([r() - 0.5, r() - 0.5, (r() - 0.5) * 0.6]);
+        const tgt = [bx + rr * Math.cos(a), by + rr * Math.sin(a), tz], eye = tgt.map((v, i) => v - dir[i] * 2.5);
+        const want = rayTriSoup(w, nv, eye[0], eye[1], eye[2], dir[0], dir[1], dir[2], 4);
+        const objAt = (x, y) => (x === Math.floor(bx) && y === Math.floor(by) ? q : null);
+        const got = aimRay(P, objAt, eye, dir, 4);
+        n++;
+        if (want === Infinity) assert.ok(!got || got.kind !== 'obj', `повз предмет — не ціль (${got && got.t})`);
+        else { hits++; assert.ok(got && got.kind === 'obj' && Math.abs(got.t - want) < 1e-3, `влучання ${want} → ${got && got.kind} ${got && got.t}`); }
+      }
+    }
+  }
+  assert.ok(trees > 0 && hits > n * 0.1 && hits < n * 0.9, `дерев ${trees}, влучань ${hits} з ${n}`);
+});

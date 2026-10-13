@@ -221,6 +221,28 @@ export function rayCast(L, ox, oy, oz, dx, dy, dz, maxT = 1, out = {}) {
   return out;
 }
 
+// Промінь проти трикутників без індексів (p — x, y, z вершин, кожні три — трикутник; nv — вершин), з обох боків:
+// s першого влучання (у частках d) чи Infinity
+export function rayTriSoup(p, nv, ox, oy, oz, dx, dy, dz, maxT = 1) {
+  let best = Infinity;
+  for (let o = 0, n = nv * 3; o + 8 < n; o += 9) {
+    const e1x = p[o + 3] - p[o], e1y = p[o + 4] - p[o + 1], e1z = p[o + 5] - p[o + 2];
+    const e2x = p[o + 6] - p[o], e2y = p[o + 7] - p[o + 1], e2z = p[o + 8] - p[o + 2];
+    const px = dy * e2z - dz * e2y, py = dz * e2x - dx * e2z, pz = dx * e2y - dy * e2x;
+    const det = e1x * px + e1y * py + e1z * pz;
+    if (Math.abs(det) < 1e-14) continue;
+    const inv = 1 / det, sx = ox - p[o], sy = oy - p[o + 1], sz = oz - p[o + 2];
+    const u = (sx * px + sy * py + sz * pz) * inv;
+    if (u < 0 || u > 1) continue;
+    const qx = sy * e1z - sz * e1y, qy = sz * e1x - sx * e1z, qz = sx * e1y - sy * e1x;
+    const v = (dx * qx + dy * qy + dz * qz) * inv;
+    if (v < 0 || u + v > 1) continue;
+    const t = (e2x * qx + e2y * qy + e2z * qz) * inv;
+    if (t >= 0 && t < best && t <= maxT) best = t;
+  }
+  return best;
+}
+
 // ---- прості тіла ----
 // Призма: правильний sides-кутник радіуса r навколо (cx, cy) від z0 до z1 — бічні грані, верх і низ (замкнена: «усередині»
 // — за всіма гранями, character.js; низ — у землі, знизу до нього не дістатися)

@@ -1,11 +1,12 @@
 // aim.js — ціль гравця (п. 3 roadmap): промінь з ока уздовж погляду камери (як у Minecraft) до першого, у що влучає:
 // видима поверхня (тоді блок — DDA по блоках від точки влучання: поверхня плавна, блок під нею — той, що зміниться
 // в п. 6), тіло, предмет (стовбур, крона, трава, камінь — циліндри з даних стовпця). Без DOM.
-// P — «щуп» світу (player.js); objAt(x, y) → {o, C} — предмет клітинки (world.js) чи null; o — початок, d — напрям
+// P — «щуп» світу (player.js); objAt(x, y) → {o, C, L} — предмет клітинки (world.js) чи null; o — початок, d — напрям
 // (одиничний), maxT — довжина
 import { colliderOf } from './collision.js';
-import { createList, clearList, rayCast } from './engine/physics/collide.js';
-import { solidB, CS } from './gen/chunk.js';
+import { createList, clearList, rayCast, rayTriSoup } from './engine/physics/collide.js';
+import { solidB, CS, O_COVER } from './gen/chunk.js';
+import { objShape } from './gen/mesh.js';
 import { LEVEL } from './universe.js';
 
 export const REACH = 3;              // досяжність рук (як удар)
@@ -53,10 +54,22 @@ export function cylHit(o, d, cx, cy, r, z0, z1, maxT) {
   return t0 <= t1 ? t0 : Infinity;
 }
 
-// Предмет o стовпця C (світові координати): найближче влучання в його циліндри — стовбур (o.r до o.top) і крона, рослина,
-// брила (o.ar від o.az0 до o.ah) — або Infinity
-function objT(o, C, ro, d, maxT) {
-  const cx = C.cx * CS + o.cx, cy = C.cy * CS + o.cy, z = o.z * LEVEL;
+// Предмет q = {o, C, L} (світові координати): найближче влучання або Infinity. Дерево й камінь — точно, трикутниками того
+// самого шаблону, що малюється й обводиться (objShape; циліндр на розмах гілок нахиленого дерева перекривав сусідні
+// предмети); спершу — описаний циліндр. Покрив (трава, квіти — тонкі) і предмет без законів — циліндри: стовбур
+// (o.r до o.top) і рослина, брила (o.ar від o.az0 до o.ah)
+function objT(q, ro, d, maxT) {
+  const o = q.o, C = q.C, cx = C.cx * CS + o.cx, cy = C.cy * CS + o.cy, z = o.z * LEVEL;
+  const sh = q.L && o.pose && o.k !== O_COVER ? objShape(C, q.L, o) : null;
+  if (sh) {
+    const { rot, s } = o.pose, R = o.ar + o.ah * Math.sin(sh.tl) + 0.05;
+    if (cylHit(ro, d, cx, cy, R, z - R, z + o.ah + 0.05, maxT) === Infinity) return Infinity;
+    // промінь у систему шаблону (обернене до place: зсув, поворот −rot, масштаб 1/s, нахил −tl); t той самий
+    const c = Math.cos(rot), sn = Math.sin(rot), ct = Math.cos(sh.tl), st = Math.sin(sh.tl);
+    const loc = (x, y, zz) => { const a = x * c + y * sn, b = -x * sn + y * c; return [a / s, (b * ct + zz * st) / s, (-b * st + zz * ct) / s]; };
+    const p = loc(ro[0] - cx, ro[1] - cy, ro[2] - z), v = loc(d[0], d[1], d[2]);
+    return rayTriSoup(sh.T.p, sh.T.verts, p[0], p[1], p[2], v[0], v[1], v[2], maxT);
+  }
   let t = Infinity;
   if (o.r > 0) t = cylHit(ro, d, cx, cy, o.r, z, z + o.top, maxT);
   if (o.ar > 0) t = Math.min(t, cylHit(ro, d, cx, cy, o.ar, z + (o.az0 || 0), z + o.ah, maxT));
@@ -85,7 +98,7 @@ export function aimRay(P, objAt, o, d, maxT = REACH) {
     for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
       const q = objAt(x, y);
       if (!q) continue;
-      const t = objT(q.o, q.C, o, d, bt);
+      const t = objT(q, o, d, bt);
       if (t < bt) { bt = t; bo = q; }
     }
     if (!bo && prism) { bo = objAt(Math.floor(r.ref.cx), Math.floor(r.ref.cy)); bt = r.t; }   // стовбур без циліндра
