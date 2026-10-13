@@ -2,7 +2,7 @@
 // Стовпець (клітинки, «небо», ґратка шуму, предмети з положеннями) рахується раз і живе в кеші: секції стовпця беруть
 // його звідти. Зведення стовпця — поверхня, укриття від опадів, межі секцій із поверхнею, предмети.
 import { genCol, genSection, genCoarse, shelterTop, CS, ci, SEC, T_WATER, T_ICE, T_BED, O_FLOAT } from './chunk.js';
-import { chunkMesh, floraMesh, farFlora, objPose, objMesh } from './mesh.js';
+import { chunkMesh, floraMesh, farFlora, objPose, objMesh, SKYLIGHT } from './mesh.js';
 import { packMesh, concat, frameOf, RS } from './pack.js';
 import { farMesh, FT } from './far.js';
 import { standCol, standSection, standFar } from './stand.js';
@@ -42,7 +42,8 @@ export function colSummary(col, L) {
 }
 
 // Робота q = {type: 'col' | 'sec' | 'lod' (груба секція рівня lod) | 'flora' | 'far' (плитка далечі tx, ty з кроком s) |
-// 'obj' (предмет i стовпця повністю — обрис цілі), d, n, cx, cy, cz, stand — стенд руху (gen/stand.js)}:
+// 'obj' (предмет i стовпця повністю — обрис цілі) | 'relit' (меш секції заново зі світлом неба головного потоку: блоки b
+// і вікно світла sl), d, n, cx, cy, cz, stand — стенд руху (gen/stand.js)}:
 // {data, mesh?, bufs — що можна передати без копіювання}. Меші секцій і рослин — щільні вершини в кадрі регіону (pack.js):
 // секція — op (тверде, за ним ns вершин — nf далеких рослин) і liq (поверхня рідини); рослини зблизька — весь стовпець
 // окремо (потрібні лише біля камери), кадр — регіон rz найнижчого предмета. Груба секція (lod) — op: тверде (ns), далекі
@@ -66,7 +67,7 @@ export function runJob(L, q, cache) {
     if (zmin === Infinity) return { data: { rz: 0 }, mesh: { fl: null, n: 0, bb: null }, bufs: [] };
     const rz = Math.floor(Math.floor(zmin / SEC) / RS), [dx, dy] = frameOf(q.cx, q.cy, 0);
     shelterTop(col, L);
-    const F = floraMesh(col, L, rz * RS * SEC), f = packMesh(F.finish(), dx, dy, 0);
+    const F = floraMesh(col, L, rz * RS * SEC, q.ol || null), f = packMesh(F.finish(), dx, dy, 0);
     // nb — вершин великих рослин на початку (за ними покрив; вершина щільного меша — індекс); np — вершин тіней малих
     // рослин у кінці (лише кидачі дальніх каскадів); ob — по великому предмету: перша вершина, вершин, коробка в кадрі
     // регіону (як bb)
@@ -87,18 +88,34 @@ export function runJob(L, q, cache) {
       bufs: lq ? [op.buf, lq.buf] : [op.buf],
     };
   }
+  if (q.type === 'relit') {                    // меш секції заново: ті самі блоки, світло неба — глобальне (головний потік)
+    const m = secMesh(L, q, col, q.b, q.sl), out = { data: null, mesh: m.mesh, bufs: m.bufs };
+    return out;
+  }
   const sec = q.stand ? standSection(col, q.cz) : genSection(L, col, q.cz);
   if (sec.empty) return { data: sec, bufs: [] };
-  const m = chunkMesh({ cx: q.cx, cy: q.cy, h: col.h, bm: col.bm, v: col.v, top: shelterTop(col, L), sky: col.sky, b: sec.b, k0: sec.k0, nk: sec.nk, obj: col.obj, sp: col.sp }, L, { near: false });
-  const [dx, dy, dz] = frameOf(q.cx, q.cy, q.cz), s = packMesh(m.solid, dx, dy, dz), f = packMesh(m.far, dx, dy, dz);
-  const op = f.n ? concat(s, f) : s, lq = m.liquid ? packMesh(m.liquid, dx, dy, dz) : null;
-  const o = secOccluders(sec.b, sec.nk), bufs = [sec.b.buffer, op.buf];
+  // світло неба вікна секції (локальне: блоки з рамкою й верх укриття; поза вікном — невідоме): меш одразу з ним,
+  // головний потік — глобальне (між секціями) і перебудова (relit), коли вікно зросте. lw — null: усе небо; lu — у нутрі
+  // є неопакове нижче неба
+  const w = SKYLIGHT.windowLight(sec.b, shelterTop(col, L), sec.k0, sec.nk);
+  const m = secMesh(L, q, col, sec.b, w.lw), o = secOccluders(sec.b, sec.nk), bufs = [sec.b.buffer, ...m.bufs];
   if (o) bufs.push(o.f.buffer, o.s.buffer);
-  if (lq) bufs.push(lq.buf);
+  if (w.lw) bufs.push(w.lw.buffer);
   return {
     // occ, occS — заслони й бічні маски (відсікання закритого, gen/vis.js)
-    data: { b: sec.b, k0: sec.k0, nk: sec.nk, occ: o && o.f, occS: o && o.s },
-    mesh: { op: op.buf, ns: s.n, nf: f.n, nc: 0, bb: op.n ? op.bb : null, liq: lq ? lq.buf : null, nl: lq ? lq.n : 0, lbb: lq ? lq.bb : null },
+    data: { b: sec.b, k0: sec.k0, nk: sec.nk, occ: o && o.f, occS: o && o.s, lw: w.lw, lu: w.under },
+    mesh: m.mesh,
     bufs,
+  };
+}
+
+// Меш секції (тверде з далекими рослинами, поверхня рідини) у кадрі регіону; sl — вікно світла неба (null — усе небо)
+function secMesh(L, q, col, b, sl) {
+  const m = chunkMesh({ cx: q.cx, cy: q.cy, h: col.h, bm: col.bm, v: col.v, top: shelterTop(col, L), sky: col.sky, b, sl, k0: q.cz * SEC, nk: SEC, obj: col.obj, sp: col.sp }, L, { near: false });
+  const [dx, dy, dz] = frameOf(q.cx, q.cy, q.cz), s = packMesh(m.solid, dx, dy, dz), f = packMesh(m.far, dx, dy, dz);
+  const op = f.n ? concat(s, f) : s, lq = m.liquid ? packMesh(m.liquid, dx, dy, dz) : null;
+  return {
+    mesh: { op: op.buf, ns: s.n, nf: f.n, nc: 0, bb: op.n ? op.bb : null, liq: lq ? lq.buf : null, nl: lq ? lq.n : 0, lbb: lq ? lq.bb : null },
+    bufs: lq ? [op.buf, lq.buf] : [op.buf],
   };
 }

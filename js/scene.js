@@ -725,7 +725,7 @@ export async function createScene(canvas, settings = {}) {
       return { ...viewProj(camera, G.width, G.height, dist), rad: VIEW_R, fog: [0.3 * FAR_R, 0.97 * FAR_R] };
     },
 
-    // st: {camera, target, view, laws, clock, weather ({W, loc}), rain ({x0, y0}), far, bodies, skyOpen(x, y, z) — AO неба тіл,
+    // st: {camera, target, view, laws, clock, weather ({W, loc}), rain ({x0, y0}), far, bodies, skyLight(x, y, z) — AO неба тіл (світло неба),
     // me {x, y, z, yaw, swim, anim, ao — AO неба фігури}}.
     // Повертає стан неба (sky.js) — для HUD
     draw(st) {
@@ -1001,7 +1001,7 @@ export async function createScene(canvas, settings = {}) {
         const c = Math.cos(bo.yaw), s = Math.sin(bo.yaw), ct = Math.cos(bo.tilt), stl = Math.sin(bo.tilt), k = bo.s;
         m16.set([c * k, s * k, 0, 0, -s * ct * k, c * ct * k, stl * k, 0, s * stl * k, -c * stl * k, ct * k, 0, bo.ix ?? bo.x, bo.iy ?? bo.y, (bo.iz ?? bo.z) - bo.hz, 1]);
         G.matToPC(m16, g.buf, g.n * 16);
-        g.buf[g.n * 16 + 3] = st.skyOpen ? st.skyOpen(bo.ix ?? bo.x, bo.iy ?? bo.y, bo.iz ?? bo.z) : 1;   // AO неба тіла (у матриці там 0; chunks.js)
+        g.buf[g.n * 16 + 3] = st.skyLight ? st.skyLight(bo.ix ?? bo.x, bo.iy ?? bo.y, bo.iz ?? bo.z) : 1;   // AO неба тіла (у матриці там 0; chunks.js)
         g.n++;
       }
       for (const g of tmpl.values()) { g.inst.update(g.buf, g.n, curve * g.d * g.d); tris += g.n * g.mesh.primitive[0].count / 3; }

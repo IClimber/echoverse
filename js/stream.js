@@ -139,6 +139,7 @@ export function createStreamer() {
       for (const dir of [-1, 1]) other(g.d, g.n + dir);
       if (ch && (ch.to[0] !== g.d || Math.abs(ch.to[1] - g.n) !== 1)) other(ch.to[0], ch.to[1]);   // далекий стрибок (R)
       far = farTiles(g, renderer, keys, t, m, rad);
+      W.lightKeys(keys);                       // перебудови зі світлом неба — не прибирати
       W.gen.keepOnly(keys);
       W.gen.tick();
       ms = ms * 0.8 + (performance.now() - t0) * 0.2;

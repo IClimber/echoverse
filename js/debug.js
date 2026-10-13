@@ -97,6 +97,13 @@ function moonsLine(L) {
   const M = L.sky.moons.map((m) => `${f0(m.Rkm)} км на ${f0(m.D)} R (${f1(m.period)} діб)`), C = L.comp;
   return `${M.length ? M.join(', ') : 'немає'}${C ? ` · компаньйон: ${COMP[C.type]}, приплив ${pc(C.f)} g, ρ ×${f2(C.rhoR)}, R ×${f2(C.Rr)}` : ''}${L.sky.rings ? ' · кільця' : ''}`;
 }
+// Світло неба: тут (блок тулуба) і поле всесвіту
+function lightLine(g) {
+  const { world, me } = g, s = world.lightAt(g.d, g.n, Math.floor(me.x), Math.floor(me.y), Math.floor((me.z ?? 0) / LEVEL + 1)), ls = world.lightStats(g.d, g.n);
+  const here = s >= 0 ? `${s}/30 (рівень ${(s / 2).toFixed(1).replace('.', ',')}, яскравість ${Math.round(world.skyLight(g.d, g.n, me.x, me.y, (me.z ?? 0) + 0.5) * 100)} %)` : s === -2 ? 'в опаковому' : 'невідомо';
+  return `тут ${here} · секцій зі світлом ${ls.store ?? 0} · черга ${ls.queued ?? 0}, брудних ${ls.dirty ?? 0} · перебудов: у черзі ${ls.relit}, зроблено ${ls.relitDone}, рослин ${ls.floraLit} · ${f1(ls.ms ?? 0)} мс усього`;
+}
+
 export function debugText(g, perf, meshCount, cam, R, lod) {
   const { world, rec, me } = g, L = world.laws(g.d, g.n);
   const tx = Math.floor(me.x), ty = Math.floor(me.y), c = world.column(g.d, g.n, tx, ty);
@@ -136,6 +143,7 @@ export function debugText(g, perf, meshCount, cam, R, lod) {
     `кадр       ${perf.fps.toFixed(0)} к/с · ${f1(perf.frameMs)} мс (p99 ${f1(perf.p99)}) · CPU ${perf.upd.toFixed(2).replace('.', ',')} + ${perf.drw.toFixed(2).replace('.', ',')} мс · GPU ${R && R.gpuMs !== null ? R.gpuMs.toFixed(2).replace('.', ',') + ' мс' : '—'}`,
     `рендер     викликів ${R ? R.stats.draws : 0} · трикутників ${R ? (R.stats.tris / 1e6).toFixed(2).replace('.', ',') : 0} млн${R && R.stats.shTris ? ` (тіні ${(R.stats.shTris / 1e6).toFixed(2).replace('.', ',')})` : ''} · завантажено ${R ? (R.stats.up / 1024).toFixed(0) : 0} КБ/кадр · у GPU ${R ? ((R.stats.gpuBytes + R.stats.arenaUsed) / 1048576).toFixed(0) : 0} з ${R ? ((R.stats.gpuBytes + R.stats.arenaBytes) / 1048576).toFixed(0) : 0} МБ · секцій ${meshCount}${lod && LOD_ON ? ` · LOD увімкнено (0/1/2: ${lod[0]}/${lod[1]}/${lod[2]})` : ''}${R && !R.cullOn ? ' · відсікання вимкнено' : ''}${R && R.stats.full ? ` · арена повна: ${R.stats.full}` : ''}${R && R.info ? ` · ${R.info.device} · тіні ${R.info.shadows === 'off' ? 'вимкнено' : R.info.shadows.toUpperCase()} · світел ${R.info.lights.dir} + ${R.info.lights.local}` : ''}`,
     `закрите    ${!g.occ || !g.occ.enabled ? 'відсікання вимкнено' : !g.occ.stats.on ? `не відсікається (${g.occ.stats.why})` : `заслони з ${g.occ.stats.secs} секцій (${g.occ.stats.polys} прямокутників, на екрані ${g.occ.stats.drawn}; ${g.occ.stats.ms.toFixed(2).replace('.', ',')} мс) · поза кадром і закрито ${g.occ.stats.culled} з ${g.occ.stats.boxes} коробок`}`,
+    `світло     ${lightLine(g)}`,
     `генерація  воркерів ${st.workers} · ${st.colsPerSec} стовпців/с · ${st.genMs.toFixed(2).replace('.', ',')} мс/робота · стовпців ${st.cols}, секцій ${st.secs}, у черзі ${st.pending}${st.failed ? ` · робіт з винятком ${st.failed} (консоль)` : ''} · стрімінг ${(g.streamMs || 0).toFixed(1).replace('.', ',')} мс`,
   ].join('\n');
 }

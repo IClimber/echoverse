@@ -155,3 +155,42 @@ console.log(`дальність 32 (14 / 42 / 44 % стовпців — повн
   }
   console.log(`рух п. 3: крок гравця, мкс — ${out.join(', ')}; ціль (aimRay) ${(t / n * 1000).toFixed(1)} мкс (влучань ${(hit / 40).toFixed(0)} %)`);
 }
+
+// Світло неба (13.10.2026): локальна заливка вікна в роботі секції, глобальне поле в головному потоці (прихід секції й
+// поширення), перебудова меша (робота relit). Місце зі скарги «1qgt24p» / −4047 і зерно заміру
+{
+  const { SKYLIGHT } = await import('../js/gen/mesh.js');
+  const { createLightField } = await import('../js/engine/world/skylight.js');
+  const { shelterTop } = await import('../js/gen/chunk.js');
+  const { ck, sk } = await import('../js/world.js');
+  for (const [name, sd, n, X, Y] of [['«1qgt24p» −4047 (навіс)', hashStr('1qgt24p'), -4047, 36, 24], [`«${process.argv[2] || 'test'}» 37`, seed, 37, 0, 0]]) {
+    const L = lawsOf(sd, 0, n), cache = new Map(), secs = new Map(), cols = new Map(), recs = [];
+    let tw = 0, nw = 0, nt = 0, tr = 0, nr = 0;
+    for (let cy = Y - 3; cy <= Y + 3; cy++) for (let cx = X - 3; cx <= X + 3; cx++) {
+      const C = runJob(L, { type: 'col', d: 0, n, cx, cy }, cache).data;
+      cols.set(ck(cx, cy), C);
+      const col = genCol(L, cx, cy), top = shelterTop(col, L);
+      for (let cz = C.czLo; cz <= C.czHi; cz++) {
+        const sec = genSection(L, col, cz);
+        if (sec.empty) { recs.push({ ...sec, cx, cy, cz }); continue; }
+        const t = performance.now(), w = SKYLIGHT.windowLight(sec.b, top, sec.k0);
+        tw += performance.now() - t; nw++;
+        if (w.lw) {
+          nt++;
+          const t1 = performance.now();
+          runJob(L, { type: 'relit', d: 0, n, cx, cy, cz, b: sec.b, sl: w.lw }, cache);
+          tr += performance.now() - t1; nr++;
+        }
+        recs.push({ b: sec.b, k0: sec.k0, cx, cy, cz, lw: w.lw, lu: w.under });
+      }
+    }
+    const F = createLightField(SKYLIGHT, { sec: (cx, cy, cz) => secs.get(sk(cx, cy, cz)) || null, col: (cx, cy) => cols.get(ck(cx, cy)) || null });
+    const t = performance.now();
+    for (const R of recs) { secs.set(sk(R.cx, R.cy, R.cz), R); F.addSection(R); }
+    while (!F.idle) F.step(1000);
+    let win = 0;
+    F.flush(1e9, () => win++, () => {});
+    const tf = performance.now() - t;
+    console.log(`світло ${name}: вікно в роботі секції ${(tw / nw).toFixed(3)} мс (нетривіальних ${(nt / nw * 100).toFixed(0)} % з ${nw}); перебудова (relit) ${(tr / Math.max(1, nr)).toFixed(2)} мс; поле в головному потоці ${(tf / recs.length).toFixed(3)} мс на секцію (${recs.length} секцій, перебудов ${win})`);
+  }
+}

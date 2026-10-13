@@ -772,14 +772,14 @@ test('під рідиною: око нижче поверхні стовпця �
   assert.ok(Math.abs(vis[0] - 15.56) < 0.01 && Math.abs(vis[1] - 8.78) < 0.01 && Math.abs(vis[2] - 32.73) < 0.01 && vis[3] === 0.8, `${vis}`);
 });
 
-test('відкритість неба фігури й тіл: як AO неба вершин землі (skyK), білінійно між клітинками; немає даних — відкрито', async () => {
-  const { skyOpenAt } = await import('../js/world.js');
-  const { skyK } = await import('../js/gen/mesh.js');
+test('відкритість неба над точкою (опади, мокра стіна): skyK верху укриття, білінійно між клітинками; немає даних — відкрито', async () => {
+  const { skyOpenAt, skyK } = await import('../js/world.js');
+  const { LEVEL } = await import('../js/universe.js');
   // клітинки x < 0 — під стелею на висоті 10 (печера), x ≥ 0 — відкрито (верх укриття — земля на 0)
   const top = (x) => x < 0 ? 10 : 0;
   assert.equal(skyOpenAt(top, 5.5, 0.5, 0.5), 1);
   assert.equal(skyOpenAt(top, -5.5, 0.5, 0.5), 0);
-  // та сама величина, що й у вершини землі на тій самій висоті під укриттям
+  // 5 блоків під укриттям — skyK(5)
   const mid = (x) => x < 0 ? 0.5 + 5 * LEVEL : 0;
   assert.ok(Math.abs(skyOpenAt(mid, -5.5, 0.5, 0.5) - skyK(5)) < 1e-12);
   // на межі — посередині, без стрибка; уздовж кроку — монотонно

@@ -36,6 +36,7 @@ const CAM_KEY = 'echoverse-camera';         // вибраний вигляд (н
 const VIEW_KEY = 'echoverse-view';          // дальність, чанків (на браузер)
 const PHYS_DT = 1 / 120, AI_DT = 1 / 30;      // такти: фізика (гравець, тіла); світ, моби й NPC
 const AI_BUDGET = 2;                          // мс на такт світу: що не встигло — на наступному
+const LIGHT_MS = 1;                           // мс на такт світу для світла неба (поширення між секціями, перебудови)
 
 const QS = new URLSearchParams(location.search);
 if (QS.has('strip')) import('./strip.js').then((m) => m.runStrip());
@@ -113,6 +114,9 @@ function boot(renderer) {
     },
     // Відсікання закритого: увімкнути / вимкнути (заміри й знімки «з / без»; тримається й після нового світу)
     occ(on, opts) { occOff = !on; if (g) { g.occ.enabled = !!on; if (opts) g.occ.set(opts); } return !occOff; },
+    // світло неба блоку в точці (0…30; −1 — невідомо, −2 — опакове) і стан поля світла поточного всесвіту
+    lightAt(x, y, z) { return g.world.lightAt(g.d, g.n, Math.floor(x), Math.floor(y), Math.floor(z / LEVEL)); },
+    light() { return g.world.lightStats(g.d, g.n); },
     // Годинник на фазу доби ph (0 — північ, 0,5 — полудень) поточного всесвіту; вічний день — ні (false)
     setPhase(ph) { const c = clockFor(ph); if (c === null) return false; g.clock = c; return true; },
     // Фаза 0…0,99 з найбільшою кількістю напрямлених світел (за рівності — найсильніших), ставить її
@@ -490,6 +494,9 @@ function boot(renderer) {
     if (occOff) g.occ.enabled = false;
     // сутності: зона симуляції 5×5 чанків навколо гравця (поточний всесвіт; інші сплять і дорахуються при поверненні)
     g.ai.push((dt, G) => G.world.ents(G.d, G.n).update(Math.floor(G.me.x / CS), Math.floor(G.me.y / CS), G.clock * 1000));
+    // світло неба: поширення між секціями й перебудова мешів, чиє світло зросло (js/world.js lightTick)
+    const lightHooks = { hasSection: (d, n, k) => renderer.hasSection(d, n, k), hasFlora: (d, n, k) => renderer.hasFlora(d, n, k), get target() { return g && g.cam; } };
+    g.ai.push((dt, G) => G.world.lightTick(LIGHT_MS, lightHooks));
     g.world.setCurrent(g.d, g.n);
     g.world.setKeep(keepFor(VIEW_R));
     if (rec.stand) {
@@ -931,10 +938,10 @@ function boot(renderer) {
     const lines = g.showColl && me.placed ? collLines(me) : null;
     const fx = me.ix ?? me.x, fy = me.iy ?? me.y, fz = me.iv ?? me.vis ?? me.z;
     const sk = renderer.draw({
-      lines, under: g.under ? L.liquid : null, skyOpen: (x, y, z) => g.world.skyOpen(g.d, g.n, x, y, z),
+      lines, under: g.under ? L.liquid : null, skyLight: (x, y, z) => g.world.skyLight(g.d, g.n, x, y, z),
       camera, target: g.cam, view: g.view, laws: L, far: g.far, occ: g.occ, charge: g.dev.charge ? g.dev.charge.to : null, clock: g.clock, bodies, aim: g.aimFx === false ? null : g.aim, weather: { W: loc.W, loc }, bolt: g.bolt, rain: me.placed && loc.type ? rainMap(now) : null,
       // вигляд гравця: положення — інтерпольоване, стан — усе, що читають руки першої особи (VIEW_KEYS у anim.js)
-      me: me.placed ? { ...Object.fromEntries(VIEW_KEYS.map((k) => [k, me[k]])), x: fx, y: fy, z: fz, anim, ao: g.world.skyOpen(g.d, g.n, fx, fy, fz + 0.5) } : null,
+      me: me.placed ? { ...Object.fromEntries(VIEW_KEYS.map((k) => [k, me[k]])), x: fx, y: fy, z: fz, anim, ao: g.world.skyLight(g.d, g.n, fx, fy, fz + 0.5) } : null,
     });
     setText('addr', g.rec.stand ? `Стенд руху · g ${gStr(L)} · тертя ${String(+L.phys.friction.toFixed(2)).replace('.', ',')}${wOver === 'rain' ? ' · дощ' : ''}`
       : `Глибина ${g.d} · всесвіт ${fmtN(g.n)} · ${clockStr(sk.phase)}${L.sky.lock ? ' (вічно)' : ''}`);

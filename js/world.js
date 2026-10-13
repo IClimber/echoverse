@@ -7,19 +7,20 @@ import { lawsOf, physOf, KMIN, KMAX, LEVEL } from './universe.js';
 import { CS, ci, bv, solidB, blocks, genColumn, B_AIR, B_STONE, O_FLOAT, O_TREE, SEC } from './gen/chunk.js';
 import { createGen } from './gen/client.js';
 import { standableB, GRAVITY, PLAYER_MASS, PLAYER_AREA } from './player.js';
-import { floatPose, skyK } from './gen/mesh.js';
+import { floatPose, SKYLIGHT, SKY_MAX, skyBright } from './gen/mesh.js';
 import { footprint } from './gen/plants.js';
 import { makeBody, configureBodies, settle } from './engine/physics/bodies.js';
 import { createEntities } from './engine/world/entities.js';
+import { createLightField } from './engine/world/skylight.js';
 import { revEq } from './worldphys.js';
 
 // тіла рушія — зі сталими гри (блок, тверде, тяжіння, еталон маси й площі — гравець)
 configureBodies({ level: LEVEL, solid: solidB, gravity: GRAVITY, refMass: PLAYER_MASS, refArea: PLAYER_AREA });
 
-// Відкритість неба в точці (x, y, z) — як AO неба вершин землі (skyK у gen/mesh.js: верх укриття ≤ 1 блок над точкою —
-// 1, ≥ 9 — 0), білінійно між центрами чотирьох клітинок (без стрибків при ході); topAt(x, y) — верх укриття клітинки
-// (одиниці; немає даних — null → 1). Для об'єктів без AO у вершинах (фігура, руки, тіла): розсіяне світло неба в печері
-// й під навісом гасне так само, як на землі поруч
+// Відкритість неба над точкою (x, y, z) для опадів (мокра стіна): верх укриття ≤ 1 блок над точкою — 1, ≥ 9 — 0,
+// білінійно між центрами чотирьох клітинок; topAt(x, y) — верх укриття клітинки (одиниці; немає даних — null → 1).
+// Світло неба (розсіяне: фігура, тіла, вершини) — інше: skyLight (заливкою, engine/world/skylight.js)
+export const skyK = (d) => d <= 1 ? 1 : d >= 9 ? 0 : 1 - (d - 1) / 8;
 export function skyOpenAt(topAt, x, y, z) {
   const fx = x - 0.5, fy = y - 0.5, i = Math.floor(fx), j = Math.floor(fy), u = fx - i, v = fy - j;
   const k = (tx, ty) => { const t = topAt(tx, ty); return t === null ? 1 : skyK((t - z) / LEVEL); };
@@ -32,6 +33,8 @@ export const sk = (cx, cy, cz) => ck(cx, cy) * 1024 + (cz + 512);
 // Рядкові ключі робіт генератора й мешів рендера
 export const skey = (d, n, cx, cy, cz) => `${d}:${n}:${cx}:${cy}:${cz}`;
 // Скільки тримати в пам'яті (секція ~6 КБ) — від дальності (стрімінг: setKeep(keepFor(R)))
+// Світло неба між секціями (глобальне поле) — лише ближче LIGHT_R од. від цілі камери; далі — локальне світло воркера
+export const LIGHT_R = 96;
 export const keepFor = (R) => { const n = Math.ceil(Math.PI * (R / CS + 1) ** 2); return { cols: Math.max(1500, Math.ceil(n * 1.8)), secs: Math.max(5000, n * 6), fars: 1500 }; };
 
 // opts.stand — стенд руху ?move (gen/stand.js): усі роботи генератора — з полігону
@@ -53,10 +56,55 @@ export function createWorld(seed, onMesh, opts = {}) {
   let keep = keepFor(256);
   let genMs = 0, genN = 0, objR = 0.5, nCols = 0, nSecs = 0, cur = null, lastU = null;   // objR — найбільша півширина перешкоди серед завантажених
   const colTimes = [];                       // мітки часу готових стовпців за останню секунду (F3: стовпців/с)
+  // Світло неба: перебудови мешів секцій і рослин (ключі робіт у черзі — стрімінг їх не прибирає), запис секції — rid,
+  // версія її вікна світла — lv; hooks — від гри (lightTick): чи тримає рендер секцію / рослини, ціль камери
+  const relit = new Set();
+  let rid = 0, nRelit = 0, nFloraLit = 0, hooks = null;
+  function wantRelit(U, T) {
+    const key = `r${U.d}:${U.n}:${T.cx}:${T.cy}:${T.cz}`, t = hooks && hooks.target;
+    const pri = 300 + (t ? Math.hypot(T.cx * CS + 8 - t[0], T.cy * CS + 8 - t[1]) : 0);
+    gen.want(key, Q({ type: 'relit', d: U.d, n: U.n, cx: T.cx, cy: T.cy, cz: T.cz, b: T.b, sl: T.lw, rid: T.rid, lv: T.lv }), pri);
+    relit.add(key);
+  }
+  // Світло неба основ предметів стовпця C (рослини зблизька): Uint8Array за номером предмета чи null — усі під небом;
+  // невідоме — як небо
+  function objLight(U, C) {
+    let ol = null;
+    for (let i = 0; i < C.obj.length; i++) {
+      const o = C.obj[i];
+      if (o.k === O_FLOAT) continue;
+      const X = C.cx * CS + o.x, Y = C.cy * CS + o.y;
+      let v = U.light.get(X, Y, o.z);
+      if (v === -2) v = U.light.get(X, Y, o.z + 1);
+      if (v < 0 || v >= SKY_MAX) continue;
+      if (!ol) ol = new Uint8Array(C.obj.length).fill(SKY_MAX);
+      ol[i] = v;
+    }
+    return ol;
+  }
+  const sameOl = (a, b) => {
+    if (a === b) return true;
+    const n = (a || b).length;
+    for (let i = 0; i < n; i++) if ((a ? a[i] : SKY_MAX) !== (b ? b[i] : SKY_MAX)) return false;
+    return true;
+  };
+  // Рослини стовпця C — з тим світлом основ, що є зараз (C.fol — з яким замовлено; undefined — ще не замовляли)
+  function wantFloraLit(U, C, pri) {
+    const key = `p${U.d}:${U.n}:${C.cx}:${C.cy}`, ol = objLight(U, C);
+    C.fol = ol || null;
+    gen.want(key, Q({ type: 'flora', d: U.d, n: U.n, cx: C.cx, cy: C.cy, ol }), pri);
+    return key;
+  }
   const uni = (d, n, make) => {
     if (lastU && lastU.d === d && lastU.n === n) return lastU;
     let U = unis.get(`${d}:${n}`);
-    if (!U && make) { U = { d, n, cols: new Map(), secs: new Map(), at: 0 }; unis.set(`${d}:${n}`, U); }
+    if (!U && make) {
+      U = { d, n, cols: new Map(), secs: new Map(), at: 0, lpend: new Set() };
+      // світло неба всесвіту (engine/world/skylight.js): секції — записи U.secs, уже прийняті полем (lf; решта для поля —
+      // незавантажені), небо незавантаженого — зі зведень стовпців. lpend — прийшли, але ще не в полі (далі LIGHT_R)
+      U.light = createLightField(SKYLIGHT, { sec: (cx, cy, cz) => { const T = U.secs.get(sk(cx, cy, cz)); return T && T.lf ? T : null; }, col: (cx, cy) => U.cols.get(ck(cx, cy)) || null });
+      unis.set(`${d}:${n}`, U);
+    }
     if (U) lastU = U;
     return U;
   };
@@ -81,6 +129,7 @@ export function createWorld(seed, onMesh, opts = {}) {
         if (total <= keep * 0.9) break;
         o.dead = true; map.delete(k); total--;
         if (kind === 'cols') entsOf(U.d, U.n).unload(k);       // змінені тіла стовпця — у сховище сесії
+        else if (o.lf) U.light.removeSection(o); else U.lpend.delete(o);
       }
       if (!U.cols.size && !U.secs.size && U !== cur) { unis.delete(`${U.d}:${U.n}`); if (lastU === U) lastU = null; }
       if (total <= keep * 0.9) break;
@@ -120,6 +169,13 @@ export function createWorld(seed, onMesh, opts = {}) {
     if (was) { was.dead = true; U.cols.delete(key); } else nCols++;
     c.used = ++stamp;
     U.cols.set(key, c);
+    // небо стовпця — сусіднім секціям за гранню (секції від найнижчого верху укриття до верху сусіда)
+    let minTop = Infinity;
+    for (let i = 0; i < c.top.length; i++) if (c.top[i] < minTop) minTop = c.top[i];
+    U.light.addColumn(c.cx, c.cy, (nx, ny) => {
+      const N = U.cols.get(ck(nx, ny));
+      return N ? [Math.floor(minTop / SEC), Math.max(N.czHi, c.czHi, ...N.isl) + 1] : null;
+    });
     for (const b of bodies) { b.x0 = b.x; b.y0 = b.y; b.z0 = b.z; }
     entsOf(c.d, c.n).load(key, c.cx, c.cy, bodies);
     nCols = trim('cols', nCols, keep.cols);
@@ -132,13 +188,24 @@ export function createWorld(seed, onMesh, opts = {}) {
       if (fars.size > keep.fars) for (const k of fars.keys()) { if (fars.size <= keep.fars * 0.9) break; fars.delete(k); }
       return;
     }
-    if (q.type === 'flora') { onMesh('flora', q.d, q.n, ck(q.cx, q.cy), q, data, mesh); return; }
+    if (q.type === 'flora') { relit.delete(key); onMesh('flora', q.d, q.n, ck(q.cx, q.cy), q, data, mesh); return; }
+    if (q.type === 'relit') {                  // меш секції зі світлом неба: та сама секція (rid) — замінити
+      relit.delete(key);
+      const U = uni(q.d, q.n), k = sk(q.cx, q.cy, q.cz), T = U && U.secs.get(k);
+      if (!T || T.rid !== q.rid) return;
+      nRelit++;
+      onMesh('sec', q.d, q.n, k, q, T, mesh);
+      if (T.lv !== q.lv) wantRelit(U, T);      // поки будувався, вікно зросло ще
+      return;
+    }
     if (q.type === 'obj') { onMesh('obj', q.d, q.n, key, q, null, mesh); return; }
     if (q.type === 'lod') { onMesh('sec', q.d, q.n, sk(q.cx, q.cy, q.cz), q, null, mesh); return; }
     const U = uni(q.d, q.n, true), k = sk(q.cx, q.cy, q.cz), was = U.secs.get(k);
-    if (was) { was.dead = true; U.secs.delete(k); } else nSecs++;
+    if (was) { was.dead = true; U.secs.delete(k); if (was.lf) U.light.removeSection(was); else U.lpend.delete(was); } else nSecs++;
     data.used = ++stamp;
+    data.cx = q.cx; data.cy = q.cy; data.cz = q.cz; data.rid = ++rid; data.lv = 0;
     U.secs.set(k, data);
+    U.lpend.add(data);                         // у поле світла — у такті світу, ближчі до камери (lightTick)
     W.ver++;
     onMesh('sec', q.d, q.n, k, q, data, mesh);
     nSecs = trim('secs', nSecs, keep.secs);
@@ -247,8 +314,68 @@ export function createWorld(seed, onMesh, opts = {}) {
     // Плитка далечі (крок s): запит (готова — far(key): zmin, zmax; меш — у рендері), ключ
     wantFar(d, n, tx, ty, s, pri) { const key = `f${d}:${n}:${tx}:${ty}:${s}`; gen.want(key, Q({ type: 'far', d, n, tx, ty, s }), pri); return key; },
     far: (key) => { const F = fars.get(key); if (F) { fars.delete(key); fars.set(key, F); } return F; },
-    // Рослини зблизька стовпця (меш — у рендері)
-    wantFlora(d, n, cx, cy, pri) { const key = `p${d}:${n}:${cx}:${cy}`; gen.want(key, Q({ type: 'flora', d, n, cx, cy }), pri); return key; },
+    // Рослини зблизька стовпця (меш — у рендері); світло неба основ — з глобального
+    wantFlora(d, n, cx, cy, pri) {
+      const U = uni(d, n), C = U && U.cols.get(ck(cx, cy));
+      if (C) return wantFloraLit(U, C, pri);
+      const key = `p${d}:${n}:${cx}:${cy}`;
+      gen.want(key, Q({ type: 'flora', d, n, cx, cy }), pri);
+      return key;
+    },
+    // Світло неба (такт світу): поширення між секціями, потім перебудова секцій і рослин, чиє світло зросло. ms — бюджет;
+    // h = {hasSection(d, n, k), hasFlora(d, n, k) — чи тримає рендер, target — ціль камери (пріоритет)}
+    lightTick(ms, h) {
+      hooks = h;
+      const t0 = performance.now(), order = [...unis.values()], t = h.target;
+      if (cur) { order.splice(order.indexOf(cur), 1); order.unshift(cur); }
+      for (const U of order) {
+        if (performance.now() - t0 > ms) break;
+        // прийняти в поле секції ближче LIGHT_R від цілі камери (далі — світло воркера: різниця лише біля меж секцій)
+        let i = 0;
+        for (const T of U.lpend) {
+          if (T.dead) { U.lpend.delete(T); continue; }
+          if (t && Math.hypot(T.cx * CS + 8 - t[0], T.cy * CS + 8 - t[1]) > LIGHT_R) continue;
+          U.lpend.delete(T);
+          T.lf = true;
+          U.light.addSection(T);
+          if ((++i & 7) === 0 && performance.now() - t0 > ms) break;
+        }
+        const left = ms - (performance.now() - t0);
+        if (left <= 0) break;
+        U.light.step(left);
+        if (!U.light.idle) break;
+        U.light.flush(Math.max(0.1, ms - (performance.now() - t0)),
+          (T) => { T.lv++; if (h.hasSection(U.d, U.n, sk(T.cx, T.cy, T.cz))) wantRelit(U, T); },
+          (T) => {
+            const C = U.cols.get(ck(T.cx, T.cy));
+            if (!C || C.fol === undefined || !h.hasFlora(U.d, U.n, ck(C.cx, C.cy))) return;
+            if (!sameOl(objLight(U, C), C.fol)) { nFloraLit++; relit.add(wantFloraLit(U, C, 300)); }
+          });
+      }
+    },
+    // Ключі перебудов у черзі генератора (стрімінг лишає їх при keepOnly)
+    lightKeys(keys) { for (const k of relit) keys.add(k); },
+    // Світло неба блоку (x, y, k): 0…30, −1 — невідомо, −2 — опакове
+    lightAt(d, n, x, y, k) { const U = uni(d, n); return U ? U.light.get(x, y, k) : -1; },
+    // Яскравість розсіяного світла неба в точці (x, y, z) для об'єктів без AO у вершинах (фігура, руки, тіла) — як вершини
+    // землі поруч: світло блоків трилінійно між центрами (опакові не враховуються, невідоме — небо), та сама крива
+    skyLight(d, n, x, y, z) {
+      const U = uni(d, n);
+      if (!U) return 1;
+      const fx = x - 0.5, fy = y - 0.5, fz = z / LEVEL - 0.5, X = Math.floor(fx), Y = Math.floor(fy), K = Math.floor(fz);
+      const u = fx - X, v = fy - Y, w = fz - K;
+      let s = 0, ws = 0;
+      for (let c = 0; c < 8; c++) {
+        const ax = c & 1, ay = c >> 1 & 1, az = c >> 2, wt = (ax ? u : 1 - u) * (ay ? v : 1 - v) * (az ? w : 1 - w);
+        if (wt <= 0) continue;
+        let l = U.light.get(X + ax, Y + ay, K + az);
+        if (l === -2) continue;
+        if (l < 0) l = SKY_MAX;
+        s += l * wt; ws += wt;
+      }
+      return ws > 0 ? skyBright(s / ws) : 1;
+    },
+    lightStats(d, n) { const U = uni(d, n); return { ...(U ? U.light.stats() : {}), pending: U ? U.lpend.size : 0, relit: relit.size, relitDone: nRelit, floraLit: nFloraLit }; },
     // Груба секція рівня lod (1, 2) — лише меш для рендера
     wantLod(d, n, cx, cy, cz, lod, pri) { const key = `l${lod}:${d}:${n}:${cx}:${cy}:${cz}`; gen.want(key, Q({ type: 'lod', lod, d, n, cx, cy, cz }), pri); return key; },
     wantSec(d, n, cx, cy, cz, pri) { const key = skey(d, n, cx, cy, cz); gen.want(key, Q({ type: 'sec', d, n, cx, cy, cz }), pri); return key; },

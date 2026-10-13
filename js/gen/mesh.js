@@ -2,12 +2,13 @@
 // позиції (float32 ×3), нормалі (int8 ×3), кольори (uint8 ×3), матеріали (uint8 — шар текстури), індекси.
 // Світло, туман і текстуру (за матеріалом, координати — проєкцією на площину грані) додає шейдер.
 // Земля — з блоків: грань лише між твердим і порожнім.
-import { CS, FR, ci, SEC, H, O_TREE, O_FLOAT, O_COVER, solidB, B_AIR, B_LIQ, B_ICE, B_SAND, B_GRASS, B_DRY, B_DESERT, B_SNOW, B_ROCK, B_BED, B_MUD, B_SOIL, B_STONE, B_SANDSTONE, B_MAGMA, B_FLOAT, B_LADDER, B_VINE } from './chunk.js';
+import { CS, FR, SEC, H, O_TREE, O_FLOAT, O_COVER, solidB, B_AIR, B_LIQ, B_ICE, B_SAND, B_GRASS, B_DRY, B_DESERT, B_SNOW, B_ROCK, B_BED, B_MUD, B_SOIL, B_STONE, B_SANDSTONE, B_MAGMA, B_FLOAT, B_LADDER, B_VINE } from './chunk.js';
 import { L_LAVA, SEA, gravityAt, LEVEL } from '../universe.js';
 import { template, place, footprint, extent } from './plants.js';
 import { groundTint } from './flora.js';
 import { M_FLAT, M_ROCK, M_CLIFF, M_WATER, M_LAVA, M_ICE, M_SAND, M_LUSH, M_DRY, M_DESERT, M_SNOW, M_BED, M_MUD, M_SOIL, M_SANDSIDE, M_LIP, M_BARK, M_LEAF, THIN_N } from './materials.js';
 import { hash3 } from '../rng.js';
+import { createSkyLight } from '../engine/world/skylight.js';
 
 export const shade = (c, k) => [Math.min(255, c[0] * k | 0), Math.min(255, c[1] * k | 0), Math.min(255, c[2] * k | 0)];
 const mixc = (a, b, k) => [a[0] + (b[0] - a[0]) * k | 0, a[1] + (b[1] - a[1]) * k | 0, a[2] + (b[2] - a[2]) * k | 0];
@@ -96,12 +97,19 @@ export class Mesh {
 // рослини й каміння зблизька (flora: повна будова, трава й квіти) і здалеку (far: спрощені великі рослини й каміння).
 // Трава, степ і пустеля — відтінку біому клітинки (межі біомів — усереднення по сусідах 3×3)
 const DIRS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
-// AO вершини: кут (твердих блоків у кубі 2×2×2 навколо вершини) і відкритість неба (верх укриття вище вершини на d блоків)
+// AO вершини: кут (твердих блоків у кубі 2×2×2 навколо вершини, 0fps) × яскравість світла неба вершини
 // тверде (solidB) таблицею — у гарячих циклах: драбина й ліана не тверді, їх меш — окремо (climbMesh)
 const SOL = new Uint8Array(256);
 for (let b = 0; b < 256; b++) SOL[b] = solidB(b) ? 1 : 0;
 const AOB = [255, 255, 255, 255, 255, 227, 199, 168, 140];
-export const skyK = (d) => d <= 1 ? 1 : d >= 9 ? 0 : 1 - (d - 1) / 8;
+// Світло неба (як у Minecraft; engine/world/skylight.js): 0…30 пів-рівнів (рівень — s/2, 0…15); небо — неопакове вище
+// верху укриття клітинки (shelterTop), решта — заливкою: убік −2 (1 м), угору й униз −1 (блок 0,5 м) — однаково −1
+// рівень на метр. Опакове — тверде (те саме, що меш і зіткнення); рідина, драбини й ліани пропускають
+export const SKY_MAX = 30;
+export const SKYLIGHT = createSkyLight({ size: SEC, frame: FR, max: SKY_MAX, costH: 2, costV: 1, opaque: SOL });
+// Яскравість розсіяного від світла неба s — крива Minecraft «Похмуро» (рішення користувача 13.10.2026): f/(4 − 3f),
+// f = s/30: 1 м від неба — 78 %, 3 м — 50 %, 5 м — 33 %, 8 м — 18 %, 12 м — 6 %; 0 — темно (мінімум 3 % дає шейдер)
+export const skyBright = (s) => { const f = s / SKY_MAX; return f / (4 - 3 * f); };
 
 const CLIMB_N = [[-1, 0], [1, 0], [0, -1], [0, 1]], LADDER_COL = [120, 84, 52];
 // Драбина чи ліана: (wx, wy) — середина грані стіни внизу блоку (z0), (nx, ny) — нормаль від стіни. Точка (d — від стіни,
@@ -194,9 +202,14 @@ export function chunkMesh(C, L, { near = true, far = true } = {}) {
   const vsI = (x, y, k) => x < -1 || y < -1 || k < -1 || x > N + 1 || y > N + 1 || k > NK + 1 ? -1 : ((k + 1) * VSX + y + 1) * VSX + x + 1;
   const markV = (x, y, k) => { if (x === Math.round(x) && y === Math.round(y) && k === Math.round(k)) { const i = vsI(x, y, k); if (i >= 0) VS[i] = 1; } };
   // AO вершини (0fps, «Ambient occlusion for Minecraft-like worlds»): кут — за кількістю твердих блоків куба 2×2×2 навколо
-  // вершини (до 4 — відкрито, далі — увігнутий кут темніший); небо — наскільки верх укриття клітинки (C.top, блоки) вище
-  // вершини: ≤ 1 блок — відкрито, ≥ 9 — темно (печера, під навісом); середнє чотирьох клітинок навколо вершини
+  // вершини (до 4 — відкрито, далі — увігнутий кут темніший) × яскравість світла неба: середнє світла неопакових блоків
+  // куба (Minecraft «Smooth lighting»). Світло вікна (як B) — C.sl від головного потоку (глобальне; null — усе небо), без
+  // нього — локальне з блоків і верху укриття (C.top); груба ґратка — без укриття
   const TOP = ST === 1 ? C.top : null;
+  const LT = ST !== 1 ? null : C.sl !== undefined ? C.sl : TOP ? SKYLIGHT.windowLight(B, TOP, K0, NK).lw : null;
+  const lightAt = (o) => LT ? skyBright(LT[o]) : 1;
+  // світло блоку o (індекс B), що стоїть у неопаковому: опакове — блок вище
+  const lightUp = (o) => LT ? skyBright(SOL[B[o]] ? LT[o + 1] : LT[o]) : 1;
   const EDGES = [[0, 1], [2, 3], [4, 5], [6, 7], [0, 2], [1, 3], [4, 6], [5, 7], [0, 4], [1, 5], [2, 6], [3, 7]];
   const cornerSolid = new Uint8Array(8), EA = EDGES.map((e) => e[0]), EB = EDGES.map((e) => e[1]);
   // середина ребра (від нижнього кута куба) і зсув кута в масиві блоків
@@ -261,9 +274,10 @@ export function chunkMesh(C, L, { near = true, far = true } = {}) {
     let ns = 0;
     for (let c = 0; c < 8; c++) ns += cornerSolid[c];
     let sky = 1;
-    if (TOP) {
-      const zb = K0 + VC[o + 2] / LEVEL;
-      sky = (skyK(TOP[cix(x, y)] - zb) + skyK(TOP[cix(x + 1, y)] - zb) + skyK(TOP[cix(x, y + 1)] - zb) + skyK(TOP[cix(x + 1, y + 1)] - zb)) / 4;
+    if (LT) {
+      let sl = 0, nl = 0;
+      for (let c = 0; c < 8; c++) if (!cornerSolid[c]) { sl += LT[o0 + CO[c]]; nl++; }
+      sky = skyBright(sl / nl);
     }
     VA[o / 3] = Math.round(AOB[ns] * sky);
     return o;
@@ -477,7 +491,7 @@ export function chunkMesh(C, L, { near = true, far = true } = {}) {
     let nx = 0, ny = 0;
     for (const [dx, dy] of CLIMB_N) if (SOL[B[bi(x + dx, y + dy, k)]]) { nx = -dx; ny = -dy; break; }
     if (!nx && !ny) continue;
-    const ao = TOP ? Math.round(255 * skyK(TOP[cix(x, y)] - (K0 + k + 0.5))) : 255;
+    const ao = Math.round(255 * lightAt(bi(x, y, k)));
     climbMesh(M, b, x + 0.5 - nx * 0.5, y + 0.5 - ny * 0.5, k * LEVEL, nx, ny, b === B_LADDER ? LADDER_COL : shade(P.lush, 0.8), ao);
   }
   // Поверхня рідини: верхній блок рідини під повітрям (трохи нижче за край блоку)
@@ -487,14 +501,15 @@ export function chunkMesh(C, L, { near = true, far = true } = {}) {
     if (!inL[k + 1]) break;
     if (B[bi(x, y, k)] !== B_LIQ) continue;
     const open = B[bi(x, y, k + 1)] === B_AIR, top = (k + 1) * LEVEL - (open ? 0.15 : 0), z0 = k * LEVEL;
-    const c = mixc(P.liquid, P.liquidDeep, Math.min(1, C.v[cix(x, y)] / 160)), la = TOP ? Math.round(255 * skyK(TOP[cix(x, y)] - (K0 + k + 1))) : 255;
+    // світло: верх — блоку над рідиною, бік — блоку повітря, куди дивиться
+    const c = mixc(P.liquid, P.liquidDeep, Math.min(1, C.v[cix(x, y)] / 160)), la = Math.round(255 * lightUp(bi(x, y, k + 1)));
     if (open) W.quad([x, y, top], [x + 1, y, top], [x + 1, y + 1, top], [x, y + 1, top], 0, 0, 1, c, LM, la);
     for (let d = 0; d < 4; d++) {
       const [dx, dy] = DIRS[d];
       if (B[bi(x + dx, y + dy, k)] !== B_AIR) continue;
-      const sc = shade(c, 0.85);
-      if (dx) { const X = dx > 0 ? x + 1 : x; W.quad([X, y, top], [X, y + 1, top], [X, y + 1, z0], [X, y, z0], dx, 0, 0, sc, LM, la); }
-      else { const Y = dy > 0 ? y + 1 : y; W.quad([x, Y, top], [x + 1, Y, top], [x + 1, Y, z0], [x, Y, z0], 0, dy, 0, sc, LM, la); }
+      const sc = shade(c, 0.85), ls = Math.round(255 * lightAt(bi(x + dx, y + dy, k)));
+      if (dx) { const X = dx > 0 ? x + 1 : x; W.quad([X, y, top], [X, y + 1, top], [X, y + 1, z0], [X, y, z0], dx, 0, 0, sc, LM, ls); }
+      else { const Y = dy > 0 ? y + 1 : y; W.quad([x, Y, top], [x + 1, Y, top], [x + 1, Y, z0], [x, Y, z0], 0, dy, 0, sc, LM, ls); }
     }
   }
   // Берег: площина води тягнеться й над твердими клітинками поруч (8 сусідів) з відкритою рідиною на тому самому рівні.
@@ -510,7 +525,7 @@ export function chunkMesh(C, L, { near = true, far = true } = {}) {
       if ((dx || dy) && B[bi(x + dx, y + dy, k)] === B_LIQ && B[bi(x + dx, y + dy, k + 1)] === B_AIR) { n = cix(x + dx, y + dy); break; }
     }
     if (n < 0) continue;
-    const top = (k + 1) * LEVEL - 0.15, c = mixc(P.liquid, P.liquidDeep, Math.min(1, C.v[n] / 160)), la = TOP ? Math.round(255 * skyK(TOP[cix(x, y)] - (K0 + k + 1))) : 255;
+    const top = (k + 1) * LEVEL - 0.15, c = mixc(P.liquid, P.liquidDeep, Math.min(1, C.v[n] / 160)), la = Math.round(255 * lightUp(bi(x, y, k + 1)));
     W.quad([x, y, top], [x + 1, y, top], [x + 1, y + 1, top], [x, y + 1, top], 0, 0, 1, c, LM, la);
   }
   else {
@@ -525,7 +540,8 @@ export function chunkMesh(C, L, { near = true, far = true } = {}) {
       x += w;
     }
   }
-  const { F, Ff } = objMeshes(C, L, K0, NK, near, far);
+  // рослини й каміння секції: світло блоку основи (опакова основа — блок вище)
+  const { F, Ff } = objMeshes(C, L, K0, NK, near, far, 0, false, LT ? (o) => lightUp(bi(o.x, o.y, o.z - K0)) : null);
   return { solid: M.finish(), liquid: W.n ? W.finish() : null, caps: Mc.n ? Mc.finish() : null, flora: F.n ? F.finish() : null, far: Ff.n ? Ff.finish() : null };
 }
 
@@ -545,19 +561,22 @@ function shadeProxy(M, T, x, y, z, s, thin) {
 
 // Рослини й каміння предметів з основою в K0…K0+NK−1: шаблон виду (варіант будови — від хешу) з поворотом, віком,
 // нахилом і розкидом кольору; висота — від K0. F — зблизька (повна будова, трава й квіти), Ff — здалеку (спрощені
-// великі рослини й каміння); near / far — що рахувати; shade — за покривом F ще тіні малих рослин (F.ncv — кінець покриву)
-function objMeshes(C, L, K0, NK, near, far, dz = 0, shade = false) {
+// великі рослини й каміння); near / far — що рахувати; shade — за покривом F ще тіні малих рослин (F.ncv — кінець покриву);
+// lightOf(o, i) — яскравість світла неба основи предмета i (немає — 1)
+function objMeshes(C, L, K0, NK, near, far, dz = 0, shade = false, lightOf = null) {
   const F = new Mesh(), Ff = new Mesh(), cover = [], sh = [];
   F.nb = 0; F.objs = [];
   // зблизька — спершу великі (дерева, каміння), за ними малі (покрив): F.nb — індексів великих, F.objs — по 8 чисел на
   // великий предмет: перший індекс, індексів, коробка x0, y0, z0, x1, y1, z1 (scene.js малює великі поза зонами
   // розчинення, «вікна» й переходу матеріалом без дизерингу)
-  for (let pass = 0; pass < 2; pass++) for (const o of pass ? cover : C.obj) {
-    if (!pass && o.k === O_COVER) { if (near) cover.push(o); continue; }
+  const OB = C.obj;
+  for (let pass = 0; pass < 2; pass++) for (let n = 0, nn = pass ? cover.length : OB.length; n < nn; n++) {
+    const i = pass ? cover[n] : n, o = OB[i];
+    if (!pass && o.k === O_COVER) { if (near) cover.push(i); continue; }
     if (o.z < K0 || o.z >= K0 + NK) continue;                 // предмет — у секції своєї основи
     const z = (o.z - K0) * LEVEL + dz, v = o.v, g = C.sp[o.s], q = objPose(C, L, o);
     if (o.k === O_FLOAT) continue;                            // ширяюче каміння — тіла (bodies.js), малюються окремо
-    const { cx, cy, rot, s, cj } = q, sk = C.top ? skyK(C.top[ci(o.x, o.y)] - o.z) : 1;   // AO неба над основою
+    const { cx, cy, rot, s, cj } = q, sk = lightOf ? lightOf(o, i) : 1;   // світло неба основи
     const v0 = F.n, i0 = F.ni;
     if (o.k === O_TREE) {
       const tl = ((v >> 2 & 7) / 7) * 0.1;
@@ -600,7 +619,8 @@ export function objMesh(C, L, o) {
 
 // Рослини й каміння зблизька всього стовпця (окрема робота: потрібні лише біля камери); висота — від блоку K0. Індекси:
 // [0, nb) — великі, [nb, ncv) — покрив, [ncv, ni) — тіні малих рослин для дальніх каскадів (у кадрі не малюються)
-export function floraMesh(C, L, K0) { return objMeshes(C, L, K0, 1e9, true, false, 0, true).F; }
+// ol — світло неба основ предметів (головний потік, глобальне; null — усі під небом)
+export function floraMesh(C, L, K0, ol = null) { return objMeshes(C, L, K0, 1e9, true, false, 0, true, ol ? (o, i) => skyBright(ol[i]) : null).F; }
 // Далекі рослини й каміння з основою в секції K0…K0+15 (груба секція: dz — опустити до грубої землі)
 export function farFlora(C, L, K0, dz = 0) { return objMeshes(C, L, K0, SEC, false, true, dz).Ff; }
 

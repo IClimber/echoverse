@@ -43,7 +43,7 @@ import { hashStr, rng } from '../js/rng.js';
 import { lawsOf, LEVEL } from '../js/universe.js';
 import { M_LEAF as M_LEAF_ } from '../js/gen/materials.js';
 import { genChunk, genCol, genSection, CS, SEC, FR } from '../js/gen/chunk.js';
-import { chunkMesh, objPose } from '../js/gen/mesh.js';
+import { chunkMesh, objPose, skyBright } from '../js/gen/mesh.js';
 import { colSummary } from '../js/gen/job.js';
 import { packMesh, unpack, meshHash, meshDigest, regionOf, frameOf, packStats, VB, RS, RW, RH } from '../js/gen/pack.js';
 import { createAlloc } from '../js/engine/graphics/arena.js';
@@ -463,10 +463,19 @@ test('AO: рівна відкрита поверхня — 255 і одним п�
   }
   assert.ok(foot.length && Math.min(...foot) < 255 && Math.min(...foot) >= 140, 'підніжжя стіни темніше');
   assert.ok(far.length && far.every((a) => a === 255), 'далі від стіни — відкрито');
-  const deep = chunkMesh(aoSection((x, y, k) => k < 4, 16), L).solid;
+  // світло неба (engine/world/skylight.js): дах над усім вікном — темно; дах над x < 8 — спад від краю, як заливка
+  const deep = chunkMesh(aoSection((x, y, k) => k < 4 || k >= 12, 18), L).solid;
   for (const v of upVerts(deep)) assert.equal(deep.ao[v], 0);
-  const mid = chunkMesh(aoSection((x, y, k) => k < 4, 9), L).solid;
-  for (const v of upVerts(mid)) assert.equal(mid.ao[v], 128);
+  const eave = chunkMesh(aoSection((x, y, k) => k < 4 || (x < 8 && k >= 8), (x) => x < 8 ? 18 : 4), L).solid;
+  const s = (c) => c >= 8 ? 30 : Math.max(0, 30 - 2 * (8 - c));
+  let n = 0;
+  for (const v of upVerts(eave)) {
+    const x = eave.pos[v * 3], z = eave.pos[v * 3 + 2];
+    if (Math.abs(z - 2) > 1e-6 || x !== Math.round(x) || x < 1 || x > 12) continue;
+    assert.equal(eave.ao[v], Math.round(255 * skyBright((s(x - 1) + s(x)) / 2)), `x ${x}`);
+    n++;
+  }
+  assert.ok(n > 20);
 });
 // T-стики: вершина однієї грані посеред ребра іншої дає щілини (шов уздовж межі чанків) — у секціях їх немає
 test('тверде без T-стиків: жодна вершина не лежить посеред осевого ребра (сусідні секції разом)', () => {
