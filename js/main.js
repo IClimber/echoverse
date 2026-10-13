@@ -55,6 +55,9 @@ function boot(renderer) {
   addEventListener('resize', () => renderer.resize());
   const raf = renderer.raf || ((f) => requestAnimationFrame(f));   // рушій PlayCanvas: кадр гри — з його такту
   initInput();
+  // профайлер GPU PlayCanvas (запити часу на кожен прохід) — лише коли його читають: F3 чи ?dev (manual
+  // optimization/gpu-profiling.md: «If no tool needs GPU timing anymore, set profiler.enabled = false»)
+  const profNeed = () => renderer.G.setProfiler(QS.has('dev') || showDebug);
 
   let g = null;                              // поточна гра
   let occOff = QS.get('occ') === '0';        // ?occ=0 — без відсікання закритого (порівняння)
@@ -88,6 +91,7 @@ function boot(renderer) {
   renderer.onOutOfMemory(onOom);
   $('view').addEventListener('input', () => store(VIEW_KEY, setView(+$('view').value)));
   let showDebug = false, showHelp = true, toastUntil = 0;
+  profNeed();
   const perf = { fps: 60, cpu: 0, upd: 0, drw: 0, frameMs: 0, p99: 0 };
   const frameT = new Float32Array(512);      // інтервали між кадрами (мс), кільце — для середнього й p99 у F3
   let frameI = 0, frameN = 0;
@@ -763,7 +767,7 @@ function boot(renderer) {
         if (menuOpen) hideMenu(); else { save(); showMenu(); }
       }
       else if (menuOpen || !g.me.placed) continue;
-      else if (a === 'debug') { showDebug = !showDebug; $('debug').hidden = !showDebug; }
+      else if (a === 'debug') { showDebug = !showDebug; $('debug').hidden = !showDebug; profNeed(); }
       else if (a === 'copyDebug') copyDebug();
       else if (a === 'help') { showHelp = !showHelp; $('help').hidden = !showHelp; }
       else if (a === 'jump') {

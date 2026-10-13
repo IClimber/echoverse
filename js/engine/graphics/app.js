@@ -18,7 +18,7 @@ export async function createApp(canvas, { device = 'webgl2', maxPixelRatio = 2, 
   const app = new pc.AppBase(canvas);
   app.init(ao);
   app.setCanvasFillMode(pc.FILLMODE_NONE); app.setCanvasResolution(pc.RESOLUTION_AUTO);
-  if (dev.gpuProfiler) dev.gpuProfiler.enabled = true;
+  // профайлер GPU (запити часу на кожен прохід) — вимкнено; вмикає той, кому потрібні заміри (setProfiler)
   const setProfiler = (on) => { if (dev.gpuProfiler) dev.gpuProfiler.enabled = !!on; return !!(dev.gpuProfiler && dev.gpuProfiler.enabled); };
   // мова шейдерів: матеріали отримують шматки лише цієї мови (як у прикладі shaders/trees)
   const lang = dev.isWebGPU ? pc.SHADERLANGUAGE_WGSL : pc.SHADERLANGUAGE_GLSL;
