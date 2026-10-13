@@ -29,16 +29,22 @@ const CASC_F = 2, CASC_T = 4, CASC_A = 0.05;
 // 15 кадрів каскади мали б різні напрями (зсув тіні на межі каскадів); поріг 0,1° — вище похибки float32 у матрицях
 const CASC_JUMP = Math.cos(0.1 * Math.PI / 180);
 
-// G — застосунок (app.js); shadows — 'pcf3' | 'pcss' | 'off' (без тіней)
-export function createLights(G, { shadows = 'pcf3' } = {}) {
+// G — застосунок (app.js); shadows — 'pcf3' | 'pcss' | 'off' (без тіней); perCell — найбільше локальних світел в одній
+// клітинці кластерної сітки (типово — як у PlayCanvas, 255): текстура сітки оновлюється щокадру, і clustered-lighting.md
+// радить тримати це число якомога меншим
+export function createLights(G, { shadows = 'pcf3', perCell = 255 } = {}) {
   const { pc, app, scene, layers } = G;
   const pcss = () => q === 'pcss' && G.info.pcss;
   let q = shadows;
   scene.clusteredLightingEnabled = true;
   const L = scene.lighting;
   L.shadowsEnabled = true; L.cookiesEnabled = false; L.areaLightsEnabled = false;
-  L.shadowAtlasResolution = 2048;
-  const LAY = [layers.world.id, layers.shadow.id, ...(layers.arms ? [layers.arms.id] : [])];
+  L.shadowAtlasResolution = 2048; L.maxLightsPerCell = perCell;
+  // Шари світел (app.js): напрямлені бачать усіх кидачів; локальні — без «Тіней дальніх» (світло поруч — повні рослини там
+  // є, спрощені дали б подвійну тінь); ліхтарик гравця (scene.js) — ще й без «Тіні гравця»
+  const opt = (l) => (l ? [l.id] : []);
+  const LAY = [layers.world.id, layers.shadow.id, ...opt(layers.shadowFar), ...opt(layers.player), ...opt(layers.arms)];
+  const LAY_LOCAL = [layers.world.id, layers.shadow.id, ...opt(layers.player), ...opt(layers.arms)];
 
   // Поворот світла: +Y — до джерела (напрямлене світить уздовж −Y сутності; код _updateSunLight скрипта ProceduralSky)
   const X = new pc.Vec3(), Z = new pc.Vec3(), M4 = new pc.Mat4(), Q = new pc.Quat();
@@ -110,14 +116,15 @@ export function createLights(G, { shadows = 'pcf3' } = {}) {
   // ---- точкові й прожектори (кластерні) ----
   const locals = new Set();
   const P = new pc.Vec3();
-  // { type: 'omni' | 'spot', pos, dir (spot, куди світить), color, intensity, range, inner, outer, castShadows, moving }
+  // { type: 'omni' | 'spot', pos, dir (spot, куди світить), color, intensity, range, inner, outer (кути від осі, як у
+  // PlayCanvas), castShadows, moving, bias, normalBias, layers (типово LAY_LOCAL) }. Згасання — типове PlayCanvas (лінійне)
   function addLight(o) {
     const e = new pc.Entity('джерело');
     e.addComponent('light', {
       type: o.type || 'omni', color: new pc.Color(...(o.color || [1, 1, 1])), intensity: o.intensity ?? 1, range: o.range ?? 8,
       innerConeAngle: o.inner ?? 30, outerConeAngle: o.outer ?? 45, castShadows: o.castShadows !== false,
-      shadowBias: 0.2, normalOffsetBias: 0.2,                       // приклад clustered-omni-shadows
-      shadowUpdateMode: o.moving ? pc.SHADOWUPDATE_REALTIME : pc.SHADOWUPDATE_THISFRAME, layers: o.layers || LAY,
+      shadowBias: o.bias ?? 0.2, normalOffsetBias: o.normalBias ?? 0.2,   // типово — приклад clustered-omni-shadows
+      shadowUpdateMode: o.moving ? pc.SHADOWUPDATE_REALTIME : pc.SHADOWUPDATE_THISFRAME, layers: o.layers || LAY_LOCAL,
     });
     app.root.addChild(e);
     const H = { e, pos: [...o.pos], dir: o.dir ? [...o.dir] : [0, 0, -1], range: o.range ?? 8, moving: !!o.moving };
@@ -134,6 +141,7 @@ export function createLights(G, { shadows = 'pcf3' } = {}) {
       if (p.intensity !== undefined) e.light.intensity = p.intensity;
       if (p.range !== undefined) { e.light.range = H.range = p.range; redo(); }
       if (p.moving !== undefined) { H.moving = !!p.moving; e.light.shadowUpdateMode = H.moving ? pc.SHADOWUPDATE_REALTIME : pc.SHADOWUPDATE_THISFRAME; }
+      if (p.castShadows !== undefined) e.light.castShadows = !!p.castShadows;   // сетер PlayCanvas: без зміни — нічого
       if (p.enabled !== undefined) e.enabled = !!p.enabled;
       place();
     };

@@ -21,9 +21,10 @@ import { debugText, fmtN } from './debug.js';
 import { animate, VIEW_KEYS } from './anim.js';
 import { clockStr, skyState, lightsOf, lightSlots, stormAt, setStormOverride } from './sky.js';
 import { weatherAt, localWeather, areaClimate, reliefAt, windHeightK, lightningNear } from './weather.js';
-import { createCamera, rotate, wheel, smooth, moveBasis, camHead, camCollide, camDist, facing, setYaw, basis, pitchOf, setViewChunks, setLod, setFloraNear, THIRD, FIRST, NEXT, LIMITS, EYE, EYE_OF, HEAD_OF, VIEW_R } from './camera.js';
+import { createCamera, rotate, wheel, smooth, moveBasis, camHead, camCollide, camDist, facing, setYaw, basis, pitchOf, setViewChunks, setLod, setFloraNear, THIRD, FIRST, NEXT, LIMITS, EYE, EYE_OF, HEAD_OF, VIEW_R, FIG_NEAR } from './camera.js';
 import { createStreamer, visibleMissing } from './stream.js';
 import { aimRay, REACH } from './aim.js';
+import { lampPose, segHit } from './lamp.js';
 import { canLift, weightOf, throwBody, holdBody, LIFT_W } from './carry.js';
 import { STAND_SPOTS, standBodies, standBlock } from './gen/stand.js';
 import { makeBody } from './engine/physics/bodies.js';
@@ -110,7 +111,7 @@ function boot(renderer) {
       const st = g ? g.world.stats() : {}, R = renderer.R;
       return { fps: perf.fps, frameMs: perf.frameMs, p99: perf.p99, frameMax: perf.max, upd: perf.upd, drw: perf.drw, gpuMs: R.gpuMs, draws: R.stats.draws, tris: R.stats.tris, full: R.stats.full, flTris: R.stats.flTris, flbTris: R.stats.flbTris,
         gpuMB: (R.stats.gpuBytes + R.stats.arenaBytes) / 1048576, colsPerSec: st.colsPerSec, pending: st.pending, cols: st.cols, secs: st.secs, meshes: renderer.meshCount, lod: [...renderer.lodCounts], workers: st.workers, streamMs: g ? g.streamMs : 0,
-        pcMs: R.cpuRenderMs, gpuPass: R.gpuPass, shTris: R.stats.shTris, shDraws: R.stats.shDraws, camSub: R.stats.camSub, shSub: R.stats.shSub, occ: g && g.occ ? { ...g.occ.stats } : null, ...lightStats() };
+        pcMs: R.cpuRenderMs, gpuPass: R.gpuPass, shTris: R.stats.shTris, shDraws: R.stats.shDraws, lamp: !!(g && g.lamp), lampTris: R.stats.lampTris || 0, lampDraws: R.stats.lampDraws || 0, camSub: R.stats.camSub, shSub: R.stats.shSub, occ: g && g.occ ? { ...g.occ.stats } : null, ...lightStats() };
     },
     // Відсікання закритого: увімкнути / вимкнути (заміри й знімки «з / без»; тримається й після нового світу)
     occ(on, opts) { occOff = !on; if (g) { g.occ.enabled = !!on; if (opts) g.occ.set(opts); } return !occOff; },
@@ -279,6 +280,8 @@ function boot(renderer) {
     key(code, down = true) { devKey(code, down); return true; },
     // Поза гравця: {pose, climb, stam, slide, dive, carry (маса тіла в руках)}
     pose() { const me = g.me; return { pose: me.pose, climb: me.climb ? { ...me.climb } : null, stam: me.stam, slide: !!me.slide, dive: !!me.dive, carry: g.carry ? g.carry.b.mass : null, h: me.h }; },
+    // Ліхтарик (L): увімкнути / вимкнути; без аргументу — стан
+    lamp(on) { if (on !== undefined) g.lamp = !!on; return !!g.lamp; },
     // Підсвітка цілі (обрис, каркас): false — не малювати (заміри ціни; ціль і дії лишаються)
     aimFx(on) { g.aimFx = !!on; return g.aimFx; },
     // Ціль: {kind, t, x, y, k, b, mass, key} або null
@@ -488,6 +491,7 @@ function boot(renderer) {
       d: p.d, n: p.n, me: { x: p.x, y: p.y, z: p.z, vz: 0, air: false, ground: true, yaw: Math.PI * 0.75, moving: false, placed: false },
       cam: [p.x, p.y, p.z || 0], lastSave: performance.now(), view: null, clock: rec.clock || 0,
       stamp: 0, ai: [], aiAt: 0,                 // крок фізики (інтерполяція тіл); системи світу (моби, NPC) — (dt, g)
+      lamp: false,                               // ліхтарик (L; js/lamp.js) — не зберігається, як і політ
       envHere: () => envHere(),                  // середовище тут (F3)
     };
     g.occ = createOcclusion(g.world);               // відсікання закритого (заслони з блоків, js/occlusion.js)
@@ -763,6 +767,7 @@ function boot(renderer) {
       else if (a === 'hit' || a === 'hitDev') { if (a === 'hitDev' || locked()) hit(now); }   // у третій особі перше клацання — захоплення миші
       else if (a === 'take') take(now);
       else if (a === 'use') use(now);
+      else if (a === 'lamp') { g.lamp = !g.lamp; toast(g.lamp ? 'Ліхтарик увімкнено' : 'Ліхтарик вимкнено'); }
       else if (a === 'jumpRandom' || a === 'jumpRandomDepth') {
         const to = [a === 'jumpRandomDepth' ? (g.d + 1 + rnd(12)) % 13 : g.d, rnd(200001) - 100000];
         if (g.dev.start(to, a) === 'cancel') toast('Стрибок скасовано');
@@ -937,8 +942,15 @@ function boot(renderer) {
     }
     const lines = g.showColl && me.placed ? collLines(me) : null;
     const fx = me.ix ?? me.x, fy = me.iy ?? me.y, fz = me.iv ?? me.vis ?? me.z;
+    // ліхтарик: перша особа — з ока, третя — зі скла на лобі (поза тієї самої фігури, що малюється), уздовж погляду камери;
+    // камеру в тісноті підтягнуло до голови (фігури не видно) — з ока, як у першій: скло за 0,27 м перед оком, впритул до стіни
+    const lamp = g.lamp && me.placed ? lampPose({
+      first: camera.mode === FIRST || Math.hypot(...g.view.eye) <= FIG_NEAR, eye: [g.cam[0] + g.view.eye[0], g.cam[1] + g.view.eye[1], g.cam[2] + g.view.eye[2]], look: lookDir(),
+      anim, foot: [fx, fy, fz], yaw: me.yaw, safe: g.cam, hit: (o, d, t) => segHit(g.world.probe(g.d, g.n), o, d, t),
+    }) : null;
+    g.lampEye = !!lamp && !lamp.shadow;      // F3: світить з ока
     const sk = renderer.draw({
-      lines, under: g.under ? L.liquid : null, skyLight: (x, y, z) => g.world.skyLight(g.d, g.n, x, y, z),
+      lines, lamp, under: g.under ? L.liquid : null, skyLight: (x, y, z) => g.world.skyLight(g.d, g.n, x, y, z),
       camera, target: g.cam, view: g.view, laws: L, far: g.far, occ: g.occ, charge: g.dev.charge ? g.dev.charge.to : null, clock: g.clock, bodies, aim: g.aimFx === false ? null : g.aim, weather: { W: loc.W, loc }, bolt: g.bolt, rain: me.placed && loc.type ? rainMap(now) : null,
       // вигляд гравця: положення — інтерпольоване, стан — усе, що читають руки першої особи (VIEW_KEYS у anim.js)
       me: me.placed ? { ...Object.fromEntries(VIEW_KEYS.map((k) => [k, me[k]])), x: fx, y: fy, z: fz, anim, ao: g.world.skyLight(g.d, g.n, fx, fy, fz + 0.5) } : null,

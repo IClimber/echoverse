@@ -23,24 +23,29 @@ export async function createApp(canvas, { device = 'webgl2', maxPixelRatio = 2, 
   // мова шейдерів: матеріали отримують шматки лише цієї мови (як у прикладі shaders/trees)
   const lang = dev.isWebGPU ? pc.SHADERLANGUAGE_WGSL : pc.SHADERLANGUAGE_GLSL;
 
-  // Шари: типові World, Skybox, Immediate, UI (+ Depth), «Тіні» — кидачі тіней (бачать світла, не камера) і «Руки»
+  // Шари: типові World, Skybox, Immediate, UI (+ Depth), кидачі тіней (бачать світла, не камера) і «Руки». Кидачів
+  // локального світла PlayCanvas бере з шарів, до яких воно належить (shadow-renderer.js _collectCasterLists; маска
+  // каскадів — лише напрямленим), тож кидачі розкладено за тим, хто їх бачить: «Тіні» — усі світла; «Тіні дальні» — лише
+  // напрямлені (спрощені рослини стовпців, де є повні, і тіні малих рослин: дальні каскади); «Тінь гравця» — фігура: усі
+  // світла, крім ліхтарика гравця (lights.js LAY / LAY_LOCAL)
   const L = app.scene.layers;
   const world = L.getLayerByName('World'), sky = L.getLayerByName('Skybox');
   world.opaqueSortMode = pc.SORTMODE_FRONT2BACK;
-  const shadow = new pc.Layer({ name: 'Тіні' });
-  L.push(shadow);
+  const shadow = new pc.Layer({ name: 'Тіні' }), shadowFar = new pc.Layer({ name: 'Тіні дальні' }), player = new pc.Layer({ name: 'Тінь гравця' });
+  L.push(shadow); L.push(shadowFar); L.push(player);
+  const casterOnly = [shadow, shadowFar, player];
   // «Руки» (перша особа): після прозорого World, до Immediate й UI, з очищенням глибини — не входять у стіни
   // (як шар гізмо, extras/gizmo/gizmo.js createLayer; manual graphics/cameras/multiple-cameras.md — «first-person weapon rendering»)
   const immediate = L.getLayerByName('Immediate');
   const arms = new pc.Layer({ name: 'Руки', clearDepthBuffer: true, opaqueSortMode: pc.SORTMODE_NONE, transparentSortMode: pc.SORTMODE_NONE });
   L.insert(arms, L.layerList.indexOf(immediate));
-  const layers = { world, sky, shadow, arms, immediate, ui: L.getLayerByName('UI') };
+  const layers = { world, sky, shadow, shadowFar, player, arms, immediate, ui: L.getLayerByName('UI') };
 
   // Камера: тональна компресія й гама — PlayCanvas (кольори лінійні; правило покажчика manual/llms/…/engine/llms.txt)
   const camE = new pc.Entity('камера');
   camE.addComponent('camera', {
     fov: 55, nearClip: 0.1, farClip: far, gammaCorrection: pc.GAMMA_SRGB, toneMapping: pc.TONEMAP_NEUTRAL, clearColor: new pc.Color(0, 0, 0),
-    layers: L.layerList.filter((l) => l !== shadow).map((l) => l.id),
+    layers: L.layerList.filter((l) => !casterOnly.includes(l)).map((l) => l.id),
   });
   app.root.addChild(camE);
 

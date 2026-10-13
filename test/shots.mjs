@@ -10,9 +10,10 @@ const COMBOS = arg('combos', 'webgl2:pcf3:16,webgl2:pcss:16,webgl2:off:16,webgpu
 // сцена: [всесвіт, x, y, фаза доби ('best' — найбільше світил), особливе]. Порядок важливий: сцени того самого всесвіту
 // й місця — підряд без телепорту; печера — остання з них (переносить гравця під землю), далі — стрибок в інший всесвіт
 // особливе: rain — дощ, first — перша особа, grass / grass3 — трава впритул (перша / третя особа), coll — каркас зіткнень (?dev showColl), cave — печера (перша особа:
-// firstcave)
+// firstcave); ліхтарик (eco.lamp): lamp — у печері (третя особа, з тінню), lamp1 — у печері з першої особи (з ока, без
+// тіні), lampn — ліс уночі (третя особа)
 const ALL = { plain: [1, -52, -45, 0.4], night: [1, -52, -45, 0.0], rain: [1, -52, -45, 0.4, 'rain'],
-  first: [1, -52, -45, 0.4, 'first'], under: [1, -52, -45, 0.4, 'under'], slope: [33281, -61, -2, 0.4, 'slope'], trunk: [-60813, -478, -107, 0.4, 'trunk'], coll: [1, -52, -45, 0.4, 'coll'], grass: [1, -52, -45, 0.4, 'grass'], grass3: [1, -52, -45, 0.4, 'grass3'], cave: [1, -52, -45, 0.4, 'cave'], firstcave: [1, -52, -45, 0.4, 'firstcave'], fgrass: [-60813, -478, -107, 0.4, 'grass'], mount: [33281, -61, -2, 0.4], forest: [-60813, -478, -107, 0.4], suns3: [784, -52, -45, 'best'] };
+  first: [1, -52, -45, 0.4, 'first'], under: [1, -52, -45, 0.4, 'under'], slope: [33281, -61, -2, 0.4, 'slope'], trunk: [-60813, -478, -107, 0.4, 'trunk'], coll: [1, -52, -45, 0.4, 'coll'], grass: [1, -52, -45, 0.4, 'grass'], grass3: [1, -52, -45, 0.4, 'grass3'], cave: [1, -52, -45, 0.4, 'cave'], firstcave: [1, -52, -45, 0.4, 'firstcave'], lamp: [1, -52, -45, 0.4, 'lamp'], lamp1: [1, -52, -45, 0.4, 'lamp1'], fgrass: [-60813, -478, -107, 0.4, 'grass'], mount: [33281, -61, -2, 0.4], forest: [-60813, -478, -107, 0.4], lampn: [-60813, -478, -107, 0.0, 'lampn'], suns3: [784, -52, -45, 'best'] };
 const SCENES = arg('scenes', Object.keys(ALL).join(',')).split(',').filter((k) => ALL[k]);   // --scenes=none — лише стенд
 // Стенд руху ?move (gen/stand.js): сцена — дії через ?dev (eco.spot — місце, eco.key — клавіші, eco.look — камера)
 const K = (c, d = true) => `eco.key('${c}', ${d});`;
@@ -116,8 +117,8 @@ for (const [gpu, sh, view] of COMBOS) {
   for (const sc of SCENES) {
     log('сцена', sc);
     const [n, x, y, ph, sp] = ALL[sc];
-    const mode = ['first', 'firstcave', 'under', 'grass'].includes(sp) ? 'first' : 'third', cave = sp === 'cave' || sp === 'firstcave';
-    await ev(`eco.setCam('${mode}'); eco.showColl(${sp === 'coll'}); eco.weather(${sp === 'rain' ? "'rain'" : 'null'}); 1`);
+    const mode = ['first', 'firstcave', 'under', 'grass', 'lamp1'].includes(sp) ? 'first' : 'third', cave = ['cave', 'firstcave', 'lamp', 'lamp1'].includes(sp);
+    await ev(`eco.setCam('${mode}'); eco.showColl(${sp === 'coll'}); eco.weather(${sp === 'rain' ? "'rain'" : 'null'}); eco.lamp(${['lamp', 'lamp1', 'lampn'].includes(sp)}); 1`);
     await jumpTo(n, x, y);
     if (cave && last[3] !== 'cave') {             // печерні секції підвантажуються не одразу — кілька спроб
       let ok = null;

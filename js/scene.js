@@ -19,11 +19,12 @@ import { SKY_GLSL, SKY_WGSL } from './sky-shader.js';
 import { CS } from './gen/chunk.js';
 import { L_LAVA, LEVEL } from './universe.js';
 import { liquidVis } from './collision.js';
-import { figureParts } from './gen/mesh.js';
+import { figureParts, lampGlow } from './gen/mesh.js';
+import { LAMP } from './lamp.js';
 import { poseMatrices, viewArms } from './anim.js';
 import { skyState, applyWeather, CLOUD_H, lightsOf, lightSlots, pcIntensity } from './sky.js';
 import { far2, near2 } from './engine/core/frustum.js';
-import { FIRST, CAM_R, fovOf, VIEW_R, FAR_R, SEAM, viewProj, project, basis, aabbInView, aabbInside, LOD_R, LOD_CAP, LOD_ON, lodOf, keepLod, colDist, FLORA_NEAR, FLORA_FADE, FLORA_THIN } from './camera.js';
+import { FIRST, CAM_R, FIG_NEAR, fovOf, VIEW_R, FAR_R, SEAM, viewProj, project, basis, aabbInView, aabbInside, LOD_R, LOD_CAP, LOD_ON, lodOf, keepLod, colDist, FLORA_NEAR, FLORA_FADE, FLORA_THIN } from './camera.js';
 import { regionOf, RS, RW, RH, PO, PQ } from './gen/pack.js';
 import { ck } from './world.js';
 import { texturesOf, TEX } from './textures.js';
@@ -101,17 +102,20 @@ export async function createScene(canvas, settings = {}) {
   for (const k in KINDS) kinds[k] = { arena: KINDS[k][0], material: mats[KINDS[k][1]] };
   const stats = { draws: 0, tris: 0, shTris: 0, shDraws: 0, up: 0, upBytes: 0, gpuBytes: 0, arenaBytes: 0, arenaUsed: 0, full: 0 };
   // види кидачів (CASTERS): матеріал і каскади (shLod — ?dev: false — усе в усі каскади, як до тіней за відстанню)
+  // (layer 'far' — шар «Тіні дальні»: лише напрямлені світла; локальні — ліхтарик — беруть повні рослини, не спрощені)
   const CASTERS = [
-    { arena: 'op', material: mats.obj, cascades: SH_ALL }, { arena: 'op', material: mats.obj, cascades: SH_FAR },
+    { arena: 'op', material: mats.obj, cascades: SH_ALL }, { arena: 'op', material: mats.obj, cascades: SH_FAR, layer: 'far' },
     { arena: 'fl', material: mats.fl, cascades: SH_NEAR }, { arena: 'fl', material: mats.fl, cascades: SH_NEAR },
-    { arena: 'fl', material: mats.fl, cascades: SH_FAR },
+    { arena: 'fl', material: mats.fl, cascades: SH_FAR, layer: 'far' },
   ];
   const RG = createRegions(G, { size: [RW, RW, RH], PO, PQ, format: FMT, kinds, casters: CASTERS, arena0: ARENA0, arenaMax: ARENA_MAX, stats });
 
   // ---- небо, світла, частинки ----
   // розсіяне з неба перепікається, коли сонце зсунулось на 2° (доба 6–40 хв × плин часу — до ~2°/с; розсіяне плавне)
   const sky = createSky(G, { glsl: SKY_GLSL, wgsl: SKY_WGSL, lightingThreshold: 2 });
-  const LG = createLights(G, { shadows: settings.shadows || 'pcf3' });
+  // локальних світел у грі поруч щонайбільше кілька (ліхтарик гравця, світло блискавки): 8 на клітинку замість 255 —
+  // з ліхтариком кадр 4,7 → 4,0 мс (шахта «1qgt24p», WebGPU, 13.10.2026), без локальних — без змін
+  const LG = createLights(G, { shadows: settings.shadows || 'pcf3', perCell: 8 });
   const vols = {};
   const volume = (type) => {
     let v = vols[type];
@@ -124,10 +128,10 @@ export async function createScene(canvas, settings = {}) {
 
   // ---- фігура: один меш на всі частини, вершини — на CPU за матрицями пози; руки першої особи — так само ----
   const figP = figureParts([226, 92, 70]);
-  const posedMesh = (names) => {
+  const posedMesh = (names, src = figP) => {
     const parts = [];
     let nv = 0, ni = 0;
-    for (const p of names) { parts.push([p, nv, figP[p]]); nv += figP[p].pos.length / 3; ni += figP[p].count; }
+    for (const p of names) { parts.push([p, nv, src[p]]); nv += src[p].pos.length / 3; ni += src[p].count; }
     const pos = new Float32Array(nv * 3), nor = new Float32Array(nv * 3), col = new Uint8Array(nv * 4), idx = new Uint32Array(ni);
     { let ii = 0; for (const [, v0, m] of parts) { const n = m.pos.length / 3; for (let i = 0; i < n; i++) col.set([m.col[i * 3], m.col[i * 3 + 1], m.col[i * 3 + 2], m.mat[i]], (v0 + i) * 4); for (let i = 0; i < m.count; i++) idx[ii++] = m.idx[i] + v0; } }
     const mesh = new pc.Mesh(dev);
@@ -155,10 +159,21 @@ export async function createScene(canvas, settings = {}) {
   // особі й з камерою впритул фігури не видно, а тінь лишається
   const figMI = new pc.MeshInstance(fig.mesh, mats.fig, figNode), figSh = new pc.MeshInstance(fig.mesh, mats.fig, figNode);
   figMI.castShadow = false; figMI.visible = false; figSh.castShadow = true; figSh.visible = false;
-  G.layers.world.addMeshInstances([figMI]); G.layers.shadow.addMeshInstances([figSh]);
+  G.layers.world.addMeshInstances([figMI]); G.layers.player.addMeshInstances([figSh]);   // «Тінь гравця»: не для свого ліхтарика
   const armsMI = new pc.MeshInstance(arms.mesh, mats.fig, figNode);
   armsMI.castShadow = false; armsMI.visible = false;
   G.layers.arms.addMeshInstances([armsMI]);
+  // Скло налобного ліхтарика, що світиться (увімкнений, фігуру видно): окремий меш з емісією — як видиме джерело в
+  // прикладі PlayCanvas clustered-spot-shadows («render component with a small cone», material.emissive); поза — голова
+  const glow = posedMesh(['glow'], { glow: lampGlow() }), glowMat = new pc.StandardMaterial();
+  glowMat.diffuse = new pc.Color(0, 0, 0); glowMat.emissive = new pc.Color(1, 1, 1); glowMat.emissiveIntensity = 2;
+  glowMat.useLighting = false; glowMat.useSkybox = false; glowMat.update();
+  const glowMI = new pc.MeshInstance(glow.mesh, glowMat, figNode);
+  glowMI.castShadow = false; glowMI.visible = false;
+  G.layers.world.addMeshInstances([glowMI]);
+  // Ліхтарик гравця (js/lamp.js): прожектор — створюється при першому вмиканні; шари — World, «Тіні», «Руки» (без «Тіні
+  // гравця»: своя фігура не затуляє свій ліхтарик, і без «Тіней дальніх»: тут повні рослини)
+  let lampL = null;
 
   // ---- обрис цілі (п. 3 roadmap): тіло, рослина, камінь — OutlineRenderer PlayCanvas (extras/renderers/outline-renderer.js,
   // приклад graphics/outlines-colored): шар «Обрис» у композиції, але не в камері (обриси малює лише внутрішня камера);
@@ -726,6 +741,7 @@ export async function createScene(canvas, settings = {}) {
     },
 
     // st: {camera, target, view, laws, clock, weather ({W, loc}), rain ({x0, y0}), far, bodies, skyLight(x, y, z) — AO неба тіл (світло неба),
+    // lamp — ліхтарик {pos, dir, shadow} чи null (js/lamp.js),
     // me {x, y, z, yaw, swim, anim, ao — AO неба фігури}}.
     // Повертає стан неба (sky.js) — для HUD
     draw(st) {
@@ -740,6 +756,12 @@ export async function createScene(canvas, settings = {}) {
         for (const m of rd.visibleCasters) { shDraws++; shSub += m.shN || 1; shTris += (m.shV ?? m.mesh.primitive[0].count) / 3; }
       }
       stats.shTris = shTris; stats.shDraws = shDraws; stats.shSub = shSub;
+      // тінь ліхтарика (прожектор: дані рендеру спільні для камер — null, shadow-renderer-local.js)
+      let lTris = 0, lDraws = 0;
+      if (lampL && lampL.e.enabled && lampL.e.light.castShadows && LG.quality !== 'off') {
+        for (const m of lampL.e.light.light.getRenderData(null, 0).visibleCasters) { lDraws++; lTris += (m.shV ?? m.mesh.primitive[0].count) / 3; }
+      }
+      stats.lampTris = lTris; stats.lampDraws = lDraws;
 
       const { target: t, view, laws } = st, sk = skyState(laws, st.clock || 0), wt = st.weather;
       const curve = laws.phys ? 0.5 / laws.phys.planetR : 0;   // кривизна (шейдер опускає світ на curve·d², d — від цілі)
@@ -785,6 +807,12 @@ export async function createScene(canvas, settings = {}) {
       }
       LG.setShadowDistance(SHADOW_D);
       LG.prepare();                                   // зрізи каскадів кадру (кидачі, розклад оновлення)
+      // ліхтарик: до відбору кидачів (його куля вмикає кидачів у цьому кадрі); тінь — лише в третій особі (st.lamp.shadow)
+      const lp = st.lamp;
+      if (lp) {
+        if (!lampL) lampL = LG.addLight({ type: 'spot', pos: lp.pos, dir: lp.dir, color: LAMP.color, intensity: LAMP.intensity, range: LAMP.range, inner: LAMP.inner, outer: LAMP.outer, castShadows: false, moving: true, bias: LAMP.bias, normalBias: LAMP.normalBias, layers: [G.layers.world.id, G.layers.shadow.id, G.layers.arms.id] });
+        lampL.set({ pos: lp.pos, dir: lp.dir, castShadows: lp.shadow && LG.quality !== 'off', enabled: true });
+      } else if (lampL && lampL.e.enabled) lampL.set({ enabled: false });
       const bakeK = Lt.amb / Math.max(1e-4, 0.6 * lum(sk.zenith) + 0.4 * lum(sk.horizon));
       setSky(sk, bakeK);
       cloudMap(laws, st.clock || 0, t[0] + view.eye[0], t[1] + view.eye[1], performance.now());
@@ -1008,13 +1036,16 @@ export async function createScene(canvas, settings = {}) {
 
       // Фігура (у першій особі й з камерою впритул — лише тінь, інакше око в голові); пристрій не світиться (рішення 10.10.2026).
       // Руки першої особи — у шарі «Руки» (поверх світу, глибина очищена)
-      if (me) fig.pose(poseMatrices(me.anim, me.x - G.O[0], me.y - G.O[1], me.z, me.yaw));
+      const FP = me ? poseMatrices(me.anim, me.x - G.O[0], me.y - G.O[1], me.z, me.yaw) : null;
+      if (me) fig.pose(FP);
       // AO неба фігури й рук — одне число (у float-мешах AO вершин немає): у печері й під навісом розсіяне світло неба гасне,
       // як на землі поруч
       if (me) { const ao = me.ao ?? 1; figMI.setParameter('eco_ao', ao); armsMI.setParameter('eco_ao', ao); }
       figSh.visible = !!me;
-      figMI.visible = !!me && !first && camD > 0.9;
+      figMI.visible = !!me && !first && camD > FIG_NEAR;
       armsMI.visible = !!me && first;
+      glowMI.visible = !!lp && figMI.visible;
+      if (glowMI.visible) glow.pose({ glow: FP.head });
       if (armsMI.visible) arms.pose(viewArms(me.anim, me, b, [t[0] + e[0] - G.O[0], t[1] + e[1] - G.O[1], t[2] + e[2]], G.width / G.height, fovOf(st.camera)));
 
       // Ціль: обрис тіла чи предмета, каркас блоку (1 × 1 × LEVEL, трохи ширше, крізь поверхню не видно)

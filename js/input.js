@@ -7,12 +7,12 @@ let wheel = 0, dragX = 0, dragY = 0, dragging = false, downX = 0, downY = 0;
 
 const ACTIONS = {
   Space: 'jump', KeyQ: 'jumpPrev', KeyE: 'jumpNext', KeyR: 'jumpRandom', KeyV: 'camera', Escape: 'menu', F3: 'debug', KeyH: 'help',
-  KeyF: 'take', F11: 'fullscreen',
+  KeyF: 'take', KeyL: 'lamp', F11: 'fullscreen',
 };
 const CTRL = ['ControlLeft', 'ControlRight'];
 // Ctrl + клавіші гри — браузер своїх дій не робить (Ctrl+S, Ctrl+D, Ctrl+F…). Ctrl+W, Ctrl+T, Ctrl+N, Ctrl+Tab браузер
 // не віддає сторінці — лише в повному екрані з Keyboard Lock (main.js toggleFull)
-const GAME_KEY = /^(Key[WASDFREHQVZC]|Space|Arrow|Shift)/;
+const GAME_KEY = /^(Key[WASDFREHQVZCL]|Space|Arrow|Shift)/;
 
 // Клавіша натиснута (від клавіатури чи ?dev eco.key): дія — без повторів
 function keyDown(code, shift, repeat) {
@@ -76,7 +76,7 @@ export function takeDrag() { const d = [dragX, dragY]; dragX = dragY = 0; return
 // Дії з минулого кадру (кожну — один раз): jump — стрибок, jumpPrev / jumpNext — пристрій (номер −1 / +1),
 // jumpRandom — у випадковий всесвіт (для перевірок), jumpRandomDepth (Shift+R) — і на іншу глибину, camera — вигляд,
 // hit — удар (ЛКМ), use — використати (ПКМ), take — взяти / покласти (F), crouchPress — Ctrl натиснуто (відпустити
-// стіну), fullscreen — повний екран (F11)
+// стіну), lamp — ліхтарик (L), fullscreen — повний екран (F11)
 export function takeActions() { return pressed.splice(0); }
 export function takeWheel() { const w = wheel; wheel = 0; return w; }
 export function clearInput() { held.clear(); pressed.length = 0; wheel = 0; dragX = dragY = 0; dragging = false; }

@@ -9,7 +9,8 @@ import { far2, near2, casterVolume, boxOut } from '../core/frustum.js';
 
 // layout: { size: [RW, RW, RH], PO, PQ, format (pc.VertexFormat), kinds: {вид: {arena, material}},
 //   casters: [{arena, material, cascades — біти каскадів напрямленого світла, у які кидач цього виду малюється (типово
-//   усі)} | null] (вид кидача — індекс), arena0, arenaMax, stats }
+//   усі), layer — 'far': шар «Тіні дальні» (лише напрямлені світла), інакше «Тіні»} | null] (вид кидача — індекс),
+//   arena0, arenaMax, stats }
 export function createRegions(G, layout) {
   const { pc, root, layers, O } = G, camC = G.cam;
   const { size: [RW, , RH], PO, format, kinds, casters } = layout;
@@ -87,10 +88,11 @@ export function createRegions(G, layout) {
       if (!K || !R.ar[K.arena] || !B.nr) continue;
       let m = R.sh.get(B.key);
       if (!m || m.mesh !== R.ar[K.arena].mesh) {
-        if (m) { layers.shadow.removeMeshInstances([m]); m.destroy(); }
+        if (m) { m.lay.removeMeshInstances([m]); m.destroy(); }
         m = new pc.MeshInstance(R.ar[K.arena].mesh, K.material, R.node);
         m.castShadow = true; m.sh = md(m, null, 16); m.shCap = 16; m.kind = B.kind; m.b = new Float64Array(6);
-        layers.shadow.addMeshInstances([m]);
+        m.lay = K.layer === 'far' && layers.shadowFar ? layers.shadowFar : layers.shadow;   // 'far' — лише напрямлені (app.js)
+        m.lay.addMeshInstances([m]);
         R.sh.set(B.key, m);
       }
       m.setCustomAabb(box(B.bb)); m.lo = m.hi = 0;
@@ -175,7 +177,7 @@ export function createRegions(G, layout) {
 
   function drop(R) {
     for (const k in R.mi) { const m = R.mi[k]; layers.world.removeMeshInstances([m]); m.destroy(); }
-    for (const m of R.sh.values()) { layers.shadow.removeMeshInstances([m]); m.destroy(); }
+    for (const m of R.sh.values()) { m.lay.removeMeshInstances([m]); m.destroy(); }
     R.mi = {}; R.sh.clear();
     for (const k in R.ar) R.ar[k].drop();
     R.ar = {};
