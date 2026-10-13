@@ -1,7 +1,8 @@
 // test/shots.mjs — знімки сцен гри й стенда ?light, помилки консолі; headless Chrome через CDP (не в npm test).
-// Сервер: python3 serve.py (порт 8123). node test/shots.mjs [--combos=webgl2:pcf3:16,…] [--scenes=plain,mount,…] [--mscenes=mcrouch,…|none] [--out=ТЕКА]
+// Сервер: python3 serve.py (порт 8123). node test/shots.mjs [--combos=webgl2:pcf3:16,…] [--scenes=plain,mount,…] [--mscenes=mcrouch,…|none] [--out=ТЕКА] [--port=8123]
 import { spawn } from 'node:child_process'; import { mkdirSync, rmSync, writeFileSync } from 'node:fs'; import { tmpdir } from 'node:os';
 const arg = (k, d) => { const a = process.argv.find((s) => s.startsWith(`--${k}=`)); return a ? a.slice(k.length + 3) : d; };
+const PORT = +arg('port', 8123);                   // --port= — сервер робочої копії (досліди — не на 8123)
 const port = 9337;
 const OUT = arg('out', `${tmpdir()}/echoverse-shots`); mkdirSync(OUT, { recursive: true });
 // поєднання налаштувань (графіка : тіні : дальність): кожне має запуститися без помилок
@@ -95,7 +96,7 @@ const R = [];
 for (const [gpu, sh, view] of COMBOS) {
   last = null;                                    // кожне поєднання — новий світ
   await send('Runtime.enable');
-  await send('Page.navigate', { url: 'http://localhost:8123/?dev' }); await wait(1500);
+  await send('Page.navigate', { url: `http://localhost:${PORT}/?dev` }); await wait(1500);
   await ev(`localStorage.setItem('echoverse-gpu', '${gpu}'); localStorage.setItem('echoverse-shadows', '${sh}'); localStorage.setItem('echoverse-view', '${view}'); localStorage.setItem('echoverse-camera', 'third'); 1`);
   await send('Page.reload'); await waitFor('!!window.eco');
   // меню з'являється раніше, ніж сцена готова (WebGPU — асинхронно): натискаємо, доки світ не створиться
@@ -170,7 +171,7 @@ for (const [gpu, sh, view] of COMBOS) {
   }
   // стенд руху ?move: ті самі налаштування, свої сцени; ціль — без меню (з відкритим меню цілі немає)
   if (!MSCENES.length) continue;
-  await send('Page.navigate', { url: 'http://localhost:8123/?move&dev' }); await waitFor('!!(window.eco && eco.g && eco.g.me.placed)'); await idle();
+  await send('Page.navigate', { url: `http://localhost:${PORT}/?move&dev` }); await waitFor('!!(window.eco && eco.g && eco.g.me.placed)'); await idle();
   await menu(false); await ev("document.getElementById('help').hidden = true; 1");
   for (const sc of MSCENES) {
     for (const a of MOVE[sc]) {
@@ -182,7 +183,7 @@ for (const [gpu, sh, view] of COMBOS) {
   }
 }
 // стенд ?light (сам ставить window.eco = { ready: true } після першого кадру)
-await send('Page.navigate', { url: 'http://localhost:8123/?light&dev' }); await waitFor('!!(window.eco && eco.ready)'); await wait(2000);
+await send('Page.navigate', { url: `http://localhost:${PORT}/?light&dev` }); await waitFor('!!(window.eco && eco.ready)'); await wait(2000);
 await shot('light');
 writeFileSync(`${OUT}/results.json`, JSON.stringify({ R, errs }, null, 1));
 for (const r of R) console.log([r.gpu, r.sh, r.view, r.sc, r.skip || `пристрій ${r.device}`].join(' '));
