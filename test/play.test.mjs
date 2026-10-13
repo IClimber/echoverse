@@ -307,6 +307,16 @@ test('небо й час: біля старту — одне сонце, міс�
   assert.equal(deserialize(serialize(w)).world.clock, 1234.5);
 });
 
+test('тінь — від світила з найсильнішим прямим світлом: головне сонце сідає (диск ще яскравіший), друге високо — тінь від другого (14.10.2026)', async () => {
+  const { lightsOf } = await import('../js/sky.js');
+  const n = (v) => { const l = Math.hypot(...v); return v.map((x) => x / l); };
+  const main = { dir: n([1, 0, 0.03]), col: [255, 240, 200], size: 0.04, bright: 1 }, sec = { dir: n([0, 1, 0.6]), col: [255, 220, 180], size: 0.04, bright: 0.75 };
+  const o = lightsOf({ suns: [main, sec], moons: [], main, duskCol: [255, 140, 60], lock: false, I: 0.8, amb: 0.3, day: 0.6 }, 3);
+  const lm = o.all.find((l) => l.dir === main.dir), ls = o.all.find((l) => l.dir === sec.dir);
+  assert.ok(lm.b > ls.b && lm.k < ls.k, `диск головного яскравіший (${lm.b} > ${ls.b}), пряме світло — слабше (${lm.k} < ${ls.k})`);
+  assert.equal(o.dirs[0], ls, 'слот 0 (тінь) — друге сонце');
+});
+
 test('світла неба: головне (з тінню) — найяскравіше; сонце, що показалось над обрієм на 1 %, яскравіше за місяць; серп слабший за повню; захід без провалу й стрибка яскравості', async () => {
   const { lightsOf, aboveHorizon } = await import('../js/sky.js');
   const n = (v) => { const l = Math.hypot(...v); return v.map((x) => x / l); };
