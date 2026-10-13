@@ -587,6 +587,7 @@ export async function createScene(canvas, settings = {}) {
   const lin = (c) => (c / 255) ** 2.2, lum = (c) => 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]);
   const sig = new Float32Array(12);
 
+  let forceBake = false;                         // ?dev: розсіяне — запекти в наступному кадрі (знімки на годиннику, що стоїть)
   let cullOn = true, shownU = null, lastCol = '', lastRad = 0, lawsKey = null;
   const M4 = new pc.Mat4(), Q = new pc.Quat(), V3 = new pc.Vec3(), engRegs = [];
   let linesPC = new Float32Array(0);
@@ -623,6 +624,7 @@ export async function createScene(canvas, settings = {}) {
   return {
     R, G, LG,
     raf(f) { next = f; },
+    rebake() { forceBake = true; },
     resize() {},                                   // розмір полотна PlayCanvas відстежує сам
     setShadows(q) { LG.setQuality(q); return LG.quality; },
     // Прогрів шейдерів (кількість напрямлених світел 3, 2, 1; поточний тип тіней) — за екраном завантаження
@@ -641,6 +643,49 @@ export async function createScene(canvas, settings = {}) {
         i++;
       }
       if (upHead === upQ.length) { upQ.length = 0; upHead = 0; } else if (upHead > 4096) { upQ.splice(0, upHead); upHead = 0; }
+    },
+    // ?dev: усе з черги — в арени, потім секції й рослини зблизька кожного всесвіту — заново в порядку ключів, перемішаних
+    // зерном seed, плитки далечі — у шар у тому самому порядку: порядок малювання не залежить від того, у якому порядку
+    // прийшли роботи генератора (попіксельні порівняння версій, test/pixels.mjs). Рослини, що не вмістились, — як порожні
+    canon(seed = 0) {
+      while (upHead < upQ.length) this.pump(1 << 30);
+      const mix = (k) => {
+        if (typeof k === 'string') { let h = 2166136261; for (let i = 0; i < k.length; i++) h = Math.imul(h ^ k.charCodeAt(i), 16777619); k = h >>> 0; }
+        let x = (k % 4294967296) ^ Math.imul(Math.floor(k / 4294967296) | 0, 0x9e3779b1) ^ Math.imul(seed + 1, 0x85ebca6b);
+        x = Math.imul(x ^ (x >>> 16), 0x7feb352d); x = Math.imul(x ^ (x >>> 15), 0x846ca68b);
+        return (x ^ (x >>> 16)) >>> 0;
+      };
+      const byKey = (a, b) => mix(a[0]) - mix(b[0]) || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+      for (const Un of [...unis.values()]) {
+        const secs = [], fls = [], empty = [];
+        for (const Gr of Un.regions.values()) {
+          const op = Gr.R.ar.op, lq = Gr.R.ar.liq, fa = Gr.R.ar.fl;
+          for (const [k, E] of Gr.secs) for (let lod = 0; lod < 3; lod++) {
+            const sl = E.L[lod];
+            if (!sl) continue;
+            const mesh = { ns: sl.ns, nf: sl.nf, nc: sl.nc, nl: sl.nl, bb: sl.bb, lbb: sl.lbb, op: null, liq: null };
+            if (sl.off >= 0) mesh.op = op.u8.slice(sl.off * 16, (sl.off + sl.ns + sl.nf + sl.nc) * 16); else mesh.ns = mesh.nf = mesh.nc = 0;
+            if (sl.loff >= 0) mesh.liq = lq.u8.slice(sl.loff * 16, (sl.loff + sl.nl) * 16); else mesh.nl = 0;
+            secs.push([k, { cx: E.cx, cy: E.cy, cz: E.cz, lod }, mesh]);
+          }
+          for (const [k, f] of Gr.fls) {
+            const n = f.off < 0 ? 0 : f.n + f.np;
+            fls.push([k, { cx: f.cx, cy: f.cy }, { rz: Gr.rz }, { n, nb: f.nb, np: f.np, ob: f.ob, bb: f.bb, fl: n ? fa.u8.slice(f.off * 16, (f.off + n) * 16) : null }]);
+          }
+        }
+        for (const [k, Gr] of Un.flora) if (Gr === null) empty.push(k);
+        const { d, n } = Un;
+        dropUni(Un);
+        secs.sort(byKey); fls.sort(byKey);
+        for (const [k, q, mesh] of secs) putSection(d, n, k, q, mesh);
+        for (const [k, q, data, mesh] of fls) putFlora(d, n, k, q, data, mesh);
+        const U2 = uni(d, n, true);
+        for (const k of empty) U2.flora.set(k, null);
+      }
+      const fs = [...fars].sort(byKey);
+      fars.clear();
+      for (const [k, e] of fs) { G.layers.world.removeMeshInstances([e.mi]); G.layers.world.addMeshInstances([e.mi]); fars.set(k, e); }
+      return { secs: [...unis.values()].reduce((a, V) => a + V.slots.size, 0), far: fars.size };
     },
     // Нестача пам'яті GPU (подія 'oom' застосунку): звільнити все, крім всесвіту на екрані
     releaseOthers() { for (const V of [...unis.values()]) if (V !== shownU) dropUni(V); },
@@ -695,13 +740,14 @@ export async function createScene(canvas, settings = {}) {
       frame++;
       // числа минулого кадру: виклики, тіні (кидачі й трикутники, що пішли в каскади)
       stats.up = stats.upBytes; stats.upBytes = 0; stats.draws = G.R.draws;
-      let shTris = 0, shDraws = 0;
+      let shTris = 0, shDraws = 0, shSub = 0;
+      stats.camSub = stats.sub || 0; stats.sub = 0;
       for (const s of LG.slots) if (s.on && s.l.castShadows) for (let c = 0; c < s.l.numCascades; c++) {
         if (s === LG.slots[0] && !(LG.lastCascades >> c & 1)) continue;     // каскад не оновлювався
         const rd = s.l.light.getRenderData(cam.camera, c);
-        for (const m of rd.visibleCasters) { shDraws++; shTris += (m.shV ?? m.mesh.primitive[0].count) / 3; }
+        for (const m of rd.visibleCasters) { shDraws++; shSub += m.shN || 1; shTris += (m.shV ?? m.mesh.primitive[0].count) / 3; }
       }
-      stats.shTris = shTris; stats.shDraws = shDraws;
+      stats.shTris = shTris; stats.shDraws = shDraws; stats.shSub = shSub;
 
       const { target: t, view, laws } = st, sk = skyState(laws, st.clock || 0), wt = st.weather;
       const curve = laws.phys ? 0.5 / laws.phys.planetR : 0;   // кривизна (шейдер опускає світ на curve·d², d — від цілі)
@@ -760,7 +806,7 @@ export async function createScene(canvas, settings = {}) {
       bolt(st.bolt, st.clock || 0, [t[0] + view.eye[0], t[1] + view.eye[1], t[2] + view.eye[2]]);
       const cl = sk.cloud ? sk.cloud.k : 0, d0 = sk.suns[0].dir;
       sig.set([d0[0], d0[1], d0[2], ...c3(sk.zenith), ...c3(sk.horizon), sk.dusk, cl, Math.log2(bakeK + 1e-6) / 10]);
-      sky.maybeBake(sig, fresh);
+      sky.maybeBake(sig, fresh || forceBake); forceBake = false;
       // Туман (лінійний, PlayCanvas; колір — екранний, рушій сам переводить). Згори — без туману: глибина від ока ~400
       // однакова для всього, а лінійний туман PlayCanvas — за глибиною
       const F = scene.fog, under = st.under;

@@ -55,6 +55,7 @@ export function createRegions(G, layout) {
     const n = b - a;
     if (n > m[w + 'Cap']) { let c = m[w + 'Cap']; while (c < n) c *= 2; m[w + 'Cap'] = c; m[w] = md(m, w === 'cam' ? camC : null, c); }
     let v = 0;
+    if (w === 'cam') stats.sub = (stats.sub || 0) + n;   // піддрави multi-draw камери (заміри)
     for (let i = 0; i < n; i++) { m[w].add(i, C[a + i], 1, F[a + i]); v += C[a + i]; }
     m[w].update(n);
     return v;
@@ -94,7 +95,7 @@ export function createRegions(G, layout) {
       }
       m.setCustomAabb(box(B.bb)); m.lo = m.hi = 0;
       m.b.set(B.bb);
-      m.shV = fill(m, 'sh', B.F, B.C, 0, B.nr);
+      m.shV = fill(m, 'sh', B.F, B.C, 0, B.nr); m.shN = B.nr;
       m.visible = false;                              // вмикає cullCasters щокадру
     }
     const b = R.bb;

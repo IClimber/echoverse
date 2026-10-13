@@ -19,6 +19,7 @@ export async function createApp(canvas, { device = 'webgl2', maxPixelRatio = 2, 
   app.init(ao);
   app.setCanvasFillMode(pc.FILLMODE_NONE); app.setCanvasResolution(pc.RESOLUTION_AUTO);
   if (dev.gpuProfiler) dev.gpuProfiler.enabled = true;
+  const setProfiler = (on) => { if (dev.gpuProfiler) dev.gpuProfiler.enabled = !!on; return !!(dev.gpuProfiler && dev.gpuProfiler.enabled); };
   // мова шейдерів: матеріали отримують шматки лише цієї мови (як у прикладі shaders/trees)
   const lang = dev.isWebGPU ? pc.SHADERLANGUAGE_WGSL : pc.SHADERLANGUAGE_GLSL;
 
@@ -69,7 +70,7 @@ export async function createApp(canvas, { device = 'webgl2', maxPixelRatio = 2, 
   };
 
   // Заміри минулого кадру (згладжені): GPU (профайлер PlayCanvas), по проходах, CPU рендера, виклики
-  const R = { gpuMs: null, gpuPass: {}, cpuRenderMs: 0, draws: 0, gpuHist: new Float32Array(HIST), gpuHistI: 0 };
+  const R = { gpuMs: null, gpuPass: {}, cpuRenderMs: 0, draws: 0, gpuHist: new Float32Array(HIST), gpuHistI: 0, upd: 0, drw: 0, sampler: null, grab: null };
   const measure = () => {
     R.draws = app.stats.drawCallCount;
     const gt = app.stats.gpuFrameTime;
@@ -82,6 +83,17 @@ export async function createApp(canvas, { device = 'webgl2', maxPixelRatio = 2, 
   // Кадр: гра малює з події 'update' PlayCanvas (рендер іде одразу після неї); _time — мітка rAF цього такту (2.23.2)
   let next = null;
   app.on('update', () => { measure(); const f = next; next = null; if (f) f(app._time); });
+  // Заміри покадрово (?dev, test/perf.mjs): інтервал між кадрами (мітки rAF), CPU такту PlayCanvas (від frameupdate до
+  // frameend: гра + рендер), CPU рендера PlayCanvas, CPU гри (оновлення, малювання — main.js), GPU кадру (профайлер; з
+  // запізненням на кілька кадрів), викликів
+  let tickT = 0, prevT = 0;
+  app.on('frameupdate', () => { tickT = performance.now(); });
+  app.on('frameend', () => {
+    const S = R.sampler, t = app._time;
+    if (S && prevT) S.push(t - prevT, performance.now() - tickT, app.stats.cpuRenderTime || 0, R.upd, R.drw, app.stats.gpuFrameTime ?? -1, app.stats.drawCallCount);
+    prevT = t;
+    if (R.grab) { const f = R.grab; R.grab = null; f(); }
+  });
   app.start();
 
   // Нестача пам'яті GPU — подія 'oom' (why): браузер не каже, скільки пам'яті у відеокарти, лише що виділити не вдалося.
@@ -101,7 +113,7 @@ export async function createApp(canvas, { device = 'webgl2', maxPixelRatio = 2, 
     pc, dev, app, scene: app.scene, lang, layers, camE, cam: camE.camera, root, O, R,
     on: (name, f) => ev.on(name, f), fire: (name, ...a) => ev.fire(name, ...a),
     setOrigin, toPC, dirToPC, matToPC,
-    onFrame(f) { next = f; },
+    onFrame(f) { next = f; }, setProfiler,
     get width() { return canvas.clientWidth || innerWidth; }, get height() { return canvas.clientHeight || innerHeight; },
     info: {
       device: dev.isWebGPU ? 'webgpu' : 'webgl2', webgpu: 'gpu' in navigator,

@@ -106,7 +106,7 @@ function boot(renderer) {
       const st = g ? g.world.stats() : {}, R = renderer.R;
       return { fps: perf.fps, frameMs: perf.frameMs, p99: perf.p99, frameMax: perf.max, upd: perf.upd, drw: perf.drw, gpuMs: R.gpuMs, draws: R.stats.draws, tris: R.stats.tris, full: R.stats.full, flTris: R.stats.flTris, flbTris: R.stats.flbTris,
         gpuMB: (R.stats.gpuBytes + R.stats.arenaBytes) / 1048576, colsPerSec: st.colsPerSec, pending: st.pending, cols: st.cols, secs: st.secs, meshes: renderer.meshCount, lod: [...renderer.lodCounts], workers: st.workers, streamMs: g ? g.streamMs : 0,
-        pcMs: R.cpuRenderMs, gpuPass: R.gpuPass, shTris: R.stats.shTris, shDraws: R.stats.shDraws, occ: g && g.occ ? { ...g.occ.stats } : null, ...lightStats() };
+        pcMs: R.cpuRenderMs, gpuPass: R.gpuPass, shTris: R.stats.shTris, shDraws: R.stats.shDraws, camSub: R.stats.camSub, shSub: R.stats.shSub, occ: g && g.occ ? { ...g.occ.stats } : null, ...lightStats() };
     },
     // Відсікання закритого: увімкнути / вимкнути (заміри й знімки «з / без»; тримається й після нового світу)
     occ(on, opts) { occOff = !on; if (g) { g.occ.enabled = !!on; if (opts) g.occ.set(opts); } return !occOff; },
@@ -247,7 +247,14 @@ function boot(renderer) {
     // Текст F3 у буфер обміну (як Ctrl+Shift+C); повертає текст
     copyDebug() { return copyDebug(); },
     // Зупинити світ (годинник, рух, камера) без меню — знімки одного й того самого кадру
-    freeze(on) { g.frozen = !!on; return g.frozen; },
+    // at — мітка часу замороженого кадру (анімація фігури — за нею, пози доведено до цілі): однаковий кадр у різних запусках
+    freeze(on, at) {
+      g.frozen = !!on;
+      if (on && at !== undefined) { g.frozenAt = at; for (let i = 0; i < 80; i++) animate(g.me, 0.05, at, 1); }
+      return g.frozen;
+    },
+    // Годинник світу стоїть (погода, вітер, світила — ті самі щокадру): on — на поточному значенні, false — іде далі
+    pin(on) { g.pin = on ? g.clock : null; if (on) renderer.rebake(); return g.pin; },
     // Стенд руху: гравець — на місце name (STAND_SPOTS), обличчям за поглядом місця
     spot(name) {
       const sp = STAND_SPOTS[name], me = g.me;
@@ -269,6 +276,23 @@ function boot(renderer) {
     aimFx(on) { g.aimFx = !!on; return g.aimFx; },
     // Ціль: {kind, t, x, y, k, b, mass, key} або null
     aim() { const a = g.aim; return a ? { kind: a.kind, t: a.t, p: a.p, x: a.x, y: a.y, k: a.k, b: a.b, mass: a.body ? a.body.mass : undefined, key: a.key, form: a.obj ? a.obj.o.k : undefined } : null; },
+    // Заміри (test/perf.mjs): дальність у чанках (8–32), як у налаштуваннях, але без запису
+    setView(c) { return setView(c); },
+    // Покадрові заміри ms мілісекунд: [інтервал кадру, CPU такту PlayCanvas, CPU рендера PlayCanvas, CPU оновлення гри,
+    // CPU малювання гри, GPU кадру (−1 — профайлер вимкнено), викликів]
+    sample(ms) {
+      const A = [], R = renderer.G.R;
+      R.sampler = { push: (...v) => A.push(v) };
+      return new Promise((r) => setTimeout(() => { R.sampler = null; r(A); }, ms));
+    },
+    // Профайлер GPU PlayCanvas: увімкнути / вимкнути → стан
+    gpuProf(on) { return renderer.G.setProfiler(on); },
+    // Поворот камери з постійною швидкістю rad/с (0 — стоп)
+    spin(rate) { g.spin = rate || 0; return g.spin; },
+    // Кадр полотна (PNG, data URL) одразу після рендера наступного кадру (той самий такт: буфер ще цілий)
+    grab(type = 'image/png') { return new Promise((r) => { renderer.G.R.grab = () => r($('gl').toDataURL(type)); }); },
+    // Порядок малювання незалежний від порядку робіт генератора (scene.js canon) — попіксельні порівняння
+    canon(seed = 0) { return renderer.canon(seed); },
     // Видимого ще бракує (стовпців без зведення й секцій не в GPU) — заміри часу після стрибка
     visMissing() { return g && g.view ? visibleMissing(g, camera, renderer) : -1; },
   };
@@ -761,10 +785,11 @@ function boot(renderer) {
       }
     }
     if (!$('menu').hidden || g.frozen) return;                  // меню — пауза (`?dev` freeze — теж)
-    g.clock += dt;                                              // годинник світу (доба кожного всесвіту — своя)
+    g.clock = g.pin != null ? g.pin : g.clock + dt;             // годинник світу (доба кожного всесвіту — своя; ?dev pin — стоїть)
     const w = takeWheel(), [mx, my] = takeDrag(), turn = turnAxis();
     if (w) wheel(camera, w);
     if (mx || my || turn) rotate(camera, mx + turn * dt * 260, my);
+    if (g.spin) setYaw(camera, camera.yaw + g.spin * dt);        // ?dev spin — поворот камери з постійною швидкістю (заміри)
     smooth(camera, dt);
     const me = g.me;
     if (!me.placed) {
@@ -995,6 +1020,7 @@ function boot(renderer) {
       if (g) { if (g.frozen) draw(0, g.frozenAt ??= now); else { g.frozenAt = null; draw(dt, now); } }
       const t2 = performance.now();
       perf.upd = perf.upd * 0.95 + (t1 - t0) * 0.05; perf.drw = perf.drw * 0.95 + (t2 - t1) * 0.05;
+      renderer.G.R.upd = t1 - t0; renderer.G.R.drw = t2 - t1;      // покадрово — ?dev sample
       perf.cpu = perf.cpu * 0.95 + (t2 - t0) * 0.05;
     }
     fpsN++;
