@@ -50,14 +50,23 @@ export function createRegions(G, layout) {
     if (!(b[0] <= b[3])) return;
     for (const k in R.ar) R.ar[k].mesh.aabb = box(b);
   }
-  // діапазони F/C [a, b) у команди w ('cam' — камери, 'sh' — спільні); → вершин
+  // діапазони F/C [a, b) у команди w ('cam' — камери, 'sh' — спільні); → вершин. Ті самі діапазони, що минулого разу, —
+  // команди не чіпаємо (у WebGPU update — запис буфера непрямого малювання, writeBuffer, щокадру на кожну сітку)
   function fill(m, w, F, C, a, b) {
     const n = b - a;
-    if (n > m[w + 'Cap']) { let c = m[w + 'Cap']; while (c < n) c *= 2; m[w + 'Cap'] = c; m[w] = md(m, w === 'cam' ? camC : null, c); }
-    let v = 0;
     if (w === 'cam') stats.sub = (stats.sub || 0) + n;   // піддрави multi-draw камери (заміри)
-    for (let i = 0; i < n; i++) { m[w].add(i, C[a + i], 1, F[a + i]); v += C[a + i]; }
+    let P = m[w + 'P'];
+    if (P && P[0] === n) {
+      let same = true;
+      for (let i = 0; i < n; i++) if (P[1 + i * 2] !== F[a + i] || P[2 + i * 2] !== C[a + i]) { same = false; break; }
+      if (same) return P[P.length - 1];
+    }
+    if (n > m[w + 'Cap']) { let c = m[w + 'Cap']; while (c < n) c *= 2; m[w + 'Cap'] = c; m[w] = md(m, w === 'cam' ? camC : null, c); }
+    if (!P || P.length < n * 2 + 2) P = m[w + 'P'] = new Float64Array(Math.max(16, m[w + 'Cap']) * 2 + 2);
+    let v = 0;
+    for (let i = 0; i < n; i++) { m[w].add(i, C[a + i], 1, F[a + i]); v += C[a + i]; P[1 + i * 2] = F[a + i]; P[2 + i * 2] = C[a + i]; }
     m[w].update(n);
+    P[0] = n; P[P.length - 1] = v;
     return v;
   }
   // Сітка камери виду kind: діапазони F/C [a, b); → вершин (0 — сітка схована)

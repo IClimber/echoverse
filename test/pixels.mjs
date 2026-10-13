@@ -55,11 +55,15 @@ const VIEWS = arg('views', '8,32').split(',').map(Number), SHS = arg('shadows', 
 const OUT = arg('out', `${tmpdir()}/echoverse-pixels-${API}`); mkdirSync(`${OUT}/A`, { recursive: true }); mkdirSync(`${OUT}/diff`, { recursive: true });
 const NOISE = arg('noise') && existsSync(arg('noise')) ? JSON.parse(readFileSync(arg('noise'), 'utf8')) : null, SAVE = arg('save-noise');
 const noiseOut = SAVE && existsSync(SAVE) ? JSON.parse(readFileSync(SAVE, 'utf8')) : {};
-const P = await launch({ port: 9345, dir: `${tmpdir()}/echoverse-pixels-profile-${API}` });
+// браузер — новий на кожну версію: за годину перезавантажень сторінок один Chrome із WebGPU тримав ~22 ГБ пам'яті ядра
+// (як у perf.mjs), і версія B отримувала полотно іншого розміру чи зависала
+let P = null;
+const errs = [];
 const bySeed = SC.reduce((m, k) => { (m[SCENES[k].seed] ||= []).push(k); return m; }, {});
 const rows = [];
 for (let vi = 0; vi < 2; vi++) {
   const port = PORTS[vi];
+  P = await launch({ port: 9345, dir: `${tmpdir()}/echoverse-pixels-profile-${API}` });
   for (const seed in bySeed) {
     await openGame(P, port, { gpu: API, view: VIEWS[VIEWS.length - 1], seed });
     await P.ev('eco.gpuProf(false)');
@@ -99,11 +103,11 @@ for (let vi = 0; vi < 2; vi++) {
     }
     await P.send('Page.navigate', { url: 'about:blank' }); await wait(1000);
   }
+  errs.push(...P.errs); P.quit(); await wait(2500);
 }
 if (SAVE) writeFileSync(SAVE, JSON.stringify(noiseOut));
-writeFileSync(`${OUT}/report.json`, JSON.stringify({ api: API, ports: PORTS, canon: CANON, rows, errs: P.errs }, null, 1));
+writeFileSync(`${OUT}/report.json`, JSON.stringify({ api: API, ports: PORTS, canon: CANON, rows, errs }, null, 1));
 const bad = rows.filter((r) => r.fresh || r.sizeA);
-console.log(`\n${API}: кадрів ${rows.filter((r) => r.diff !== undefined).length}, з різницею поза шумом — ${bad.length}; помилок у консолі ${P.errs.length}`);
-for (const e of P.errs.slice(0, 10)) console.log(e);
-P.quit();
+console.log(`\n${API}: кадрів ${rows.filter((r) => r.diff !== undefined).length}, з різницею поза шумом — ${bad.length}; помилок у консолі ${errs.length}`);
+for (const e of errs.slice(0, 10)) console.log(e);
 process.exit(bad.length ? 1 : 0);
