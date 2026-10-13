@@ -107,7 +107,7 @@ export function debugText(g, perf, meshCount, cam, R, lod) {
     `зерно      «${rec.seedText}» (${rec.seed})  генератор v${rec.gen}`,
     `адреса     глибина ${g.d}, всесвіт ${fmtN(g.n)}`,
     `позиція    ${me.x.toFixed(2)}, ${me.y.toFixed(2)}  z ${me.z.toFixed(2)}${me.air ? '  у повітрі' : ''}`,
-    `гравітація ${L.grav.toFixed(L.grav < 0.1 ? 3 : 2).replace('.', ',')} g: стрибок ${f2(jumpHeight(L.grav))} м, крок угору ${ph.up}, хода ×${f2(ph.speed)}`,
+    `гравітація ${L.grav.toFixed(L.grav < 0.1 ? 3 : 2).replace('.', ',')} g: стрибок ${f2(jumpHeight(L.grav, ph.vT))} м, крок угору ${ph.up}, хода ×${f2(ph.speed)}`,
     `зоря       ${starLine(L)}`,
     `планета    ${planetLine(L, g)}`,
     `повітря    ${airLine(L)}`,

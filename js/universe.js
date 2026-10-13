@@ -503,14 +503,15 @@ export function gravityAt(L, x, y) {
 // нову висоту (легка гравітація — «пливе»), межа швидкості падіння vT (опір повітря: густе й легка гравітація —
 // повільне падіння, без повітря — майже без межі), тертя ґрунту (1 — звичайне, менше — ковзко), пружність.
 // Зійти пішки можна з будь-якої висоти (шкоди від падіння ще немає)
-export function physOf(L) {
-  const g = L.grav, pr = L.air ? L.air.pressure : 1, P = L.phys || { friction: 1, bounce: 0 };
+export function physOf(L, rho = L.air ? L.air.rho : 1.225) {
+  const g = L.grav, P = L.phys || { friction: 1, bounce: 0 };
   return {
     up: g < FLOAT_G ? 2 : 1,
     speed: g > 1 ? Math.max(0.55, 1 - 0.18 * (g - 1)) : 1 + 0.1 * (1 - g),
     settle: Math.min(20, Math.max(5, 14 * g)),
-    // межа падіння гравця (м/с): вага = опір, m·g = ½·ρ·v²·CdA (m 70 кг, CdA 0,9 м², ρ — 1,225 кг/м³ на атмосферу)
-    vT: Math.min(500, Math.sqrt(2 * 70 * 9.81 * g / (1.225 * Math.max(pr, 1e-4) * 0.9))),
+    // межа падіння гравця (м/с): вага = опір, m·g = ½·ρ·v²·CdA (m 70 кг, CdA 0,9 м², ρ — густина повітря зі складу й
+    // температури, на висоті — з physAt3)
+    vT: Math.min(500, Math.sqrt(2 * 70 * 9.81 * g / (Math.max(rho, 1.225e-4) * 0.9))),
     friction: P.friction, bounce: P.bounce,
     g,
   };

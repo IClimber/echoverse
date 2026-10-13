@@ -55,7 +55,7 @@ export function physAt3(L, x, y, z, clock = 0, ground = null) {
   const gz = G * k - (t ? G * t[2] : 0);
   const tx = a.tx * G * Math.abs(k) + (t ? G * t[0] : 0), ty = a.ty * G * Math.abs(k) + (t ? G * t[1] : 0);
   // повітря на висоті (тиск — e^(−z / H)): межа падіння й сила вітру
-  const A = airAt(L, z), La = A.P === L.air.pressure ? L : { ...L, air: { ...L.air, pressure: A.P } };
-  const base = physOf({ ...La, grav: Math.max(0.02, Math.abs(gz)) });
-  return { ...base, g: gz, g0: G, vT0: physOf(La).vT, P: A.P, rho: A.rho, tilt: tx || ty ? [tx, ty] : null, anom: a.k !== 1 ? k : null, tide: t ? -t[2] : 0, rev: !!a.rev };
+  const A = airAt(L, z);
+  const base = physOf({ ...L, grav: Math.max(0.02, Math.abs(gz)) }, A.rho);
+  return { ...base, g: gz, g0: G, vT0: physOf(L, A.rho).vT, P: A.P, rho: A.rho, tilt: tx || ty ? [tx, ty] : null, anom: a.k !== 1 ? k : null, tide: t ? -t[2] : 0, rev: !!a.rev };
 }

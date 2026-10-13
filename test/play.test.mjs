@@ -439,11 +439,11 @@ test('інша фізика: ковзкий ґрунт — інерція; оп�
   for (let n = 1001; small < 3 && n < 300000; n += 7) small += lawsOf(seed, 0, n).phys.planetR < 3000;   // малі планети — рідкість
   assert.ok(s > 20 && bo > 20 && tm > 20 && small >= 3, `ковзких ${s}, пружних ${bo}, з іншим часом ${tm}, малих ${small}`);
   const L0 = lawsOf(seed, 0, 0);
-  assert.ok(physOf({ ...L0, air: { ...L0.air, pressure: 2.5 } }).vT < physOf({ ...L0, air: { ...L0.air, pressure: 0.3 } }).vT);
+  assert.ok(physOf(L0, L0.air.rho * 2.5).vT < physOf(L0, L0.air.rho * 0.3).vT);
 });
 
 test('нові сили: вітер — чесний опір (на землі — понад поріг від g і густини), в\'язка рідина повільніша, поверхневий натяг тримає на бігу, нахил тяжіння штовхає', () => {
-  // чесний вітер (опір ∝ густина × швидкість²): на землі при 1 g зносить лише понад vT·√тертя (vT 18 — ≈ 117 км/год)
+  // чесний вітер (опір ∝ густина × швидкість²): на землі при 1 g зносить лише понад vT·√тертя (vT 18 — ≈ 65 км/год)
   const P = world(Array(40).fill('4'.repeat(40))), ph1 = { ...PH1, vT: 18 };
   const onGround = (ph, w) => { const m = man(P, 20.5, 20.5); for (let i = 0; i < 60; i++) step(m, 0, 0, false, 1 / 60, P, ph, undefined, { wind: [w, 0] }); return m.x - 20.5; };
   assert.equal(onGround(ph1, 15), 0, '1 g, 15 кл/с — не зносить');
@@ -845,4 +845,57 @@ test('поверхневий натяг: опускаючись на повер�
   assert.ok(!hits(P, p.x, p.y, p.z));
   step(p, 1, 0, false, 1 / 120, P, physOf(L), undefined, { sprint: true });
   assert.ok(!hits(P, p.x, p.y, p.z), `перетин: ${p.x} ${p.y} ${p.z}`);
+});
+
+test('опір повітря: стрибок 1,15 м і 0,97 с при 1 g і 1 атм, як у формулі, за будь-якого кроку; падіння — до межі, не далі; метан — Архімед', async () => {
+  const { physOf } = await import('../js/universe.js');
+  const ph = physOf({ grav: 1, air: { rho: 1.225 }, phys: { friction: 1, bounce: 0 } });
+  const air = (dt) => {
+    const P = world(Array(9).fill('4'.repeat(9))), p = man(P, 4.5, 4.5), z0 = p.z;
+    step(p, 0, 0, true, dt, P, ph);
+    let t = dt, top = p.z - z0;
+    while (!p.ground && t < 5) { step(p, 0, 0, false, dt, P, ph); t += dt; top = Math.max(top, p.z - z0); }
+    return [t, top];
+  };
+  const [t120, h120] = air(1 / 120), [t30, h30] = air(1 / 30);
+  assert.ok(Math.abs(h120 - 1.15) < 0.01 && Math.abs(t120 - 0.97) < 0.01, `120 Гц: ${h120} м, ${t120} с`);
+  assert.ok(Math.abs(jumpHeight(1, ph.vT) - 1.15) < 0.005, `формула: ${jumpHeight(1, ph.vT)}`);
+  assert.ok(Math.abs(h30 - h120) < 0.02 && Math.abs(t30 - t120) < 1 / 30 + 0.005, `30 Гц: ${h30} м, ${t30} с`);
+  // вільне падіння з 2 км: швидкість наближається до межі й не перевищує її; аналітика v(t) = vT·th(g·t/vT)
+  const P = world(Array(9).fill('4'.repeat(9))), p = { x: 4.5, y: 4.5, z: 2000, vz: 0, ground: false };
+  for (let i = 0; i < 360; i++) { step(p, 0, 0, false, 1 / 120, P, ph); assert.ok(-p.vz <= ph.vT + 1e-9); }
+  const vt = ph.vT * Math.tanh(GRAVITY * 3 / ph.vT);
+  assert.ok(Math.abs(-p.vz - vt) < 0.05, `3 с: ${-p.vz} проти ${vt}`);
+  // метан (0,42): тонеш з межею √(2·m·g·(1 − ρр/ρт) / (ρр·CdA)) ≈ 1,44 м/с
+  const M = world(Array(9).fill('w'.repeat(9)), { swim: false, danger: 'x', density: 0.42 }), q = { x: 4.5, y: 4.5, z: 5.5 * LEVEL, vz: 0, ground: false };
+  let vEnd = 0;
+  for (let i = 0; i < 600 && !q.ground; i++) { step(q, 0, 0, false, 1 / 120, M, PH1); if (q.z > 1.2) vEnd = -q.vz; }
+  const vl = Math.sqrt(2 * 70 * GRAVITY * (1 - 420 / 985) / (420 * 0.9));
+  assert.ok(Math.abs(vEnd - vl) < 0.02 && q.ground, `метан: ${vEnd} проти ${vl}`);
+});
+
+test('тіла: тертя Кулона (гальмівний шлях v²/(2μg)), межа падіння — від площі проєкції й маси, вітер зрушує понад μ·m·g', async () => {
+  const { configureBodies } = await import('../js/engine/physics/bodies.js'); const { solidB: sB } = await import('../js/gen/chunk.js'); const pl = await import('../js/player.js'); const { LEVEL: LV } = await import('../js/iso.js');
+  configureBodies({ level: LV, solid: sB, gravity: pl.GRAVITY, refMass: pl.PLAYER_MASS, refArea: pl.PLAYER_AREA });
+  const { makeBody, stepBody, windMoves } = await import('../js/engine/physics/bodies.js');
+  const P = world(Array(40).fill('4'.repeat(40)));
+  for (const mu of [1, 0.3]) {
+    const env = { g: 1, vT: 1e9, bounce: 0, friction: mu, wind: [0, 0] };
+    const b = makeBody({ x: 5.5, y: 20.5, z: 4 * LEVEL, hx: 0.25, hy: 0.25, hz: 0.25, lift: 0 });
+    b.sleep = false; for (let i = 0; i < 30; i++) stepBody(b, 1 / 120, P, env);   // лягло
+    b.vx = 3; const x0 = b.x;
+    for (let i = 0; i < 600; i++) stepBody(b, 1 / 120, P, env);
+    const want = 9 / (2 * mu * GRAVITY);
+    assert.ok(Math.abs(b.x - x0 - want) < 0.03 + want * 0.03, `μ ${mu}: ${b.x - x0} проти ${want}`);
+  }
+  // межа падіння: m·g = ½·ρ·Cd·A·v² (ρ з межі гравця 35,29 м/с ↔ 1,225 кг/м³), куб 0,5 м
+  const vTp = Math.sqrt(2 * 70 * GRAVITY / (1.225 * 0.9)), env = { g: 1, g0: 1, vT: vTp, bounce: 0, friction: 1, wind: [0, 0] };
+  const c = makeBody({ x: 20.5, y: 20.5, z: 20000, hx: 0.25, hy: 0.25, hz: 0.25, lift: 0 });
+  c.sleep = false; for (let i = 0; i < 120 * 40; i++) stepBody(c, 1 / 120, P, env);
+  const vt = Math.sqrt(2 * c.mass * GRAVITY / (1.225 * 1.05 * 0.25));
+  assert.ok(Math.abs(-c.vz - vt) < vt * 0.01, `межа куба: ${-c.vz} проти ${vt}`);
+  // вітер зрушує камінь, коли ½·ρ·Cd·A·w² > μ·m·g
+  const s = makeBody({ x: 10.5, y: 10.5, z: 4 * LEVEL, hx: 0.1, hy: 0.1, hz: 0.1, lift: 0 });
+  const wc = Math.sqrt(2 * s.mass * GRAVITY / (1.225 * 1.05 * 0.04));
+  assert.ok(!windMoves(s, { ...env, wind: [wc * 0.95, 0] }) && windMoves(s, { ...env, wind: [wc * 1.05, 0] }), `поріг ${wc}`);
 });

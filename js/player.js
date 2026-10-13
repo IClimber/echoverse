@@ -16,10 +16,12 @@ export const SPEED = 4.2;            // м/с (при 1 g; хода в Minecraft
 export const FOOT = 0.24;            // півширина габариту
 export const BODY = 0.98;            // зріст, м (2 блоки; 12.10.2026: одиниця гри — 1 м, розміри як були)
 export const PLAYER_MASS = 70;                // маса гравця (тисне тіло, на якому стоїть; штовхає)
+export const BODY_RHO = 985;                 // густина тіла гравця, кг/м³ (Архімед у рідині, що не тримає)
 export const PLAYER_AREA = 0.9;               // опір гравця Cd·A, м² (закон п. 4): межа падіння ≈ 35 м/с при 1 g, 1 атм
 export const HIT_IMPULSE = 150;               // удар гравця (маса × швидкість): камінчик — ~6 од/с, брила — ледь
 export const GRAVITY = 9.81;         // прискорення при 1 g, м/с² (рішення 12.10.2026: справжнє)
-export const JUMP_V = 4.75;          // поштовх стрибка, м/с: при 1 g — 1,15 м (на уступ 1 м) і 0,97 с у повітрі
+export const JUMP_V = 4.77;          // поштовх стрибка, м/с: при 1 g і 1 атм (з опором повітря) — 1,15 м (на уступ 1 м) і
+                                     // 0,97 с у повітрі
 export const FLOAT_Z = 0.6;          // той, хто пливе у воді, тримається ногами на стільки нижче поверхні (густіша — вище)
 export const SPRINT = 1.6;           // біг (Shift): множник швидкості пішки (у воді — половина надбавки)
 // Політ: клітинок за секунду по горизонталі, з Shift. ТИМЧАСОВО на час розробки (користувач, 11.10.2026) — 48 / 120;
@@ -64,7 +66,11 @@ const R2 = Math.SQRT1_2;
 const MB45 = [[R2, -R2], [R2, R2]];  // базис руху ізометрії з азимутом 45°: праворуч, униз екрана
 const EPS = 1e-4;
 
-export const jumpHeight = (g) => JUMP_V * JUMP_V / (2 * GRAVITY * g);
+// висота стрибка при тяжінні g (у g) і межі падіння vT: з квадратичним опором h = vT²/(2a)·ln(1 + v₀²/vT²)
+export const jumpHeight = (g, vT = Infinity) => {
+  const a = GRAVITY * g, q = JUMP_V * JUMP_V / (vT * vT);
+  return q < 1e-9 ? JUMP_V * JUMP_V / (2 * a) : vT * vT / (2 * a) * Math.log1p(q);
+};
 const floatZ = (P) => FLOAT_Z * Math.min(1, 1 / P.liquid.density);
 
 // Перешкоди-предмети біля (x, y): виклик f(o) для кожної, поки f не поверне true
@@ -334,7 +340,7 @@ export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
       p.yaw = Math.atan2(dirY, dirX);
     }
     const fr = surf !== null ? 1 : mu;
-    // вітер на землі: зносить лише понад vT·√тертя (опір повітря сильніший за тертя; 1 g, 1 атм — ≈ 117 км/год);
+    // вітер на землі: зносить лише понад vT·√тертя (опір повітря сильніший за тертя; 1 g, 1 атм — ≈ 127 км/год);
     // нахил тяжіння (аномалія) — як схил
     if (wind && surf === null) {
       const wl = Math.hypot(wind[0], wind[1]), th = vT * Math.sqrt(fr);
@@ -383,6 +389,7 @@ export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
   // Вертикаль: під рідиною — пробіл / Ctrl, без введення — повільно вгору; у рідині, що тримає, — виштовхує до поверхні
   // (м'яка пружина); у рідкій, що не тримає, — повільно тонеш (опір); інакше — гравітація
   const s2 = liquidAt(P, p.x, p.y, p.z);
+  let vzm;                                                   // середня вертикальна швидкість кроку (зсув — vzm·dt)
   if (s2 !== null && buoy && p.dive) {
     if (!swimFast) {
       const rho = P.liquid.density || 1, up = Math.min(2, (0.3 + 1.2 * Math.max(0, rho - 1)) * vs);
@@ -390,28 +397,35 @@ export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
       p.vz += (tvz - p.vz) * Math.min(1, 8 * dt);
     }
   } else if (s2 !== null && buoy && !p.ground && !p.leap) p.vz += ((s2 - floatZ(P) - p.z) * 22 / visc - p.vz * 7 * Math.sqrt(visc)) * dt;
-  else if (s2 !== null && !buoy) p.vz += (-GRAVITY * ph.g * 0.35 / visc - p.vz * 4 * visc) * dt;
-  else {
-    // опір повітря: падіння не швидше за vT; пробіл під час падіння — ширяння (у густому повітрі помітно):
-    // межу досягнуто — далі не швидше; уже швидше за межу (почав ширяти) — плавно гальмуєш до неї
-    const vT = (ph.vT ?? 1e9) * (ctl.vert > 0 && p.vz < 0 ? 0.45 : 1), v0 = p.vz;
-    p.vz -= GRAVITY * ph.g * dt;
-    if (p.vz < -vT) p.vz = v0 >= -vT ? -vT : v0 + (-vT - v0) * Math.min(1, dt * 6);
+  else if (s2 !== null && !buoy) {
+    // рідина, що не тримає (метан): вага мінус Архімед (тіло 985 кг/м³) і квадратичний опір рідини (× в'язкість)
+    const rl = (P.liquid.density || 1) * 1000;
+    p.vz += (-GRAVITY * ph.g * (1 - rl / BODY_RHO) - rl * PLAYER_AREA / (2 * PLAYER_MASS) * visc * p.vz * Math.abs(p.vz)) * dt;
+  } else {
+    // тяжіння й квадратичний опір повітря: a = −g − g·v·|v|/vT² (межа падіння vT — асимптотично; угору опір теж гальмує);
+    // пробіл під час падіння — ширяння (руки розкинуті: межа × 0,45); положення — за середньою швидкістю кроку (точно
+    // для сталого прискорення)
+    const vT = (ph.vT ?? 1e9) * (ctl.vert > 0 && p.vz < 0 ? 0.45 : 1), gA = GRAVITY * ph.g, v0 = p.vz;
+    const a = -gA - gA * v0 * Math.abs(v0) / (vT * vT), v1 = v0 + a * dt;
+    p.vz = v0 + (-gA - gA * v1 * Math.abs(v1) / (vT * vT) + a) / 2 * dt;   // Хойн (2-й порядок): опір — у середині кроку
+    vzm = (v0 + p.vz) / 2;
   }
   p.glide = !p.ground && s2 === null && ctl.vert > 0 && p.vz < 0;
   if (jump && p.pose !== 'crawl' && p.pose !== 'swim') {
-    if (p.ground) { p.vz = JUMP_V * (s2 === null ? 1 : 0.85); p.jumped = true; }
-    else if (s2 !== null && buoy && !p.dive && p.z > s2 - floatZ(P) - 0.25) { p.vz = JUMP_V * 0.8; p.leap = LEAP; }   // з поверхні — вистрибнути
+    // з ґрунту: поштовх на початку кроку, далі за крок — тяжіння (траєкторія та сама за будь-якого кроку)
+    if (p.ground) { const j = JUMP_V * (s2 === null ? 1 : 0.85), gA = GRAVITY * ph.g; p.vz = j - gA * dt; vzm = j - gA * dt / 2; p.jumped = true; }
+    else if (s2 !== null && buoy && !p.dive && p.z > s2 - floatZ(P) - 0.25) { p.vz = vzm = JUMP_V * 0.8; p.leap = LEAP; }   // з поверхні — вистрибнути
   }
+  if (vzm === undefined) vzm = p.vz;
   const onLiq = !!P.liquid.tension && !!ctl.sprint && p.moving && s2 === null && !low;   // поверхневий натяг: на бігу рідина тримає
   p.floor = null;
-  if (p.vz > 0) {
-    if (moveAir(C, sh, p, 0, 0, p.vz * dt, STAND_Z).ceil) p.vz = 0;   // стеля
+  if (vzm > 0) {
+    if (moveAir(C, sh, p, 0, 0, vzm * dt, STAND_Z).ceil) p.vz = 0;   // стеля
     p.ground = false; p.onBody = null;
   } else {
     // підлога в межах падіння за крок; на землі — ще й прилипання схилом униз (на вигляд схил: ноги лишаються на землі,
     // вигляд опускається плавно); стійкої немає — падаєш (крутий схил — ковзаєш уздовж нього)
-    const drop = -p.vz * dt, snap = wasGround && s2 === null ? SNAP : 0;
+    const drop = -vzm * dt, snap = wasGround && s2 === null ? SNAP : 0;
     // поверхня рідини (натяг) нижча за падіння за крок — підлогу шукаємо до неї: інакше гравця ставило б на поверхню крізь
     // крутий берег між ними (стрес-тест, 11.10.2026)
     const lt = onLiq ? liqFloor(P, p.x, p.y, p.z, drop + snap) : null;

@@ -223,8 +223,9 @@ test('вітер: без повітря немає; межа падіння пр
   const { physOf } = await import('../js/universe.js');
   const { weatherAt, windHeightK } = await import('../js/weather.js');
   const L = lawsOf(hashStr('test'), 0, 0), E = { ...L, grav: 1, air: { ...L.air, pressure: 1 } };
-  near(physOf(E).vT, 35, 1, 'межа падіння'); 
-  const k = (P) => 1 / physOf({ ...E, air: { ...E.air, pressure: P } }).vT ** 2;   // опір ∝ (v / vT)²
+  near(physOf(E, 1.225).vT, 35, 1, 'межа падіння');
+  near(physOf(L).vT, 35, 1.5, 'межа падіння біля старту (густина зі складу й температури)');
+  const k = (P) => 1 / physOf(E, 1.225 * P).vT ** 2;   // опір ∝ (v / vT)² ∝ густина
   near(k(1) / k(0.1), 10, 0.01, 'у 10 разів слабше при 0,1 атм');
   for (let n = 300; n < 300000; n += 13) { const V = lawsOf(hashStr('test'), 3, n); if (V.air.vacuum) { const W = weatherAt(V, 1234, 5, 5); assert.ok(W.windK === 0 && W.precip === 0 && W.clouds === 0); break; } }
   assert.ok(windHeightK(80, 20) > windHeightK(20, 20) && windHeightK(20, 20) > windHeightK(0, 20), 'вершина — сильніше, долина — слабше');

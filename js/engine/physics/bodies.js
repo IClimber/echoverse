@@ -1,6 +1,7 @@
 // js/engine/physics/bodies.js — тіла з масою (власна фізика, без рушія): ширяюче каміння, пізніше — речі, істоти. Без DOM.
 // Тіло — коробка (піврозміри hx, hy, hz навколо центру x, y, z) з масою. Сили: тяжіння (місцева гравітація × (1 − підйом
-// породи)), для левітуючих (lift > 1) — пружина до висоти ширяння над ґрунтом, опір повітря з вітром (як у гравця; межа падіння — від маси на площу).
+// породи)), для левітуючих (lift > 1) — пружина до висоти ширяння над ґрунтом, опір повітря з вітром (квадратичний, від
+// площі проєкції й маси).
 // Зіткнення з блоками — рух по осях окремо, відскок і тертя від законів всесвіту. Тіло, що спокійно висить чи лежить,
 // «спить» (не рахується), поки його не зачеплять. Удар — імпульс / маса: важке ледь зрушить.
 // Інтерфейс (положення, швидкість, маса, форма) — такий, щоб за потреби пересадити на фізичний рушій.
@@ -68,15 +69,24 @@ export function settle(b, P, eqAt = null) {
 }
 
 const ANCHOR = 2;                             // пружність поля, що тримає левітуюче тіло біля місця (1/с²)
-// Межа падіння тіла: від маси на площу (важке й компактне падає швидше й менше зноситься вітром)
-const vTof = (b, vT) => vT * Math.sqrt((b.mass / (4 * b.hx * b.hz)) / (REF_MASS / REF_AREA));
-// Чи зрушить тіло, що спить: тяжіння вгору; вітер — левітуюче: помітне прискорення, на ґрунті — сильніше за тертя
+const CD_BOX = 1.05;                          // коефіцієнт опору коробки (куб гранню до потоку)
+// Опір повітря тіла в напрямку (dx, dy, dz) (одиничний): k = ρ·Cd·A/(2m), A — площа проєкції коробки на площину,
+// перпендикулярну до напрямку; ρ — з межі падіння гравця vT на цій висоті (k гравця = g₀ / vT² = ρ·CdA_гр / (2m_гр))
+function dragK(b, env, dx, dy, dz) {
+  const vT = env.vT;
+  if (!(vT < 1e8)) return 0;
+  const kP = GRAVITY * Math.abs(env.g0 ?? env.g) / (vT * vT);
+  const A = 4 * (b.hy * b.hz * Math.abs(dx) + b.hx * b.hz * Math.abs(dy) + b.hx * b.hy * Math.abs(dz));
+  return kP * (CD_BOX * A / b.mass) / (REF_AREA / REF_MASS);
+}
+// Чи зрушить тіло, що спить: тяжіння вгору; вітер — левітуюче: помітне прискорення, на ґрунті — сила вітру більша за
+// тертя спокою μ·m·g (вага — за вирахуванням підйому породи)
 export function windMoves(b, env) {
   if (env.g < -0.02 && (b.lift || 0) <= 1) return true;      // тяжіння тягне вгору (зворотна пляма, приплив) — прокидається
   const w = env.wind ? Math.hypot(env.wind[0], env.wind[1]) : 0;
   if (!w) return false;
-  const a = GRAVITY * (env.g0 ?? env.g) * (w / vTof(b, env.vT)) ** 2;
-  return (b.lift || 0) > 1 ? a > 0.15 : a > GRAVITY * env.g * (1 - Math.min(1, b.lift || 0)) * (env.friction ?? 1) * 0.5;
+  const a = dragK(b, env, env.wind[0] / w, env.wind[1] / w, 0) * w * w;
+  return (b.lift || 0) > 1 ? a > 0.15 : a > GRAVITY * env.g * (1 - Math.min(1, b.lift || 0)) * (env.friction ?? 1);
 }
 
 // Крок тіла: P — щуп, env — {g (тяжіння униз у точці, g; може бути ≤ 0 — зворотна пляма, приплив), g0 і vT (тяжіння й
@@ -96,18 +106,19 @@ export function stepBody(b, dt, P, env) {
     if (target === undefined) { const gz = groundBelow(P, b.x, b.y, b.z); target = gz === null ? b.z : gz + b.hover + b.hz; }
     az += (target - b.z) * 6 - b.vz * 2.2;
   }
-  // опір повітря й вітер — як у гравця: прискорення g·(v_відн / vT)², межа падіння тіла vTb — від маси на площу
-  // (важке й компактне падає швидше й менше зноситься)
-  const w = env.wind || [0, 0], vTb = vTof(b, env.vT);
-  const rx = w[0] - b.vx, ry = w[1] - b.vy, rl = Math.hypot(rx, ry);
-  if (rl > 1e-6) { const dv = Math.min(rl, GRAVITY * (env.g0 ?? env.g) * (rl / vTb) * (rl / vTb) * dt); b.vx += rx / rl * dv; b.vy += ry / rl * dv; }
+  // опір повітря з вітром: a = −k·|v_відн|·v_відн, k — від площі проєкції за напрямом руху й маси (важке й компактне
+  // падає швидше й менше зноситься; межа падіння — асимптотично, без жорсткої межі)
+  const w = env.wind || [0, 0];
+  const rx = w[0] - b.vx, ry = w[1] - b.vy, rz = -b.vz, rl = Math.hypot(rx, ry, rz);
+  if (rl > 1e-6) {
+    const dv = Math.min(rl, dragK(b, env, rx / rl, ry / rl, rz / rl) * rl * rl * dt);
+    b.vx += rx / rl * dv; b.vy += ry / rl * dv; b.vz += rz / rl * dv;
+  }
   if (env.tilt) { b.vx += env.tilt[0] * GRAVITY * dt; b.vy += env.tilt[1] * GRAVITY * dt; }
   if (env.rev) az -= b.vz * 1.5;
   // левітуюче: поле тримає й по горизонталі — вітер лише відхиляє (легке — далі), після удару — нове місце, де спиниться
   if (lift > 1 && b.ax !== undefined && b.ax !== null) { b.vx += ((b.ax - b.x) * ANCHOR - b.vx * 1.6) * dt; b.vy += ((b.ay - b.y) * ANCHOR - b.vy * 1.6) * dt; }
   b.vz += az * dt;
-  if (b.vz < -vTb) b.vz = -vTb;
-  else if (b.vz > vTb) b.vz = vTb;
   moveBody(b, dt, P, env);
   const sp = Math.hypot(b.vx, b.vy, b.vz);
   b.calm = sp < SLEEP_V ? b.calm + dt : 0;
@@ -126,8 +137,13 @@ function moveBody(b, dt, P, env) {
       if (!d) continue;
       const nx = ax === 'x' ? b.x + d : b.x, ny = ax === 'y' ? b.y + d : b.y, nz = ax === 'z' ? b.z + d : b.z;
       if (!boxHits(P, b, nx, ny, nz)) { b[ax] = ax === 'x' ? nx : ax === 'y' ? ny : nz; continue; }
+      const vn = b[v];
       b[v] = ax === 'z' && b.vz < 0 && b.vz > -1.5 ? 0 : -b[v] * rest;   // повільно на опору — лягає, швидко — відскакує
-      if (ax === 'z') { b.vx *= 1 - 0.5 * fr * Math.min(1, h * 30); b.vy *= 1 - 0.5 * fr * Math.min(1, h * 30); }   // тертя об опору
+      if (ax === 'z') {
+        // тертя Кулона об опору (чи стелю): дотичний імпульс — не більше μ × нормального (|Δv_z|); лежить — μ·g·dt за крок
+        const vt = Math.hypot(b.vx, b.vy), dvt = fr * Math.abs(b[v] - vn);
+        if (vt > 0) { const k = Math.max(0, vt - dvt) / vt; b.vx *= k; b.vy *= k; }
+      }
     }
   }
   b.yaw += b.spin * dt;
