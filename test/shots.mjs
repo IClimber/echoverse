@@ -68,8 +68,14 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 await wait(2000);
 const page = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find((t) => t.type === 'page');
 const ws = new WebSocket(page.webSocketDebuggerUrl), pend = new Map(), errs = []; let id = 0;
+// Прогрес — одразу (не в кінці): зависання видно за секунди. Фатальне в консолі (виняток гри, втрата GPU) — стоп одразу
+// з причиною: гра далі не малює, і очікування світу тривало б до тайм-ауту (13.10.2026: 10 хв без жодного рядка)
+const T0 = Date.now(), log = (...a) => console.error(`[${((Date.now() - T0) / 1000).toFixed(0)} с]`, ...a);
+let fatal = null;
+const FATAL = /^ВИНЯТОК|devicelost|бракує пам'яті/;
 ws.onmessage = (e) => {
   const m = JSON.parse(e.data);
+  if (m.method === 'Runtime.exceptionThrown' || m.method === 'Runtime.consoleAPICalled') setTimeout(() => { const f = errs.find((x) => FATAL.test(x)); if (f && !fatal) { fatal = f; log('ФАТАЛЬНЕ:', f); } });
   if (m.method === 'Runtime.exceptionThrown') errs.push('ВИНЯТОК ' + String(m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text).slice(0, 400));
   if (m.method === 'Runtime.consoleAPICalled' && (m.params.type === 'error' || m.params.type === 'warning') && errs.length < 60) errs.push(m.params.type + ' ' + m.params.args.map((a) => a.value ?? a.description).join(' ').slice(0, 400));
   if (m.id && pend.has(m.id)) { pend.get(m.id)(m.result); pend.delete(m.id); }
@@ -77,8 +83,13 @@ ws.onmessage = (e) => {
 await new Promise((r) => (ws.onopen = r));
 const send = (method, params = {}) => new Promise((r) => { const i = ++id; pend.set(i, r); ws.send(JSON.stringify({ id: i, method, params })); });
 const ev = async (expression) => { const r = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) errs.push('EVAL ' + String(r.exceptionDetails.exception?.description).slice(0, 300)); return r.result?.value; };
-const waitFor = async (expr, ms = 90000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await ev(expr)) return; await wait(100); } throw new Error('не дочекались: ' + expr); };
-const idle = async () => { for (;;) { if ((await ev('eco.stats().pending')) === 0) return; await wait(50); } };
+// Кожне очікування — з межею; фатальне в консолі — стоп одразу
+const waitFor = async (expr, ms = 90000) => {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) { if (fatal) throw new Error('у грі: ' + fatal); if (await ev(expr)) return; await wait(100); }
+  throw new Error(`не дочекались за ${ms / 1000} с: ${expr}; помилки консолі: ${errs.slice(0, 5).join(' | ') || 'немає'}`);
+};
+const idle = () => waitFor('eco.stats().pending === 0', 60000);
 const shot = async (name) => writeFileSync(`${OUT}/${name}.png`, Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
 const menu = (open) => ev(`(() => { const m = document.getElementById('menu'); m.hidden = !${open}; m.style.visibility = ${open} ? 'hidden' : ''; return 1; })()`);
 let last = null;                                  // попередня сцена: те саме місце — без телепорту (приземлення вже знайшло ґрунт)
@@ -87,12 +98,13 @@ const jumpTo = async (n, x, y) => {
   last = [n, x, y];
   await ev(`(() => { const g = eco.g; g.me.x = ${x}; g.me.y = ${y}; g.cam[0] = ${x}; g.cam[1] = ${y}; return 1; })()`);
   await idle(); await wait(500);
-  if ((await ev('eco.g.n')) !== n) { await ev(`eco.g.dev.start([0, ${n}], 'jumpNext'); 1`); while ((await ev('eco.g.n')) !== n) await wait(10); }
-  while ((await ev('eco.visMissing()')) !== 0) await wait(20);
+  if ((await ev('eco.g.n')) !== n) { await ev(`eco.g.dev.start([0, ${n}], 'jumpNext'); 1`); await waitFor(`eco.g.n === ${n}`, 30000); }
+  await waitFor('eco.visMissing() === 0', 90000);
   await idle();
 };
 const R = [];
 for (const [gpu, sh, view] of COMBOS) {
+  log(`поєднання ${gpu} · ${sh} · ${view}`);
   last = null;                                    // кожне поєднання — новий світ
   await send('Runtime.enable');
   await send('Page.navigate', { url: `http://localhost:${PORT}/?dev` }); await wait(1500);
@@ -102,6 +114,7 @@ for (const [gpu, sh, view] of COMBOS) {
   for (let i = 0; i < 60 && !(await ev('!!(window.eco && eco.g)')); i++) { await ev(`document.getElementById('seed').value = '1hsb1wu'; document.getElementById('create').click(); 1`); await wait(1000); }
   await waitFor('!!(eco.g && eco.g.me.placed)'); await idle();
   for (const sc of SCENES) {
+    log('сцена', sc);
     const [n, x, y, ph, sp] = ALL[sc];
     const mode = ['first', 'firstcave', 'under', 'grass'].includes(sp) ? 'first' : 'third', cave = sp === 'cave' || sp === 'firstcave';
     await ev(`eco.setCam('${mode}'); eco.showColl(${sp === 'coll'}); eco.weather(${sp === 'rain' ? "'rain'" : 'null'}); 1`);
@@ -111,7 +124,7 @@ for (const [gpu, sh, view] of COMBOS) {
       for (let i = 0; i < 20 && !ok; i++) { ok = await ev('eco.findCave()'); if (!ok) await wait(250); }
       if (!ok) { R.push({ gpu, sh, view, sc, skip: 'печеру не знайдено' }); continue; }
     }
-    if (cave) { last[3] = 'cave'; await idle(); while ((await ev('eco.visMissing()')) !== 0) await wait(20); }
+    if (cave) { last[3] = 'cave'; await idle(); await waitFor('eco.visMissing() === 0', 90000); }
     if (sp === 'under') {                         // водойма ≥ 3 одиниць: око на 1,5 під поверхнею, погляд трохи вгору (політ — не тоне)
       const w = await ev('eco.findLiquid(12)');
       if (!w) { R.push({ gpu, sh, view, sc, skip: 'водойми не знайдено' }); continue; }
@@ -137,6 +150,7 @@ for (const [gpu, sh, view] of COMBOS) {
   }
   // закони фізики світу: стрибок у всесвіт за умовою, фаза доби, погляд; заміри кадру й GPU
   for (const sc of LSCENES) {
+    log('сцена законів', sc);
     const [d, pred, ph, look, prep] = LAW[sc];
     await ev(`eco.weather(null); eco.starStorm(null); eco.setCam('third'); 1`);
     if (pred) {
@@ -173,6 +187,7 @@ for (const [gpu, sh, view] of COMBOS) {
   await send('Page.navigate', { url: `http://localhost:${PORT}/?move&dev` }); await waitFor('!!(window.eco && eco.g && eco.g.me.placed)'); await idle();
   await menu(false); await ev("document.getElementById('help').hidden = true; 1");
   for (const sc of MSCENES) {
+    log('сцена руху', sc);
     for (const a of MOVE[sc]) {
       if (typeof a === 'number') await wait(a);
       else if (a === 'shot') { if (gpu !== 'webgpu') await shot(`${gpu}-${sh}-${view}-${sc}`); R.push({ gpu, sh, view, sc, device: await ev('eco.stats().device') + ' · ' + JSON.stringify(await ev('eco.pose()')) + ' · ціль ' + JSON.stringify(await ev('(() => { const a = eco.aim(); return a && [a.kind, a.mass ?? a.b ?? a.form]; })()')) }); }
