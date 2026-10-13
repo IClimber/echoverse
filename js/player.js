@@ -309,15 +309,16 @@ export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
   if (!p.slide) p.sv = null;
   let dirX = 0, dirY = 0;
   if (ix || iy) { const vx = ix * mb[0][0] + iy * mb[1][0], vy = ix * mb[0][1] + iy * mb[1][1], l = Math.hypot(vx, vy); dirX = vx / l; dirY = vy / l; }
+  let hr2 = 0;                                               // квадрат горизонтальної відносної швидкості (опір — від повної)
   if (!p.ground && surf === null) {
-    // опір ∝ густина × швидкість²: прискорення g·(v_відн / vT)² (vT — межа падіння; ширяння — більший опір)
-    if (wind) {
-      const rx = wind[0] - p.vx, ry = wind[1] - p.vy, rl = Math.hypot(rx, ry);
-      if (rl > 1e-6) {
-        const vTh = p.glide ? vT * 0.45 : vT, dv = Math.min(rl, gA * (rl / vTh) * (rl / vTh) * dt);
-        p.vx += rx / rl * dv; p.vy += ry / rl * dv;
-      }
+    // опір ∝ густина × швидкість²: a = −k·|v_відн|·v_відн, k = g / vT² (vT — межа падіння; ширяння — більший опір);
+    // |v_відн| — повна відносна швидкість (у падінні бічний вітер зносить сильніше, ніж на місці)
+    const w0 = wind ? wind[0] : 0, w1 = wind ? wind[1] : 0, rx = w0 - p.vx, ry = w1 - p.vy, rl = Math.hypot(rx, ry);
+    if (rl > 1e-6) {
+      const vTh = p.glide ? vT * 0.45 : vT, dv = Math.min(rl, gA / (vTh * vTh) * Math.hypot(rl, p.vz) * rl * dt);
+      p.vx += rx / rl * dv; p.vy += ry / rl * dv;
     }
+    hr2 = (w0 - p.vx) ** 2 + (w1 - p.vy) ** 2;
     if (ph.tilt) { p.vx += ph.tilt[0] * GRAVITY * dt; p.vy += ph.tilt[1] * GRAVITY * dt; }
   } else if (swimFast) {
     // біг під рідиною: уздовж погляду (3D), прискорення 8/с
@@ -405,9 +406,10 @@ export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
     // тяжіння й квадратичний опір повітря: a = −g − g·v·|v|/vT² (межа падіння vT — асимптотично; угору опір теж гальмує);
     // пробіл під час падіння — ширяння (руки розкинуті: межа × 0,45); положення — за середньою швидкістю кроку (точно
     // для сталого прискорення)
-    const vT = (ph.vT ?? 1e9) * (ctl.vert > 0 && p.vz < 0 ? 0.45 : 1), gA = GRAVITY * ph.g, v0 = p.vz;
-    const a = -gA - gA * v0 * Math.abs(v0) / (vT * vT), v1 = v0 + a * dt;
-    p.vz = v0 + (-gA - gA * v1 * Math.abs(v1) / (vT * vT) + a) / 2 * dt;   // Хойн (2-й порядок): опір — у середині кроку
+    const vT = (ph.vT ?? 1e9) * (ctl.vert > 0 && p.vz < 0 ? 0.45 : 1), gA = GRAVITY * ph.g, v0 = p.vz, k = gA / (vT * vT);
+    const acc = (v) => -gA - k * Math.sqrt(hr2 + v * v) * v;
+    const a = acc(v0), v1 = v0 + a * dt;
+    p.vz = v0 + (acc(v1) + a) / 2 * dt;                     // Хойн (2-й порядок): опір — у середині кроку
     vzm = (v0 + p.vz) / 2;
   }
   p.glide = !p.ground && s2 === null && ctl.vert > 0 && p.vz < 0;

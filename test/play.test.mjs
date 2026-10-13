@@ -533,7 +533,7 @@ test('вітер: затишок за стіною, деревом чи каме
   const v0 = r.vx;
   step(r, 1, 0, true, 1 / 60, P, ph1, [[1, 0], [0, 1]]);
   for (let i = 0; i < 10; i++) step(r, 0, 0, false, 1 / 60, P, ph1, [[1, 0], [0, 1]]);
-  assert.ok(!r.ground && Math.abs(r.vx - v0) < 1e-9, `розбіг: ${r.vx} ${v0}`);
+  assert.ok(!r.ground && r.vx < v0 && r.vx > v0 * 0.95, `розбіг (лише опір повітря гальмує): ${r.vx} ${v0}`);
   const fall = (vert) => { const m = { x: 20.5, y: 20.5, z: 30, vz: 0, ground: false }; for (let i = 0; i < 60; i++) step(m, 0, 0, false, 1 / 60, P, ph1, undefined, { wind: [6, 0], vert }); return m.x - 20.5; };
   assert.ok(fall(1) > fall(0) * 1.5, `ширяння: ${fall(1)} ${fall(0)}`);
 });
