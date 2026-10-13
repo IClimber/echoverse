@@ -2,7 +2,7 @@
 // (graphics/particles.md, приклад graphics/particles-snow) з wrap — частинки прив'язані до світу й загортаються в коробку
 // навколо цілі. Укриття: частинки під дахом (карта 64×64 — висота верху стовпця, світ PlayCanvas y) не малюються.
 // Шейдер частинок бере лише глобальні шматки (getShaderVariant емітера матеріальних не передає), тож particle_initVS
-// (глобальна область) і particle_wrapVS (тіло main, лише з wrap) — типові + наше, для обох мов; particle_stretchVS — обхід помилки
+// (глобальна область) і particle_wrapVS (тіло main, лише з wrap) — типові + наше, для обох мов; PC_FIXES — обходи помилок
 const SH = 64;
 const ADD_INIT_GLSL = `
 uniform sampler2D eco_shelter;
@@ -26,19 +26,28 @@ const ADD_WRAP_WGSL = `
 		}
 	}
 `;
+// Обходи помилок 2.23.2 у шматках частинок: [шматок, що замінити, на що] — для обох мов (у якій мові місця немає —
+// без змін); test/engine.test.mjs стереже, що місця заміни в рушії ще є
+export const PC_FIXES = [
+  // з wrap розтяг (stretch) ще раз додає зсув загортання до попередньої позиції
+  // (posPrev = загорнута − швидкість·stretch + (загорнута − справжня)) — риска тяглась до справжньої позиції частинки,
+  // за десятки одиниць (дощ — кілька довгих ліній через увесь екран замість тисяч коротких рисок). particlePos тут уже
+  // загорнута, тож попередня — просто particlePos − moveDir
+  ['particle_stretchVS', /\n\s*posPrev (\+= particlePosMoved|= posPrev \+ particlePosMoved);/, ''],
+  // WebGPU: загортання — WGSL-ним %, а в нього знак залишку — від діленого (у GLSL mod — від дільника), тож частинки
+  // з від'ємного боку центру коробки лягали ще на коробку далі: усі — в одному куті (сніг лише в куті екрана, 14.10.2026).
+  // Як mod: x − b·floor(x / b)
+  ['particle_wrapVS', '(particlePos % uniform.wrapBounds)', '(particlePos - uniform.wrapBounds * floor(particlePos / uniform.wrapBounds))'],
+];
 let patched = null;
 function patch(G) {
   if (patched === G.dev) return;
   const { pc, dev } = G;
   for (const [lang, init, wrap] of [[pc.SHADERLANGUAGE_GLSL, ADD_INIT_GLSL, ADD_WRAP_GLSL], [pc.SHADERLANGUAGE_WGSL, ADD_INIT_WGSL, ADD_WRAP_WGSL]]) {
     const C = pc.ShaderChunks.get(dev, lang);
+    for (const [k, from, to] of PC_FIXES) C.set(k, C.get(k).replace(from, to));
     C.set('particle_initVS', C.get('particle_initVS') + init);
     C.set('particle_wrapVS', C.get('particle_wrapVS') + wrap);
-    // Обхід помилки 2.23.2: з wrap розтяг (stretch) ще раз додає зсув загортання до попередньої позиції
-    // (posPrev = загорнута − швидкість·stretch + (загорнута − справжня)) — риска тяглась до справжньої позиції частинки,
-    // за десятки одиниць (дощ — кілька довгих ліній через увесь екран замість тисяч коротких рисок). particlePos тут уже
-    // загорнута, тож попередня — просто particlePos − moveDir
-    C.set('particle_stretchVS', C.get('particle_stretchVS').replace(/\n\s*posPrev (\+= particlePosMoved|= posPrev \+ particlePosMoved);/, ''));
   }
   patched = dev;
 }
@@ -54,12 +63,10 @@ function spriteTex(G, kind) {
   return new pc.Texture(dev, { width: N, height: N, format: pc.PIXELFORMAT_RGBA8, mipmaps: true, levels: [d] });
 }
 
+// Текстура карти укриттів пристрою (створюється першою потребою: картою чи об'ємом — карта до першого об'єму не губиться)
 let shelterTex = null, shelterDev = null;
-// G — застосунок; numParticles, lifetime, size (півширина частинки), stretch (дощ), color [r, g, b, a] (у гамі),
-// texture 'dot' | 'streak', boxXZ (півширина коробки), boxY (піввисота)
-export function createParticleVolume(G, { numParticles = 4000, lifetime = 4, size = 0.05, stretch = 0, color = [1, 1, 1, 1], texture = 'dot', boxXZ = 24, boxY = 14 } = {}) {
+function shelter(G) {
   const { pc, dev } = G;
-  patch(G);
   if (shelterDev !== dev) {
     shelterTex = new pc.Texture(dev, { width: SH, height: SH, format: pc.PIXELFORMAT_R32F, mipmaps: false, minFilter: pc.FILTER_NEAREST, magFilter: pc.FILTER_NEAREST });
     const a = shelterTex.lock(); a.fill(-1e9); shelterTex.unlock();
@@ -67,6 +74,15 @@ export function createParticleVolume(G, { numParticles = 4000, lifetime = 4, siz
     dev.scope.resolve('eco_shelterO').setValue([0, 0]);
     shelterDev = dev;
   }
+  return shelterTex;
+}
+
+// G — застосунок; numParticles, lifetime, size (півширина частинки), stretch (дощ), color [r, g, b, a] (у гамі),
+// texture 'dot' | 'streak', boxXZ (півширина коробки), boxY (піввисота)
+export function createParticleVolume(G, { numParticles = 4000, lifetime = 4, size = 0.05, stretch = 0, color = [1, 1, 1, 1], texture = 'dot', boxXZ = 24, boxY = 14 } = {}) {
+  const { pc } = G;
+  patch(G);
+  shelter(G);
   const e = new pc.Entity('частинки');
   let vel = [0, -1, 0], col = color.slice(), inten = 1;
   const velGraph = (v, s) => new pc.CurveSet([[0, v[0] * s], [0, v[1] * s], [0, v[2] * s]]);
@@ -109,10 +125,9 @@ export function createParticleVolume(G, { numParticles = 4000, lifetime = 4, siz
 // Карта укриттів (спільна для всіх об'ємів): buf — Float32Array(64·64), висота верху стовпця (наші z) клітинки
 // (x0 + i, y0 + j); x0, y0 — наші координати кута
 export function setShelter(G, buf, x0, y0) {
-  if (!shelterTex) return;
-  const a = shelterTex.lock();
+  const t = shelter(G), a = t.lock();
   // наш (i — x, j — y) → текстура (u — PlayCanvas x, v — PlayCanvas z = наш y); значення — y PlayCanvas = наш z
   a.set(buf.subarray(0, SH * SH));
-  shelterTex.unlock();
+  t.unlock();
   G.dev.scope.resolve('eco_shelterO').setValue([x0 - G.O[0], y0 - G.O[1]]);
 }

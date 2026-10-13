@@ -2,6 +2,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createQueue, workerOf } from '../js/gen/queue.js';
+import { readFileSync } from 'node:fs';
+import { PC_FIXES } from '../js/engine/graphics/particles.js';
 
 const drain = (Q, w) => { const r = []; for (let t; (t = Q.take(w));) r.push(t[0]); return r; };
 
@@ -704,4 +706,10 @@ test('генератор: виняток у роботі не ламає чер�
     assert.deepEqual(got, ['ok']); assert.equal(logged, 1); assert.equal(g.pending, 0); assert.equal(g.stats().failed, 1);
     g.want('bad', bad, 0); assert.equal(g.pending, 0);
   } finally { console.error = err; }
+});
+
+test('частинки: обходи помилок PlayCanvas мають свої місця в шматках рушія (розтяг — обидві мови, загортання — WGSL)', () => {
+  const src = readFileSync(new URL('../js/lib/playcanvas/build/playcanvas.mjs', import.meta.url), 'utf8');
+  const count = (p) => (typeof p === 'string' ? src.split(p).length - 1 : (src.match(new RegExp(p.source, 'g')) || []).length);
+  assert.deepEqual(PC_FIXES.map(([, from]) => count(from)), [2, 1]);
 });
