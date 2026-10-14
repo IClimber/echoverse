@@ -1,9 +1,9 @@
 // Зорі з масою, відстанню й потоком; тісні пари; далекі за орбітою планети; припливне захоплення (13.10.2026)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { lawsOf } from '../js/universe.js';
-import { hashStr } from '../js/rng.js';
-import { skyState, bodiesOf, lightsOf, lightSlots, starColor, skyAxes } from '../js/sky.js';
+import { lawsOf } from '../js/laws/universe.js';
+import { hashStr } from '../js/laws/rng.js';
+import { skyState, bodiesOf, lightsOf, lightSlots, starColor, skyAxes } from '../js/env/sky.js';
 
 const near = (v, want, eps, msg) => assert.ok(Math.abs(v - want) <= eps, `${msg}: ${v} замість ${want} ± ${eps}`);
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];

@@ -1,13 +1,13 @@
-// camera.js — камера: перша особа (око гравця) і третя особа (перспектива, за спиною).
+// player/camera.js — камера: перша особа (око гравця) і третя особа (перспектива, за спиною).
 // Лише вигляд, без DOM.
 // Камера дивиться на ціль (гравця); у шейдер ідуть координати відносно цілі. Напрям від цілі до камери —
 // азимут yaw і нахил pitch: u = (cos p · cos yaw, cos p · sin yaw, sin p). Екранні осі: праворуч r = (sin yaw, −cos yaw, 0),
 // угору up = (−sin p · cos yaw, −sin p · sin yaw, cos p). Ця трійка — дзеркальна (+x — униз-праворуч, +y — униз-ліворуч,
 // як була початкова ізометрія), однакова в обох режимах, тож світ при перемиканні не віддзеркалюється.
-import { CS } from './gen/chunk.js';
-import { clamp } from './num.js';
-import { aabbInView, aabbInside } from './engine/core/frustum.js';
-import { createList, clearList, sweepSphere } from './engine/physics/collide.js';
+import { CS } from '../gen/chunk.js';
+import { clamp } from '../laws/num.js';
+import { aabbInView, aabbInside } from '../engine/core/frustum.js';
+import { createList, clearList, sweepSphere } from '../engine/physics/collide.js';
 
 export const THIRD = 'third', FIRST = 'first';
 export const NEXT = { first: THIRD, third: FIRST };   // V: перша особа ↔ третя (вид згори прибрано 13.10.2026)

@@ -3,11 +3,11 @@
 // Світло, туман і текстуру (за матеріалом, координати — проєкцією на площину грані) додає шейдер.
 // Земля — з блоків: грань лише між твердим і порожнім.
 import { CS, FR, SEC, H, O_TREE, O_FLOAT, O_COVER, solidB, B_AIR, B_LIQ, B_ICE, B_SAND, B_GRASS, B_DRY, B_DESERT, B_SNOW, B_ROCK, B_BED, B_MUD, B_SOIL, B_STONE, B_SANDSTONE, B_MAGMA, B_FLOAT, B_LADDER, B_VINE } from './chunk.js';
-import { L_LAVA, SEA, gravityAt, LEVEL } from '../universe.js';
+import { L_LAVA, SEA, gravityAt, LEVEL } from '../laws/universe.js';
 import { template, place, footprint, extent } from './plants.js';
 import { groundTint } from './flora.js';
 import { M_FLAT, M_ROCK, M_CLIFF, M_WATER, M_LAVA, M_ICE, M_SAND, M_LUSH, M_DRY, M_DESERT, M_SNOW, M_BED, M_MUD, M_SOIL, M_SANDSIDE, M_LIP, M_BARK, M_LEAF, THIN_N } from './materials.js';
-import { hash3 } from '../rng.js';
+import { hash3 } from '../laws/rng.js';
 import { createSkyLight } from '../engine/world/skylight.js';
 
 export const shade = (c, k) => [Math.min(255, c[0] * k | 0), Math.min(255, c[1] * k | 0), Math.min(255, c[2] * k | 0)];
@@ -91,7 +91,7 @@ export class Mesh {
 // Рівна грань (вершини — точно в кутах грані блоку: рівнина, пряма стіна) іде в жадібне злиття: однакові в одному
 // шарі зливаються в прямокутники (верх і низ — у двох напрямках, боки — уздовж ряду), так вершин у рази менше;
 // решта — два трикутники з власною нормаллю (пласкі грані, низькополігональний вигляд).
-// Трикутники твердого — проти годинникової ззовні (з повітря): рендер відсікає задні грані (матеріали CULLFACE_BACK, js/scene.js); гладкі
+// Трикутники твердого — проти годинникової ззовні (з повітря): рендер відсікає задні грані (матеріали CULLFACE_BACK, js/render/scene.js); гладкі
 // орієнтує smoothTri, жадібні — порядок вершин у злитті.
 // Позиції — локальні (0…16 по x і y), висота — k · LEVEL. Меші: тверде, поверхня рідини (окремо, напівпрозоро),
 // рослини й каміння зблизька (flora: повна будова, трава й квіти) і здалеку (far: спрощені великі рослини й каміння).

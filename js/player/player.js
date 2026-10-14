@@ -1,4 +1,4 @@
-// player.js — рух гравця: капсула (радіус FOOT, висота BODY) проти того, що малюється (collision.js: трикутники землі,
+// player/player.js — рух гравця: капсула (радіус FOOT, висота BODY) проти того, що малюється (collision.js: трикутники землі,
 // призми стовбурів і каміння, коробки тіл; контролер — engine/physics/character.js), гравітація, стрибок, крок на уступ
 // і хода схилами, плавання (і в небезпечних рідинах: поки немає здоров'я — лише попередження). Без DOM.
 // Позиція — у клітинках (x, y) і висота ніг z у світі; vz — вертикальна швидкість; ground — стоїть на опорі.
@@ -6,11 +6,11 @@
 // що росте в клітинці ({cx, cy, z0, z1, r}: центр, низ і верх, півширина) або null, objR — найбільша півширина
 // перешкод (скільки клітинок навколо перевіряти), liquid — рідина всесвіту ({swim — тримає на плаву, danger}).
 // ph — рух від гравітації (physOf): up, speed, settle, g.
-import { solidB, climbB, climbSide, B_LIQ, B_ICE } from './gen/chunk.js';
-import { KMIN, LEVEL, G0, PLAYER_MASS, PLAYER_AREA } from './universe.js';
-import { clamp } from './num.js';
+import { solidB, climbB, climbSide, B_LIQ, B_ICE } from '../gen/chunk.js';
+import { KMIN, LEVEL, G0, PLAYER_MASS, PLAYER_AREA } from '../laws/universe.js';
+import { clamp } from '../laws/num.js';
 import { colliderOf, isBody } from './collision.js';
-import { capsule, overlap, sweep, findFloor, floorNormal, stands, moveH, moveAir, depenetrate } from './engine/physics/character.js';
+import { capsule, overlap, sweep, findFloor, floorNormal, stands, moveH, moveAir, depenetrate } from '../engine/physics/character.js';
 
 export const SPEED = 4.2;            // м/с (при 1 g; хода в Minecraft — 4,3)
 export const FOOT = 0.24;            // півширина габариту

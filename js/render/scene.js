@@ -1,35 +1,35 @@
-// scene.js — сцена гри на рушії PlayCanvas (js/engine/graphics): регіони секцій (щільні вершини в аренах, multi-draw;
+// render/scene.js — сцена гри на рушії PlayCanvas (js/engine/graphics): регіони секцій (щільні вершини в аренах, multi-draw;
 // далекі — звільняються), рослини зблизька, плитки далечі, фігура гравця, тіла екземплярами, опади частинками, небо з
 // розсіяним світлом, світла сонць і місяців з тінями, туман, «вікно» крізь те, що закриває гравця, розчинення рослин біля
 // ока. Облік (що в якому діапазоні, які видимі) — тут; об'єкти PlayCanvas — у рушії. API для main.js, stream.js,
 // debug.js. Камера — camera.js гри (перша чи третя особа)
-import { createApp, pc } from './engine/graphics/app.js';
-import { createMaterials } from './engine/graphics/materials.js';
-import { outlineChunks } from './engine/graphics/chunks.js';
-import { createRegions } from './engine/graphics/regions.js';
-import { createSky } from './engine/graphics/sky.js';
-import { createLights, SHADOW_D } from './engine/graphics/lights.js';
-import { floatMesh } from './engine/graphics/meshes.js';
-import { createInstances } from './engine/graphics/instances.js';
-import { createParticleVolume, setShelter } from './engine/graphics/particles.js';
-import { createBolts } from './engine/graphics/bolts.js';
-import { cloudsAt, meteorsAt, boltSegs } from './weather.js';
-import { timeK } from './worldphys.js';
-import { SKY_GLSL, SKY_WGSL } from './sky-shader.js';
-import { createHorizon } from './horizon.js';
-import { CS } from './gen/chunk.js';
-import { L_LAVA, LEVEL } from './universe.js';
-import { liquidVis } from './collision.js';
-import { figureParts, lampGlow } from './gen/mesh.js';
-import { LAMP } from './lamp.js';
-import { poseMatrices, viewArms } from './anim.js';
-import { skyState, applyWeather, CLOUD_H, lightsOf, lightSlots, pcIntensity } from './sky.js';
-import { far2, near2 } from './engine/core/frustum.js';
-import { FIRST, CAM_R, FIG_NEAR, fovOf, VIEW_R, FAR_R, SEAM, viewProj, project, basis, aabbInView, aabbInside, LOD_R, LOD_CAP, LOD_ON, lodOf, keepLod, colDist, FLORA_NEAR, FLORA_FADE, FLORA_THIN } from './camera.js';
-import { regionOf, RS, RW, RH, PO, PQ } from './gen/pack.js';
-import { ck } from './world.js';
+import { createApp, pc } from '../engine/graphics/app.js';
+import { createMaterials } from '../engine/graphics/materials.js';
+import { outlineChunks } from '../engine/graphics/chunks.js';
+import { createRegions } from '../engine/graphics/regions.js';
+import { createSky } from '../engine/graphics/sky.js';
+import { createLights, SHADOW_D } from '../engine/graphics/lights.js';
+import { floatMesh } from '../engine/graphics/meshes.js';
+import { createInstances } from '../engine/graphics/instances.js';
+import { createParticleVolume, setShelter } from '../engine/graphics/particles.js';
+import { createBolts } from '../engine/graphics/bolts.js';
+import { cloudsAt, meteorsAt, boltSegs } from '../env/weather.js';
+import { timeK } from '../env/worldphys.js';
+import { SKY_GLSL, SKY_WGSL } from '../env/sky-shader.js';
+import { createHorizon } from '../env/horizon.js';
+import { CS } from '../gen/chunk.js';
+import { L_LAVA, LEVEL } from '../laws/universe.js';
+import { liquidVis } from '../player/collision.js';
+import { figureParts, lampGlow } from '../gen/mesh.js';
+import { LAMP } from '../player/lamp.js';
+import { poseMatrices, viewArms } from '../player/anim.js';
+import { skyState, applyWeather, CLOUD_H, lightsOf, lightSlots, pcIntensity } from '../env/sky.js';
+import { far2, near2 } from '../engine/core/frustum.js';
+import { FIRST, CAM_R, FIG_NEAR, fovOf, VIEW_R, FAR_R, SEAM, viewProj, project, basis, aabbInView, aabbInside, LOD_R, LOD_CAP, LOD_ON, lodOf, keepLod, colDist, FLORA_NEAR, FLORA_FADE, FLORA_THIN } from '../player/camera.js';
+import { regionOf, RS, RW, RH, PO, PQ } from '../gen/pack.js';
+import { ck } from '../world.js';
 import { texturesOf, TEX } from './textures.js';
-import { LAYERS, MAT_TABLE } from './gen/materials.js';
+import { LAYERS, MAT_TABLE } from '../gen/materials.js';
 
 const KEEP_FAR = 1500;                         // плиток далечі в GPU
 // Ємність арени регіону (вершин): початкова, найбільша — 2²⁴ (16 Б × 2²⁴ = 256 МіБ — гарантована межа буфера WebGPU,
@@ -171,7 +171,7 @@ export async function createScene(canvas, settings = {}) {
   const glowMI = new pc.MeshInstance(glow.mesh, glowMat, figNode);
   glowMI.castShadow = false; glowMI.visible = false;
   G.layers.world.addMeshInstances([glowMI]);
-  // Ліхтарик гравця (js/lamp.js): прожектор — створюється при першому вмиканні; шари — World, «Тіні», «Руки» (без «Тіні
+  // Ліхтарик гравця (js/player/lamp.js): прожектор — створюється при першому вмиканні; шари — World, «Тіні», «Руки» (без «Тіні
   // гравця»: своя фігура не затуляє свій ліхтарик, і без «Тіней дальніх»: тут повні рослини)
   let lampL = null;
 
@@ -513,7 +513,7 @@ export async function createScene(canvas, settings = {}) {
   const sc = dev.scope, U = (k) => sc.resolve(k);
   const wrapN = (v) => ((v % 256) + 256) % 256;      // період шуму неба (sky-shader.js): зсув хмар — без великих чисел
   const SU = Object.fromEntries(['uZen', 'uHor', 'uDuskDir', 'uDusk', 'uSun[0]', 'uSunCol[0]', 'uSunSp[0]', 'uSunSh[0]', 'uMoon[0]', 'uMoonCol[0]', 'uMoon2[0]', 'uMoonA[0]', 'uMoonB[0]', 'uNSun', 'uNMoon', 'uDay', 'uStars', 'uCel', 'uRing', 'uRingCol', 'uPole', 'uCloud', 'uCloudCol', 'uFlash', 'uAur', 'uAurCol', 'uAurG', 'uFwd', 'uCloudC', 'uCloudMap', 'uMet[0]', 'uMetB[0]', 'uNMet', 'eco_bakeK', 'uHz[0]'].map((k) => [k, U(k)]));
-  const hzOf = createHorizon();                      // справжній обрій з ока (js/horizon.js)
+  const hzOf = createHorizon();                      // справжній обрій з ока (js/env/horizon.js)
   const sun4 = new Float32Array(12), sunC = new Float32Array(12), sunSp = new Float32Array(12), sunSh = new Float32Array(12), moon4 = new Float32Array(16), moonC = new Float32Array(16), moon2 = new Float32Array(16), moonA = new Float32Array(16), moonB = new Float32Array(16), cel = new Float32Array(9);
   const c3 = (v) => [v[0] / 255, v[1] / 255, v[2] / 255];
   function setSky(st, bakeK) {
@@ -757,7 +757,7 @@ export async function createScene(canvas, settings = {}) {
     },
 
     // st: {camera, target, view, laws, clock, weather ({W, loc}), rain ({x0, y0}), far, bodies, skyLight(x, y, z) — AO неба тіл (світло неба),
-    // lamp — ліхтарик {pos, dir, shadow} чи null (js/lamp.js),
+    // lamp — ліхтарик {pos, dir, shadow} чи null (js/player/lamp.js),
     // me {x, y, z, yaw, swim, anim, ao — AO неба фігури}}.
     // Повертає стан неба (sky.js) — для HUD
     draw(st) {
@@ -894,7 +894,7 @@ export async function createScene(canvas, settings = {}) {
 
       // Видимі регіони й діапазони в них
       const farOn = !!(st.far && st.far.length), rad = view.rad, Un = uni(laws.d, laws.n);
-      // відсікання закритого (js/occlusion.js): регіони, секції, рідина, рослини й плитки далечі, закриті заслонами з
+      // відсікання закритого (js/render/occlusion.js): регіони, секції, рідина, рослини й плитки далечі, закриті заслонами з
       // секцій, що малюються, — не малюємо; тіні — як були (тінь закритого може впасти на видиме)
       const occ = st.occ, occOn = !!occ && occ.begin([t[0] + e[0], t[1] + e[1], t[2] + e[2]], laws.d, laws.n, m, t, curve, G.width / G.height);
       const seen = (ox, oy, oz, c) => !occOn || occ.box(t[0] + ox + c[0], t[1] + oy + c[1], t[2] + oz + c[2], t[0] + ox + c[3], t[1] + oy + c[4], t[2] + oz + c[5]);

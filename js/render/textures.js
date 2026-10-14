@@ -1,10 +1,10 @@
-// textures.js — процедурні текстури поверхонь (лише вигляд): шар 32×32 на матеріал (gen/materials.js),
+// render/textures.js — процедурні текстури поверхонь (лише вигляд): шар 32×32 на матеріал (gen/materials.js),
 // візерунок — від законів всесвіту (L.tex: стиль трави, квіти, хвилі, пласти, тріщини…). Піксельний шум — від зерна
 // глибини, тож у сусідніх всесвітах текстури схожі. Значення — множник кольору вершини: 128 = ×1 (шар sRGB, шейдер × 4,595),
 // тож колір дає палітра, а текстура — деталі. Усі текстури безшовні (період — 32 пікселі).
-import { hash2, hash3, unit } from './rng.js';
-import { hsl } from './universe.js';
-import * as M from './gen/materials.js';
+import { hash2, hash3, unit } from '../laws/rng.js';
+import { hsl } from '../laws/universe.js';
+import * as M from '../gen/materials.js';
 
 export const TEX = 32;
 const TAU = Math.PI * 2;

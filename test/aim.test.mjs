@@ -2,12 +2,12 @@
 // промінь з курсора (згори й у перспективі — той самий, що малюється), тіло в руках (чи піднімеш, утримання, кидок).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { LEVEL } from '../js/universe.js';
+import { LEVEL } from '../js/laws/universe.js';
 import { B_AIR, B_STONE, solidB } from '../js/gen/chunk.js';
-import { aimRay, blockDDA, REACH } from '../js/aim.js';
+import { aimRay, blockDDA, REACH } from '../js/player/aim.js';
 import { makeBody, stepBody, configureBodies } from '../js/engine/physics/bodies.js';
-import { GRAVITY, PLAYER_MASS, PLAYER_AREA, HIT_IMPULSE } from '../js/player.js';
-import { canLift, holdBody, throwBody, THROW_V, LIFT_W } from '../js/carry.js';
+import { GRAVITY, PLAYER_MASS, PLAYER_AREA, HIT_IMPULSE } from '../js/player/player.js';
+import { canLift, holdBody, throwBody, THROW_V, LIFT_W } from '../js/player/carry.js';
 
 configureBodies({ level: LEVEL, solid: solidB, gravity: GRAVITY, refMass: PLAYER_MASS, refArea: PLAYER_AREA });
 
@@ -94,7 +94,7 @@ test('тіло в руках: чи піднімеш — від ваги (мас�
 test('F3: рядок цілі — для кожного предмета будь-якого всесвіту, з назвою (камінь — стиль: брила, колода…)', async () => {
   // 12.10.2026: у каменю форма виду 'stone', якої немає у FORMS — рядок кидав виняток і зупиняв цикл гри
   const { aimLine } = await import('../js/debug.js');
-  const { lawsOf } = await import('../js/universe.js');
+  const { lawsOf } = await import('../js/laws/universe.js');
   const { runJob } = await import('../js/gen/job.js');
   const { O_FLOAT, O_ROCK } = await import('../js/gen/chunk.js');
   const names = new Set();
@@ -116,7 +116,7 @@ test('F3: рядок цілі — для кожного предмета буд�
 
 test('ціль: дерево й камінь — точно за трикутниками того, що малюється (обрис); повз гілки — не дерево', async () => {
   // 13.10.2026: циліндр на розмах гілок нахиленого дерева перекривав колоду поруч — обводилось дерево, а не колода
-  const { lawsOf } = await import('../js/universe.js');
+  const { lawsOf } = await import('../js/laws/universe.js');
   const { runJob } = await import('../js/gen/job.js');
   const { O_TREE, O_COVER, O_FLOAT, CS } = await import('../js/gen/chunk.js');
   const { objMesh } = await import('../js/gen/mesh.js');

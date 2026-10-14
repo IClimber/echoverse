@@ -1,8 +1,8 @@
 // Рух п. 3 roadmap: пози (присів, лежить), край, сповзання, лазіння (стіна, драбина, ліана), пірнання, політ.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { LEVEL } from '../js/universe.js';
-import { step, hits, shapeOf, slideZ, SPEED, SNEAK, PH1, FOOT, FLY_SPEED, FLY_FAST, FLOAT_Z } from '../js/player.js';
+import { LEVEL } from '../js/laws/universe.js';
+import { step, hits, shapeOf, slideZ, SPEED, SNEAK, PH1, FOOT, FLY_SPEED, FLY_FAST, FLOAT_Z } from '../js/player/player.js';
 import { B_AIR, B_LIQ, B_GRASS, B_STONE, B_ICE, B_LADDER, B_VINE, solidB } from '../js/gen/chunk.js';
 
 const X = [[1, 0], [0, 1]];                  // базис руху: праворуч = +x, униз екрана = +y (iy −1 — уздовж −y)
@@ -187,7 +187,7 @@ test('драбина й ліана: чіпляєшся, зайшовши; шви
     assert.ok(!q.climb && q.x < 9, `${kind}: від драбини ${q.x}`);
   }
   assert.equal(solidB(B_LADDER), false); assert.equal(solidB(B_VINE), false);
-  const { colliderOf } = await import('../js/collision.js');
+  const { colliderOf } = await import('../js/player/collision.js');
   const { createList, rayCast } = await import('../js/engine/physics/collide.js');
   const ray = (P, y) => { const L = colliderOf(P).gather(9, y - 0.1, 1.5, 10.5, y + 0.1, 2.5, createList()); const r = rayCast(L, 9.2, y, 2.1, 1, 0, 0, 2); return r ? 9.2 + r.t : null; };
   const lad = ray(wallW(8, B_STONE, B_LADDER), 0.8), bare = ray(wallW(8), 0.8);
@@ -266,7 +266,7 @@ test('політ: Ctrl — униз, пробіл — угору, Shift — по
 });
 
 test('фігура: голова — за поглядом; присів — ступні на землі й нижче; лежить — горизонтально над капсулою; на стіні — обличчям до неї', async () => {
-  const { animate, poseMatrices } = await import('../js/anim.js');
+  const { animate, poseMatrices } = await import('../js/player/anim.js');
   const { figureParts } = await import('../js/gen/mesh.js');
   const F = figureParts([200, 80, 60]);
   const pts = (me, part) => {
@@ -277,7 +277,7 @@ test('фігура: голова — за поглядом; присів — с�
   };
   const all = (me) => Object.keys(F).flatMap((k) => pts(me, k));
   // голова з поглядом униз на 0,5: вісь погляду (+x голови) нахилена на 0,5 униз
-  const { poseMatrices: pm } = await import('../js/anim.js');
+  const { poseMatrices: pm } = await import('../js/player/anim.js');
   const me1 = { pose: 'stand', look: { p: 0.5, y: 0 } };
   let a1; for (let i = 0; i < 200; i++) a1 = animate(me1, 1 / 60, i * 16);
   const H = pm(a1, 0, 0, 0, 0).head, tilt = Math.atan2(-H[2], H[0]);

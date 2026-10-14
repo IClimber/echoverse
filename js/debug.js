@@ -1,16 +1,16 @@
 // debug.js — панель F3: зерно, адреса, клітинка, чанк і його відбиток, закони всесвіту, швидкодія.
 import { CS, SEC, TYPE_NAMES, BLOCK_NAMES, O_ROCK, O_TREE, digest, tile } from './gen/chunk.js';
-import { canLift } from './carry.js';
-import { physOf, STRANGE_NAMES, TIER_NAMES, FAM_NAMES, LEVEL } from './universe.js';
+import { canLift } from './player/carry.js';
+import { physOf, STRANGE_NAMES, TIER_NAMES, FAM_NAMES, LEVEL } from './laws/universe.js';
 import { BIOMES } from './gen/biomes.js';
 import { regionAt, speciesOf, FORMS } from './gen/flora.js';
-import { jumpHeight } from './player.js';
-import { dayPhase, clockStr, yearPhase, starsText, heldText } from './sky.js';
-import { weatherAt, WEATHER_NAMES } from './weather.js';
-import { LOD_ON } from './camera.js';
-import { LAMP } from './lamp.js';
+import { jumpHeight } from './player/player.js';
+import { dayPhase, clockStr, yearPhase, starsText, heldText } from './env/sky.js';
+import { weatherAt, WEATHER_NAMES } from './env/weather.js';
+import { LOD_ON } from './player/camera.js';
+import { LAMP } from './player/lamp.js';
 import { styleOf } from './gen/mesh.js';
-import { stats as CST } from './collision.js';
+import { stats as CST } from './player/collision.js';
 import { fx, fmtN, sg, pc, atm } from './fmt.js';
 
 // Рельєф 3.1: скелі, родини кривої, ерозія, куести, останці, карст, рифти

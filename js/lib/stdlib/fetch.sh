@@ -3,7 +3,7 @@
 # (Sun) і Boost. Кожна функція — гілка deno пакета math-base-special-*: один ES-модуль без імпортів (працює без збирання
 # й у module worker генератора). Усередині лише точні за IEEE 754 операції (з Math.* — sqrt, abs, floor, ceil, round),
 # тож результат до біта однаковий у будь-якому рушії JS (CLAUDE.md, «Детермінізм генерації»). Версії закріплено тегами:
-# зміна бітів після оновлення — тест LIB_GOLD (js/golden.js), а з ним і GEN.
+# зміна бітів після оновлення — тест LIB_GOLD (js/gen/golden.js), а з ним і GEN.
 set -eu
 D=$(cd "$(dirname "$0")" && pwd)
 CDN=https://cdn.jsdelivr.net/gh/stdlib-js

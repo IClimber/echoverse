@@ -5,7 +5,7 @@
 // куточка плитки, нормалі й кольори — float (рендер), генерація — tile (детермінована)
 import { tile, cliffTop, SURF_Z, T_WATER, T_ICE, T_SAND, T_LUSH, T_DRY, T_DESERT, T_SNOW, T_ROCK, T_BED, O_TREE, O_ROCK } from './chunk.js';
 import { groundTint } from './flora.js';
-import { L_LAVA, LEVEL } from '../universe.js';
+import { L_LAVA, LEVEL } from '../laws/universe.js';
 import { M_LAVA, M_WATER, TOP_MAT, SIDE_MAT } from './materials.js';
 
 export const FT = 128;                        // клітинок на бік плитки

@@ -1,12 +1,12 @@
 // Закони фізики світу (п. 4 roadmap, 12.10.2026): нормальний розподіл, еталонні тіла, біля старту, розподіли величин
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { lawsOf, zOfLane, SPREAD } from '../js/universe.js';
-import { starOf, planetOf, pMin, tEq, airOf, tSurf, fieldOf } from '../js/astro.js';
-import { nsqrt, nroot4, nsin, ncos, ncbrt, nlog10, nqnorm, PI, clamp01, smooth01, smoothstep } from '../js/num.js';
-import { LIB_GOLD, libDigest } from '../js/golden.js';
-import { noise2 } from '../js/noise.js';
-import { hashStr } from '../js/rng.js';
+import { lawsOf, zOfLane, SPREAD } from '../js/laws/universe.js';
+import { starOf, planetOf, pMin, tEq, airOf, tSurf, fieldOf } from '../js/laws/astro.js';
+import { nsqrt, nroot4, nsin, ncos, ncbrt, nlog10, nqnorm, PI, clamp01, smooth01, smoothstep } from '../js/laws/num.js';
+import { LIB_GOLD, libDigest } from '../js/gen/golden.js';
+import { noise2 } from '../js/laws/noise.js';
+import { hashStr } from '../js/laws/rng.js';
 
 const near = (v, want, eps, msg) => assert.ok(Math.abs(v - want) <= eps, `${msg}: ${v} замість ${want} ± ${eps}`);
 // Закони фізики світу (нормальні): частки рівнів однакові для всіх
@@ -140,7 +140,7 @@ test('похолодання з висотою: 52 °C/км при 1 g, без �
 const skyL = (sky, extra = {}) => { const L = lawsOf(hashStr('test'), 0, 0); return { ...L, sky: { ...L.sky, ...sky }, ...extra }; };
 
 test('небо: сезони (полудень сонцестояння на 45°), довший літній день, полярні день і ніч, захоплене сонце стоїть', async () => {
-  const { skyState } = await import('../js/sky.js');
+  const { skyState } = await import('../js/env/sky.js');
   const one = (lat, yoff, off = 0.5) => skyL({ lat: lat * PI / 180, off, year: { min: 1e9, off: yoff, obliq: 23 * PI / 180 }, lock: false });
   const el = (L) => Math.asin(skyState(L, 0).suns[0].dir[2]) * 180 / PI;
   near(el(one(45, 0.25)), 68, 1, 'полудень улітку'); near(el(one(45, 0.75)), 22, 1, 'полудень узимку');
@@ -155,7 +155,7 @@ test('небо: сезони (полудень сонцестояння на 45�
 });
 
 test('небо: затемнення — частка диска, повне — сонце не світить; місяць у тіні планети темніє', async () => {
-  const { skyState, covered } = await import('../js/sky.js');
+  const { skyState, covered } = await import('../js/env/sky.js');
   near(covered(0.05, 0.05, 0), 1, 1e-9, 'повне'); near(covered(0.05, 5, 5), 0.5, 0.01, 'половина'); assert.equal(covered(0.05, 0.05, 0.11), 0);
   const L0 = lawsOf(hashStr('test'), 0, 0), m = L0.sky.moons[0];
   const big = { ...m, Rkm: m.Rkm * 3, dec: 0, off: 0, period: 30 };
@@ -167,7 +167,7 @@ test('небо: затемнення — частка диска, повне —
 });
 
 test('світло кількох сонць: сума (головне — звичайний день, разом — світліше, небо — як з одним); закрите не світить, тінь — від наступного; без світил — нічний рівень без тіней', async () => {
-  const { skyState, lightsOf, sunDay } = await import('../js/sky.js');
+  const { skyState, lightsOf, sunDay } = await import('../js/env/sky.js');
   const lit = (st) => { const o = lightsOf(st, 3); return o.amb + o.dirs.reduce((s, l) => s + l.k * Math.max(0, l.dir[2]), 0); };
   const L0 = lawsOf(hashStr('test'), 0, 0), s0 = L0.sky.suns[0], night = L0.sky.night;
   // одне сонце: рівень — як раніше (нічний + частка дня від найяскравішого)
@@ -201,7 +201,7 @@ test('світло кількох сонць: сума (головне — зв�
 });
 
 test('компаньйон: видимий радіус з припливної сили, не ближче дотику й межі Роша, світить уночі, займає слот світла', async () => {
-  const { bodiesOf, lightSlots } = await import('../js/sky.js');
+  const { bodiesOf, lightSlots } = await import('../js/env/sky.js');
   let n = 0;
   for (let d = 0; d <= 12; d += 3) for (let k = 100; k < 60000 && n < 400; k += 41) {
     const L = lawsOf(hashStr('test'), d, k), C = L.comp;
@@ -218,8 +218,8 @@ test('компаньйон: видимий радіус з припливної 
 });
 
 test('оптика: Земля — блакитне небо й помаранчевий захід; без повітря — чорне; густе — біліше; червона зоря — тепліше світло', async () => {
-  const { skyOptics } = await import('../js/optics.js');
-  const { starColor } = await import('../js/sky.js');
+  const { skyOptics } = await import('../js/env/optics.js');
+  const { starColor } = await import('../js/env/sky.js');
   const air = (P, kind = 0, ta = 0.12) => ({ air: { pressure: P, comp: { CO2: 0.0004 }, tauA: ta, hazeKind: kind, vacuum: P < 0.002 }, grav: 1 });
   const E = skyOptics(air(1), starColor(5772), PI / 3), Es = skyOptics(air(1), starColor(5772), 2 * PI / 180);
   assert.deepEqual(E.zen.map(Math.round), [70, 130, 220]);
@@ -234,19 +234,19 @@ test('оптика: Земля — блакитне небо й помаранч
 });
 
 test('приплив компаньйона: у зеніті −f, на обрії +f/2, на 45° убік 0,75·f', async () => {
-  const { tideVec } = await import('../js/worldphys.js');
+  const { tideVec } = await import('../js/env/worldphys.js');
   const f = 0.05, z = tideVec(f, [0, 0, 1]), h = tideVec(f, [1, 0, 0]), c = Math.SQRT1_2, d = tideVec(f, [c, 0, c]);
   near(z[2], f, 1e-12, 'зеніт: угору (легше)'); near(h[2], -f / 2, 1e-12, 'обрій: униз (важче)');
   near(d[0], 0.75 * f, 1e-12, '45°: убік'); near(d[2], 0.25 * f, 1e-12, '45°: угору');
 });
 
 test('зворотна гравітація: тіло піднімається й зупиняється на висоті рівноваги; гравець там ширяє', async () => {
-  const { physAt3, revEq, revK } = await import('../js/worldphys.js');
-  const { gravityAt } = await import('../js/universe.js');
+  const { physAt3, revEq, revK } = await import('../js/env/worldphys.js');
+  const { gravityAt } = await import('../js/laws/universe.js');
   const { makeBody, stepBody, configureBodies } = await import('../js/engine/physics/bodies.js');
-  const { step, GRAVITY, PLAYER_MASS, PLAYER_AREA } = await import('../js/player.js');
+  const { step, GRAVITY, PLAYER_MASS, PLAYER_AREA } = await import('../js/player/player.js');
   const { solidB, B_STONE, B_AIR } = await import('../js/gen/chunk.js');
-  const { LEVEL } = await import('../js/universe.js');
+  const { LEVEL } = await import('../js/laws/universe.js');
   configureBodies({ level: LEVEL, solid: solidB, gravity: GRAVITY, refMass: PLAYER_MASS, refArea: PLAYER_AREA });
   // всесвіт із зворотною гравітацією й точка в плямі з k₀ < 0
   let L = null, pt = null;
@@ -272,8 +272,8 @@ test('зворотна гравітація: тіло піднімається �
 });
 
 test('температура в точці: доба, сезон, висота; повітря на висоті; сніг за температурою', async () => {
-  const { tempAt, airAt, snowy } = await import('../js/climate.js');
-  const { SEA } = await import('../js/universe.js');
+  const { tempAt, airAt, snowy } = await import('../js/env/climate.js');
+  const { SEA } = await import('../js/laws/universe.js');
   const L = lawsOf(hashStr('test'), 0, 0), z0 = SEA * 0.5, day = L.sky.dayMin * 60 / L.phys.time;
   let lo = 1e9, hi = -1e9;
   for (let i = 0; i < 48; i++) { const T = tempAt(L, 10, 10, z0, i * day / 48); lo = Math.min(lo, T); hi = Math.max(hi, T); }
@@ -288,8 +288,8 @@ test('температура в точці: доба, сезон, висота; 
 });
 
 test('вітер: без повітря немає; межа падіння при 1 g і 1 атм ≈ 35 м/с; у розрідженому штовхає слабше; «не перестарайся»', async () => {
-  const { physOf } = await import('../js/universe.js');
-  const { weatherAt, windHeightK } = await import('../js/weather.js');
+  const { physOf } = await import('../js/laws/universe.js');
+  const { weatherAt, windHeightK } = await import('../js/env/weather.js');
   const L = lawsOf(hashStr('test'), 0, 0), E = { ...L, grav: 1, air: { ...L.air, pressure: 1 } };
   near(physOf(E, 1.225).vT, 35, 1, 'межа падіння');
   near(physOf(L).vT, 35, 1.5, 'межа падіння біля старту (густина зі складу й температури)');
@@ -311,7 +311,7 @@ test('вітер: без повітря немає; межа падіння пр
 });
 
 test('погода в просторі: стан триває хвилини, сусідні точки — та сама погода, поле пливе за вітром', async () => {
-  const { weatherAt, cloudsAt, prevailing } = await import('../js/weather.js');
+  const { weatherAt, cloudsAt, prevailing } = await import('../js/env/weather.js');
   // «та сама за 100 м» — у середньому за трьома всесвітами > 0,9, у кожному > 0,85 (межа туману й хмарності за 100 м — частка
   // залежить від всесвіту: 13.10.2026, генератор v16, у всесвіті 300 вага грози змінилась у 4-му знаку — 0,917 → 0,895)
   let sameAll = 0;
@@ -338,7 +338,7 @@ test('погода в просторі: стан триває хвилини, с
 });
 
 test('блискавки — у грозу й рідко в пиловій бурі над пустелею, у найвищу точку околу; метеори — лише з повітрям', async () => {
-  const { weatherAt, lightningNear, meteorsAt } = await import('../js/weather.js');
+  const { weatherAt, lightningNear, meteorsAt } = await import('../js/env/weather.js');
   const { tile, T_DESERT, T_DRY } = await import('../js/gen/chunk.js');
   let L = null;
   for (let n = 100; n < 5000 && !L; n++) { const V = lawsOf(hashStr('1hsb1wu'), 0, n); if (V.air.w.storm > 0.3) L = V; }
@@ -366,9 +366,9 @@ test('блискавки — у грозу й рідко в пиловій бу�
 });
 
 test('часові аномалії: повільні й швидкі плями не стикаються; тіло в повільній падає в 1/k разів довше', async () => {
-  const { timeK } = await import('../js/worldphys.js');
+  const { timeK } = await import('../js/env/worldphys.js');
   const { makeBody, stepBody, configureBodies } = await import('../js/engine/physics/bodies.js');
-  const { GRAVITY, PLAYER_MASS, PLAYER_AREA } = await import('../js/player.js');
+  const { GRAVITY, PLAYER_MASS, PLAYER_AREA } = await import('../js/player/player.js');
   const { solidB } = await import('../js/gen/chunk.js');
   configureBodies({ level: 0.5, solid: solidB, gravity: GRAVITY, refMass: PLAYER_MASS, refArea: PLAYER_AREA });
   let L = null;

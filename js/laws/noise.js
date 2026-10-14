@@ -1,4 +1,4 @@
-// noise.js — градієнтний шум (Perlin) 2D/3D і fBm від зерна. Лише + − × ÷ і Math.floor:
+// laws/noise.js — градієнтний шум (Perlin) 2D/3D і fBm від зерна. Лише + − × ÷ і Math.floor:
 // без Math.sin/pow/sqrt, тож значення побітово однакові в усіх рушіях JS.
 import { hash3, hash4 } from './rng.js';
 

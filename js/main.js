@@ -1,36 +1,36 @@
 // main.js — запуск: меню світів, ігровий цикл (рух, стрибки, камера, підвантаження чанків), HUD, автозбереження.
-// ?strip — замість гри стенд «смуга всесвітів» (js/strip.js), ?flora — галерея видів рослин (js/flora-stand.js),
-// ?light — світло й тіні рушія (js/light-stand.js), ?move — стенд руху (js/gen/stand.js: полігон замість світу, без
+// ?strip — замість гри стенд «смуга всесвітів» (js/stands/strip.js), ?flora — галерея видів рослин (js/stands/flora.js),
+// ?light — світло й тіні рушія (js/stands/light.js), ?move — стенд руху (js/gen/stand.js: полігон замість світу, без
 // збереження; &g= — гравітація, &fr= — тертя, &rain — дощ).
-import { createScene, BODY_R } from './scene.js';
+import { createScene, BODY_R } from './render/scene.js';
 import { loadSettings, saveSetting } from './settings.js';
 import { createWorld, findSpawn, keepFor } from './world.js';
-import { colliderOf, underLiquid } from './collision.js';
+import { colliderOf, underLiquid } from './player/collision.js';
 import { createList } from './engine/physics/collide.js';
-import { createDevice, landing, landingChunks, CHARGE } from './device.js';
-import { step, standableB, settle, placeAt, hits, SHAPE, windShelter, SPRINT, GRAVITY, FOOT, BODY, PLAYER_MASS, HIT_IMPULSE } from './player.js';
+import { createDevice, landing, landingChunks, CHARGE } from './player/device.js';
+import { step, standableB, settle, placeAt, hits, SHAPE, windShelter, SPRINT, GRAVITY, FOOT, BODY, PLAYER_MASS, HIT_IMPULSE } from './player/player.js';
 import { stepBody, windMoves, push, collideBodies } from './engine/physics/bodies.js';
-import { initInput, moveAxis, turnAxis, sprintHeld, crouchHeld, vertAxis, takeActions, takeWheel, takeDrag, clearInput, lockPointer, unlockPointer, locked, devKey } from './input.js';
+import { initInput, moveAxis, turnAxis, sprintHeld, crouchHeld, vertAxis, takeActions, takeWheel, takeDrag, clearInput, lockPointer, unlockPointer, locked, devKey } from './player/input.js';
 import { listWorlds, putWorld, deleteWorld, serialize, deserialize, newId } from './save.js';
-import { hashStr } from './rng.js';
-import { GEN, SEA, physOf, gravityAt, LEVEL } from './universe.js';
-import { physAt3, timeK } from './worldphys.js';
-import { tempAt, tempParts, snowy, radNow, airAt } from './climate.js';
+import { hashStr } from './laws/rng.js';
+import { GEN, SEA, physOf, gravityAt, LEVEL } from './laws/universe.js';
+import { physAt3, timeK } from './env/worldphys.js';
+import { tempAt, tempParts, snowy, radNow, airAt } from './env/climate.js';
 import { CS, SEC, B_LIQ, B_MAGMA, solidB } from './gen/chunk.js';
 import { debugText } from './debug.js';
 import { fx, fmtN, atm } from './fmt.js';
-import { animate, VIEW_KEYS } from './anim.js';
-import { clockStr, skyState, lightsOf, lightSlots, stormAt, setStormOverride } from './sky.js';
-import { weatherAt, localWeather, areaClimate, reliefAt, windHeightK, lightningNear } from './weather.js';
-import { createCamera, rotate, wheel, smooth, moveBasis, camHead, camCollide, camDist, facing, setYaw, basis, pitchOf, setViewChunks, setLod, setFloraNear, THIRD, FIRST, NEXT, LIMITS, EYE, EYE_OF, HEAD_OF, VIEW_R, FIG_NEAR } from './camera.js';
+import { animate, VIEW_KEYS } from './player/anim.js';
+import { clockStr, skyState, lightsOf, lightSlots, stormAt, setStormOverride } from './env/sky.js';
+import { weatherAt, localWeather, areaClimate, reliefAt, windHeightK, lightningNear } from './env/weather.js';
+import { createCamera, rotate, wheel, smooth, moveBasis, camHead, camCollide, camDist, facing, setYaw, basis, pitchOf, setViewChunks, setLod, setFloraNear, THIRD, FIRST, NEXT, LIMITS, EYE, EYE_OF, HEAD_OF, VIEW_R, FIG_NEAR } from './player/camera.js';
 import { createStreamer, visibleMissing } from './stream.js';
-import { aimRay, REACH } from './aim.js';
-import { lampPose, segHit } from './lamp.js';
-import { canLift, weightOf, throwBody, holdBody, LIFT_W } from './carry.js';
+import { aimRay, REACH } from './player/aim.js';
+import { lampPose, segHit } from './player/lamp.js';
+import { canLift, weightOf, throwBody, holdBody, LIFT_W } from './player/carry.js';
 import { STAND_SPOTS, standBodies, standBlock } from './gen/stand.js';
 import { makeBody } from './engine/physics/bodies.js';
 import { createTicker } from './engine/core/ticker.js';
-import { createOcclusion } from './occlusion.js';
+import { createOcclusion } from './render/occlusion.js';
 
 const $ = (id) => document.getElementById(id);
 const SAVE_MS = 10000;                     // автозбереження
@@ -39,10 +39,10 @@ const AI_BUDGET = 2;                          // мс на такт світу: 
 const LIGHT_MS = 1;                           // мс на такт світу для світла неба (поширення між секціями, перебудови)
 
 const QS = new URLSearchParams(location.search);
-if (QS.has('strip')) import('./strip.js').then((m) => m.runStrip());
-else if (QS.has('flora')) import('./flora-stand.js').then((m) => m.runFlora());
-else if (QS.has('light')) import('./light-stand.js').then((m) => m.runLight()).catch((e) => showErr('Стенд ?light: ' + e.message));
-else if (QS.has('laws')) import('./laws-stand.js').then((m) => m.runLaws()).catch((e) => showErr('Стенд ?laws: ' + e.message));
+if (QS.has('strip')) import('./stands/strip.js').then((m) => m.runStrip());
+else if (QS.has('flora')) import('./stands/flora.js').then((m) => m.runFlora());
+else if (QS.has('light')) import('./stands/light.js').then((m) => m.runLight()).catch((e) => showErr('Стенд ?light: ' + e.message));
+else if (QS.has('laws')) import('./stands/laws.js').then((m) => m.runLaws()).catch((e) => showErr('Стенд ?laws: ' + e.message));
 else createScene($('gl'), loadSettings(QS)).then(boot).catch(fail);
 const RESUME_KEY = 'echoverse-resume';       // світ, у який повернутися після перезавантаження (зміна графіки)
 
@@ -513,10 +513,10 @@ function boot(renderer) {
       d: p.d, n: p.n, me: { x: p.x, y: p.y, z: p.z, vz: 0, air: false, ground: true, yaw: Math.PI * 0.75, moving: false, placed: false },
       cam: [p.x, p.y, p.z || 0], lastSave: performance.now(), view: null, clock: rec.clock || 0,
       stamp: 0, ai: [], aiAt: 0,                 // крок фізики (інтерполяція тіл); системи світу (моби, NPC) — (dt, g)
-      lamp: false,                               // ліхтарик (L; js/lamp.js) — не зберігається, як і політ
+      lamp: false,                               // ліхтарик (L; js/player/lamp.js) — не зберігається, як і політ
       envHere: () => envHere(),                  // середовище тут (F3)
     };
-    g.occ = createOcclusion(g.world);               // відсікання закритого (заслони з блоків, js/occlusion.js)
+    g.occ = createOcclusion(g.world);               // відсікання закритого (заслони з блоків, js/render/occlusion.js)
     if (occOff) g.occ.enabled = false;
     // сутності: зона симуляції 5×5 чанків навколо гравця (поточний всесвіт; інші сплять і дорахуються при поверненні)
     g.ai.push((dt, G) => G.world.ents(G.d, G.n).update(Math.floor(G.me.x / CS), Math.floor(G.me.y / CS), G.clock * 1000));

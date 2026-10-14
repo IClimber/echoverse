@@ -50,15 +50,15 @@ test('workerOf: стовпець і його секції — в одного, �
 });
 
 // ================= Щільна вершина, алокатор, еталон мешів =================
-import { hashStr, rng } from '../js/rng.js';
-import { lawsOf, LEVEL } from '../js/universe.js';
+import { hashStr, rng } from '../js/laws/rng.js';
+import { lawsOf, LEVEL } from '../js/laws/universe.js';
 import { M_LEAF as M_LEAF_ } from '../js/gen/materials.js';
 import { genChunk, genCol, genSection, CS, SEC, FR } from '../js/gen/chunk.js';
 import { chunkMesh, objPose, skyBright } from '../js/gen/mesh.js';
 import { colSummary } from '../js/gen/job.js';
 import { packMesh, unpack, meshHash, meshDigest, regionOf, frameOf, packStats, VB, RS, RW, RH } from '../js/gen/pack.js';
 import { createAlloc } from '../js/engine/graphics/arena.js';
-import { SPOTS, MESH_GOLD } from '../js/golden.js';
+import { SPOTS, MESH_GOLD } from '../js/gen/golden.js';
 
 test('щільна вершина: позиції з точністю 1/256, нормаль, колір, матеріал (pos.w), AO (color.a) — точно', () => {
   const L = lawsOf(hashStr('меш'), 0, 4);
@@ -164,7 +164,7 @@ test('еталон мешів MESH_GOLD', () => {
   assert.equal(packStats.overflow, o0);
 });
 
-// Відсікання задніх граней (матеріали CULLFACE_BACK, js/scene.js): кожен трикутник твердого — проти годинникової ззовні, тобто (b − a) × (c − a)
+// Відсікання задніх граней (матеріали CULLFACE_BACK, js/render/scene.js): кожен трикутник твердого — проти годинникової ззовні, тобто (b − a) × (c − a)
 // дивиться туди ж, куди нормаль (у повітря). Повні секції стовпців SPOTS і грубі (крок 2 і 4, з обрізами)
 test('грані твердого — назовні (для відсікання задніх граней)', () => {
   const seed = hashStr('test');
@@ -294,7 +294,7 @@ test('робота flora: тіні малих рослин — у кінці (np
 
 // ================= Стрімінг =================
 import { columnsInCircle, colPri, visibleMissing } from '../js/stream.js';
-import { createCamera, viewProj, THIRD } from '../js/camera.js';
+import { createCamera, viewProj, THIRD } from '../js/player/camera.js';
 
 test('стрімінг: коло дальності 32 чанки, у піраміді — раніше', () => {
   const n = columnsInCircle([1000.5, -300.25], 512).length, a = Math.PI * (512 / 16) ** 2;
@@ -329,9 +329,9 @@ test('такт: 240 к/с → 120 Гц, alpha у [0, 1), довгий кадр �
 
 // ================= Зіткнення тіл =================
 import { makeBody, stepBody, collideBodies, configureBodies } from '../js/engine/physics/bodies.js';
-import { GRAVITY as G_, PLAYER_MASS as PM_, PLAYER_AREA as PA_ } from '../js/player.js';
+import { GRAVITY as G_, PLAYER_MASS as PM_, PLAYER_AREA as PA_ } from '../js/player/player.js';
 import { solidB as SB_ } from '../js/gen/chunk.js';
-import { LEVEL as LV_ } from '../js/universe.js';
+import { LEVEL as LV_ } from '../js/laws/universe.js';
 configureBodies({ level: LV_, solid: SB_, gravity: G_, refMass: PM_, refArea: PA_ });
 
 const AIR = { block: () => 0 }, FLOOR = { block: (x, y, k) => k < 0 ? 8 : 0 };
@@ -436,7 +436,7 @@ test('робота lod: op = тверде + далекі рослини + обр
   console.log(`# LOD1 ×${(sum[1] / sum[0]).toFixed(3)}, LOD2 ×${(sum[2] / sum[0]).toFixed(3)}`);
 });
 
-import { lodOf, keepLod, colDist } from '../js/camera.js';
+import { lodOf, keepLod, colDist } from '../js/player/camera.js';
 test('рівні: пороги й гістерезис', () => {
   assert.deepEqual([0, 191.9, 192, 383.9, 384].map(lodOf), [0, 0, 1, 1, 2]);
   assert.equal(keepLod(200, 0), true); assert.equal(keepLod(230, 0), false);
@@ -593,7 +593,7 @@ test('settle: тіло в повітрі лягає на ґрунт, левіт�
 
 // ================= Піраміда з кривизною =================
 import { aabbInView as inView_, aabbInside as inside_ } from '../js/engine/core/frustum.js';
-import { FIRST as FIRST_ } from '../js/camera.js';
+import { FIRST as FIRST_ } from '../js/player/camera.js';
 
 test('піраміда з кривизною: вигнута коробка — у кадрі, якщо в кадрі хоч одна її точка після вигину; уся всередині — лише якщо всі', () => {
   // кривизна шейдера: точка (x, y, z) відносно цілі малюється на z − c·(x² + y²)
@@ -639,7 +639,7 @@ function rngT(s) { return () => ((s = (Math.imul(s, 1664525) + 1013904223) >>> 0
 
 // ================= Об'єм кидачів тіні =================
 import { casterVolume, boxOut } from '../js/engine/core/frustum.js';
-import { basis as basis_, fovOf as fovOf_ } from '../js/camera.js';
+import { basis as basis_, fovOf as fovOf_ } from '../js/player/camera.js';
 
 // Чи входить промінь p + s·L (s ≥ 0) у зріз [s0, s1] піраміди m (точно: інтервал s за всіма гранями)
 function rayHitsSlice(m, eye, ud, s0, s1, L, p) {

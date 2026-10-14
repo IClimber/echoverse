@@ -22,7 +22,7 @@ const rules = {
 // Детермінізм генерації (CLAUDE.md): у файлах генерації — лише функції, точні за IEEE 754 (однакові до біта в будь-якому
 // рушії JS); трансцендентні — з num.js (stdlib). Неточні Math.* й оператор ** — помилка лінтера; межі імпортів цих
 // файлів — test/imports.test.mjs
-export const GEN_FILES = ['js/rng.js', 'js/noise.js', 'js/num.js', 'js/astro.js', 'js/universe.js', 'js/gen/chunk.js', 'js/gen/biomes.js', 'js/gen/flora.js'];
+export const GEN_FILES = ['js/laws/**/*.js', 'js/gen/chunk.js', 'js/gen/biomes.js', 'js/gen/flora.js'];
 const INEXACT = ['sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'atan2', 'exp', 'expm1', 'log', 'log10', 'log2', 'log1p', 'pow', 'cbrt', 'hypot',
   'sinh', 'cosh', 'tanh', 'asinh', 'acosh', 'atanh', 'random'];
 const determinism = {

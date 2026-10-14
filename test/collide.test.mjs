@@ -106,11 +106,11 @@ test('промінь на кубі з 12 трикутників; призма й
 });
 
 test('зіткнення = рендер: висота під променем — та сама, що в меші chunkMesh цілого стовпця; секція з b = віртуальна', async () => {
-  const { lawsOf } = await import('../js/universe.js');
-  const { hashStr } = await import('../js/rng.js');
+  const { lawsOf } = await import('../js/laws/universe.js');
+  const { hashStr } = await import('../js/laws/rng.js');
   const { genChunk, genCol, genSection, bi, H, B_AIR, B_STONE, SEC, FR } = await import('../js/gen/chunk.js');
   const { chunkMesh } = await import('../js/gen/mesh.js');
-  const { colliderOf } = await import('../js/collision.js');
+  const { colliderOf } = await import('../js/player/collision.js');
   const seed = hashStr('test');
   let rays = 0;
   for (const [n, cx, cy] of [[0, 3, 3], [37, -2, 5], [600, 1, -4]]) {
@@ -219,7 +219,7 @@ test('у куті (дві стіни, будь-який розхил) форма
 // Прямі стіни (12.10.2026): під стелею стіна від 2 блоків — прямі кути з підлогою й стелею, у плані — у прямих стін;
 // відкритий рельєф під небом — плавний, як був (рішення користувача)
 test('прямі стіни під стелею: хід 1 × 2 у породі — 1 м до самої підлоги, кут кімнати прямий; рів під небом і уступ — плавні', async () => {
-  const { colliderOf } = await import('../js/collision.js');
+  const { colliderOf } = await import('../js/player/collision.js');
   const { B_AIR, B_STONE } = await import('../js/gen/chunk.js');
   const world = (f) => ({ liquid: { swim: true }, obj: () => null, block: (x, y, k) => (Math.abs(x) > 40 || Math.abs(y) > 40 ? -1 : f(x, y, k) ? B_AIR : B_STONE) });
   const ray = (P, o, d, max = 6) => { const C = colliderOf(P), L = C.gather(o[0] - max, o[1] - max, o[2] - max, o[0] + max, o[1] + max, o[2] + max, createList()), r = rayCast(L, ...o, ...d, max); return r ? r.t : null; };

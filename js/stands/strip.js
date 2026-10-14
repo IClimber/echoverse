@@ -1,12 +1,12 @@
-// strip.js — стенд «смуга всесвітів» (index.html?strip[&seed=…&x=…&y=…]): мінікарти однієї ділянки
+// stands/strip.js — стенд «смуга всесвітів» (index.html?strip[&seed=…&x=…&y=…]): мінікарти однієї ділянки
 // в різних всесвітах. Видно, чи сусіди схожі (спільний рельєф із варіаціями), а далекі — справді інші, а не перефарбовані.
-import { lawsOf, STRANGE_NAMES, TIER_NAMES, FAM_NAMES } from './universe.js';
-import { tile, genChunk, digest, T_WATER, T_ICE, T_LUSH, T_DRY, T_DESERT, O_TREE, O_ROCK, O_FLOAT, O_COVER } from './gen/chunk.js';
-import { regionAt, speciesOf, pickSpecies, groundTint } from './gen/flora.js';
-import { GOLD, SPOTS, LIB_GOLD, libDigest } from './golden.js';
-import { hashStr } from './rng.js';
-import { fmtN } from './fmt.js';
-import { skyState, bodiesOf } from './sky.js';
+import { lawsOf, STRANGE_NAMES, TIER_NAMES, FAM_NAMES } from '../laws/universe.js';
+import { tile, genChunk, digest, T_WATER, T_ICE, T_LUSH, T_DRY, T_DESERT, O_TREE, O_ROCK, O_FLOAT, O_COVER } from '../gen/chunk.js';
+import { regionAt, speciesOf, pickSpecies, groundTint } from '../gen/flora.js';
+import { GOLD, SPOTS, LIB_GOLD, libDigest } from '../gen/golden.js';
+import { hashStr } from '../laws/rng.js';
+import { fmtN } from '../fmt.js';
+import { skyState, bodiesOf } from '../env/sky.js';
 
 const SIZE = 96, PX = 2;                       // клітинок на бік, px на клітинку
 

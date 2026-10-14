@@ -1,26 +1,26 @@
-// js/light-stand.js — стенд ?light: світло й тіні рушія (js/engine/graphics) окремо від гри й генератора. Світ із блоків
+// stands/light.js — стенд ?light: світло й тіні рушія (js/engine/graphics) окремо від гри й генератора. Світ із блоків
 // задано вручну (земля, тонка стіна, кімната з дахом і дверима, пагорб із тунелем, ширяючий острів, стовпи); меш — той
 // самий, що в грі (chunkMesh, AO у вершинах), далі — регіони, небо з розсіяним світлом, сонце, точкові джерела й
 // прожектори з тінями, тіла екземплярами. Камера — офіційний скрипт CameraControls (приклад camera/multi).
 // Що має бути видно: світло з одного боку тонкої стіни не проходить на інший; у кімнаті під дахом темно, крім дверей і
 // джерела; тунель темний (мінімум 3 %), світло — лише біля його джерела; острів кидає тінь; кути темніші (AO); тіні від
 // усіх джерел і тіл
-import { createApp, pc } from './engine/graphics/app.js';
-import { createMaterials } from './engine/graphics/materials.js';
-import { createRegions } from './engine/graphics/regions.js';
-import { createSky } from './engine/graphics/sky.js';
-import { createLights } from './engine/graphics/lights.js';
-import { floatMesh } from './engine/graphics/meshes.js';
-import { createInstances } from './engine/graphics/instances.js';
+import { createApp, pc } from '../engine/graphics/app.js';
+import { createMaterials } from '../engine/graphics/materials.js';
+import { createRegions } from '../engine/graphics/regions.js';
+import { createSky } from '../engine/graphics/sky.js';
+import { createLights } from '../engine/graphics/lights.js';
+import { floatMesh } from '../engine/graphics/meshes.js';
+import { createInstances } from '../engine/graphics/instances.js';
 import { CameraControls } from 'playcanvas/scripts/esm/camera-controls.mjs';
-import { SKY_GLSL, SKY_WGSL } from './sky-shader.js';
-import { lawsOf } from './universe.js';
-import { hashStr } from './rng.js';
-import { CS, FR, SEC, B_GRASS, B_SOIL, B_STONE, B_ROCK } from './gen/chunk.js';
-import { chunkMesh, Mesh } from './gen/mesh.js';
-import { packMesh, frameOf, PO, PQ, RW, RH } from './gen/pack.js';
-import { texturesOf, TEX } from './textures.js';
-import { LAYERS, MAT_TABLE } from './gen/materials.js';
+import { SKY_GLSL, SKY_WGSL } from '../env/sky-shader.js';
+import { lawsOf } from '../laws/universe.js';
+import { hashStr } from '../laws/rng.js';
+import { CS, FR, SEC, B_GRASS, B_SOIL, B_STONE, B_ROCK } from '../gen/chunk.js';
+import { chunkMesh, Mesh } from '../gen/mesh.js';
+import { packMesh, frameOf, PO, PQ, RW, RH } from '../gen/pack.js';
+import { texturesOf, TEX } from '../render/textures.js';
+import { LAYERS, MAT_TABLE } from '../gen/materials.js';
 
 const MIN_LIGHT = 0.03 ** 2.2;                 // мінімум яскравості (лінійний), як у грі
 const NX = 4, NY = 4, NZ = 3;                  // стовпців і секцій світу стенду (64 × 64 клітинки × 48 блоків)

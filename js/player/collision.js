@@ -1,12 +1,12 @@
-// collision.js — джерело зіткнень гри: трикутники того, що малюється. Земля — той самий chunkMesh(...).solid секції
+// player/collision.js — джерело зіткнень гри: трикутники того, що малюється. Земля — той самий chunkMesh(...).solid секції
 // 16³ з тих самих блоків (рамка в блок з усіх боків), що будує worker для рендеру; дерева й каміння — 12-кутні призми
 // (world.obst: стовбур, брила); тіла — коробки. Рушій (engine/physics/collide.js, character.js) бере трикутники через
 // src.gather(коробка, список). P — «щуп» світу (player.js): block, obj, objR, bodies, liquid; необов'язково sec (секція
 // з масивом b — швидкий шлях), laws (для chunkMesh; геометрія від законів не залежить), ver (лічильник даних світу).
-import { chunkMesh } from './gen/mesh.js';
-import { CS, CW, FR, SEC, bv, solidB, B_STONE, B_LIQ } from './gen/chunk.js';
-import { lawsOf, LEVEL } from './universe.js';
-import { pushTri, prismTris, boxTris, createList, clearList, rayCast } from './engine/physics/collide.js';
+import { chunkMesh } from '../gen/mesh.js';
+import { CS, CW, FR, SEC, bv, solidB, B_STONE, B_LIQ } from '../gen/chunk.js';
+import { lawsOf, LEVEL } from '../laws/universe.js';
+import { pushTri, prismTris, boxTris, createList, clearList, rayCast } from '../engine/physics/collide.js';
 
 const MAX_SECS = 128;                // секцій у кеші (найдавніша — геть)
 const NB = CW * CW * (SEC + 2 * FR);

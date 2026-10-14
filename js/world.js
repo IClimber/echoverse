@@ -3,16 +3,16 @@
 // 16×16×16 блоків з рамкою. Геометрію віддає рендеру через onMesh(kind: 'sec' | 'flora' | 'far' | 'obj', d, n, ключ, запит, дані, меш):
 // ключ секції — sk, рослин — ck, плитки далечі — рядок; 'obj' — повна будова предмета-цілі (обрис). Груба секція (робота lod, рівень q.lod) — теж 'sec', без блоків:
 // у світі не зберігається.
-import { lawsOf, physOf, KMIN, KMAX, LEVEL } from './universe.js';
+import { lawsOf, physOf, KMIN, KMAX, LEVEL } from './laws/universe.js';
 import { CS, ci, bv, solidB, blocks, genColumn, B_AIR, B_STONE, O_FLOAT, O_TREE, SEC } from './gen/chunk.js';
 import { createGen } from './gen/client.js';
-import { standableB, GRAVITY, PLAYER_MASS, PLAYER_AREA } from './player.js';
+import { standableB, GRAVITY, PLAYER_MASS, PLAYER_AREA } from './player/player.js';
 import { floatPose, SKYLIGHT, SKY_MAX, skyBright } from './gen/mesh.js';
 import { footprint } from './gen/plants.js';
 import { makeBody, configureBodies, settle } from './engine/physics/bodies.js';
 import { createEntities } from './engine/world/entities.js';
 import { createLightField } from './engine/world/skylight.js';
-import { revEq } from './worldphys.js';
+import { revEq } from './env/worldphys.js';
 
 // тіла рушія — зі сталими гри (блок, тверде, тяжіння, еталон маси й площі — гравець)
 configureBodies({ level: LEVEL, solid: solidB, gravity: GRAVITY, refMass: PLAYER_MASS, refArea: PLAYER_AREA });

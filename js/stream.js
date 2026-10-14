@@ -7,11 +7,11 @@
 // плитки нового всесвіту немає — та сама плитка попереднього (схожий рельєф: горизонт не порожніє).
 // Рівні деталізації (третя особа): секції стовпців далі LOD_R[0] — грубі (робота lod, без блоків), рівень — від відстані.
 import { CS, SEC } from './gen/chunk.js';
-import { LEVEL } from './universe.js';
+import { LEVEL } from './laws/universe.js';
 import { FT } from './gen/far.js';
 import { ck, sk } from './world.js';
-import { landingChunks } from './device.js';
-import { pitchOf, VIEW_R, FAR_R, SEAM, boxInView, LOD_ON, lodOf, colDist, FLORA_NEAR } from './camera.js';
+import { landingChunks } from './player/device.js';
+import { pitchOf, VIEW_R, FAR_R, SEAM, boxInView, LOD_ON, lodOf, colDist, FLORA_NEAR } from './player/camera.js';
 
 const ZR = [-200, 2100];                 // висоти (од.) для піраміди видимості ще не згенерованого стовпця
 const ZR_FAR = [-200, 2050];             // те саме для плитки далечі

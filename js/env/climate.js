@@ -1,8 +1,8 @@
-// climate.js — температура й повітря в точці й мить (п. 4 roadmap, М4 і М6; лише рух, вигляд і показ — Math.*
+// env/climate.js — температура й повітря в точці й мить (п. 4 roadmap, М4 і М6; лише рух, вигляд і показ — Math.*
 // дозволено). Генерація бере лише температуру ділянки й градієнт (L.temp, L.clim.lapse у gen/chunk.js tile); тут —
 // те саме плюс доба, сезон, погода, без обмеження ±2,5 одиниць (Венера в HUD — сотні градусів).
-import { fbm3 } from './noise.js';
-import { SEA, LEVEL } from './universe.js';
+import { fbm3 } from '../laws/noise.js';
+import { SEA, LEVEL } from '../laws/universe.js';
 import { dayPhase, yearPhase } from './sky.js';
 import { W_STORM } from './weather.js';
 

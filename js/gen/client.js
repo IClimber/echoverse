@@ -4,7 +4,7 @@
 // Запит q = {type: 'col' (зведення стовпця) | 'sec' (секція з мешем) | 'far' (плитка далечі), d, n, cx, cy, cz}.
 // Немає module worker (чи всі впали) — генерує в головному потоці (по кілька робіт за кадр).
 // Робота з винятком (генерація детермінована — повтор дасть те саме) — у консоль раз, далі не запитується; воркер живий.
-import { lawsOf } from '../universe.js';
+import { lawsOf } from '../laws/universe.js';
 import { runJob } from './job.js';
 import { createQueue, workerOf } from './queue.js';
 

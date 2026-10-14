@@ -1,10 +1,10 @@
-// worldphys.js — тяжіння й повітря в точці для руху (п. 4 roadmap, М10–М11; лише рух і вигляд — Math.* дозволено:
+// env/worldphys.js — тяжіння й повітря в точці для руху (п. 4 roadmap, М10–М11; лише рух і вигляд — Math.* дозволено:
 // фізика тіл і гравця не мусить бути однаковою на різних пристроях). Вектор тяжіння (у g, униз — додатне gz):
 // база всесвіту (L.grav: радіус, густина, відцентрова) × аномалія плями (universe.js gravityAt) × зворотна гравітація
 // за висотою над ґрунтом + нахил плями + приплив компаньйона (з його напряму на небі в мить clock).
-import { physOf, gravityAt } from './universe.js';
-import { noise2 } from './noise.js';
-import { smooth01 } from './num.js';
+import { physOf, gravityAt } from '../laws/universe.js';
+import { noise2 } from '../laws/noise.js';
+import { smooth01 } from '../laws/num.js';
 import { skyState } from './sky.js';
 import { airAt } from './climate.js';
 

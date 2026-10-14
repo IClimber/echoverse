@@ -1,15 +1,15 @@
-// laws-stand.js — стенд законів фізики світу (index.html?laws[&seed=&d=&n=&N=]; п. 4 roadmap): розподіли законів на N
+// stands/laws.js — стенд законів фізики світу (index.html?laws[&seed=&d=&n=&N=]; п. 4 roadmap): розподіли законів на N
 // всесвітах глибини d (рівні — кольором, частки незвичного / крайнього / легендарного, класи всесвітів), картка
 // всесвіту (d, n) в одиницях СІ, графіки в часі в одному місці (тяжіння з припливом, температура, вітер, погода, частка
 // часу «зносить») і прев'ю неба з оптики для набору атмосфер і зір. Лише показ: генерацію не змінює.
-import { lawsOf, physOf, STRANGE_NAMES, TIER_NAMES } from './universe.js';
-import { hashStr } from './rng.js';
-import { fx as fxN, fmtN } from './fmt.js';
-import { skyOptics } from './optics.js';
-import { starColor, skyState, clockStr, dayPhase, starsText, heldText } from './sky.js';
-import { physAt3 } from './worldphys.js';
-import { tempAt } from './climate.js';
-import { weatherAt, WEATHER_NAMES } from './weather.js';
+import { lawsOf, physOf, STRANGE_NAMES, TIER_NAMES } from '../laws/universe.js';
+import { hashStr } from '../laws/rng.js';
+import { fx as fxN, fmtN } from '../fmt.js';
+import { skyOptics } from '../env/optics.js';
+import { starColor, skyState, clockStr, dayPhase, starsText, heldText } from '../env/sky.js';
+import { physAt3 } from '../env/worldphys.js';
+import { tempAt } from '../env/climate.js';
+import { weatherAt, WEATHER_NAMES } from '../env/weather.js';
 
 const TIER_COL = ['#5d6b86', '#e0c060', '#f08a4b', '#ff4d6d'];
 const WCOL = ['#8fb8e8', '#9aa3b0', '#4f79b8', '#3c3f8f', '#c9ccd2', '#d6a65a'];

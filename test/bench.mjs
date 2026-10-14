@@ -1,8 +1,8 @@
 // test/bench.mjs — заміри генерації (не в npm test): мс на стовпець за етапами і стовпців/с в один потік.
 // node test/bench.mjs [зерно] [стовпців на бік]
 import { performance } from 'node:perf_hooks';
-import { hashStr } from '../js/rng.js';
-import { lawsOf } from '../js/universe.js';
+import { hashStr } from '../js/laws/rng.js';
+import { lawsOf } from '../js/laws/universe.js';
 import { genCol, genSection, tile } from '../js/gen/chunk.js';
 import { chunkMesh, floraMesh, objPose } from '../js/gen/mesh.js';
 import { colSummary, runJob } from '../js/gen/job.js';
@@ -62,13 +62,13 @@ console.log(`дальність 32 (14 / 42 / 44 % стовпців — повн
 
 // Зіткнення (collision.js): побудова секції — з масиву b (як у грі) і віртуальна з block(); крок гравця справжнім рельєфом
 {
-  const { colliderOf, stats } = await import('../js/collision.js');
+  const { colliderOf, stats } = await import('../js/player/collision.js');
   const { createList } = await import('../js/engine/physics/collide.js');
-  const { step, standable, settle } = await import('../js/player.js');
+  const { step, standable, settle } = await import('../js/player/player.js');
   const { genChunk, bi, H, B_AIR, B_STONE, SEC } = await import('../js/gen/chunk.js');
-  const { physOf } = await import('../js/universe.js');
-  const { createCamera, camHead, camCollide, THIRD, HEAD } = await import('../js/camera.js');
-  const { underLiquid } = await import('../js/collision.js');
+  const { physOf } = await import('../js/laws/universe.js');
+  const { createCamera, camHead, camCollide, THIRD, HEAD } = await import('../js/player/camera.js');
+  const { underLiquid } = await import('../js/player/collision.js');
   let secB = 0, nB = 0, secV = 0, nV = 0, stepT = 0, steps = 0, camT = 0, cams = 0;
   for (const n of [0, 37, 1000]) {
     const L = lawsOf(seed, 0, n), ph = physOf(L), C = new Map(), cols = new Map();
@@ -112,9 +112,9 @@ console.log(`дальність 32 (14 / 42 / 44 % стовпців — повн
 // Рух п. 3 (стенд ?move — gen/stand.js): крок гравця в позах (присів, лежить, на стіні, на драбині, під водою) і ціль
 // (aimRay: з ока вздовж випадкових напрямків справжнім рельєфом)
 {
-  const { step, settle, PH1 } = await import('../js/player.js');
+  const { step, settle, PH1 } = await import('../js/player/player.js');
   const { standBlock, STAND_SPOTS } = await import('../js/gen/stand.js');
-  const { aimRay, REACH } = await import('../js/aim.js');
+  const { aimRay, REACH } = await import('../js/player/aim.js');
   const { genCol, genSection, bv, solidB, B_STONE, B_AIR, SEC } = await import('../js/gen/chunk.js');
   const P = { liquid: { swim: true, danger: '', density: 1, visc: 1 }, obj: () => null, block: standBlock };
   const W = [[0, 1], [-1, 0]];                      // W — уздовж +x

@@ -2,9 +2,9 @@
 // з тінню, перед перешкодою), ліхтарик на фігурі, перешкода на відрізку (видима поверхня)
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { devKey, takeActions, clearInput } from '../js/input.js';
-import { lampPose, segHit, LAMP } from '../js/lamp.js';
-import { animate } from '../js/anim.js';
+import { devKey, takeActions, clearInput } from '../js/player/input.js';
+import { lampPose, segHit, LAMP } from '../js/player/lamp.js';
+import { animate } from '../js/player/anim.js';
 import { figureParts, LAMP_AT, FIG_K } from '../js/gen/mesh.js';
 import { B_AIR, B_STONE } from '../js/gen/chunk.js';
 

@@ -1,10 +1,10 @@
-// lamp.js — налобний ліхтарик гравця (L; 13.10.2026): параметри й положення на кадр. Лише числа, без DOM і PlayCanvas
+// player/lamp.js — налобний ліхтарик гравця (L; 13.10.2026): параметри й положення на кадр. Лише числа, без DOM і PlayCanvas
 // (світло — кластерний прожектор PlayCanvas, scene.js; «Spot · Punctual — torch», manual graphics/lighting/lights.md).
 // Рішення користувача: на лобі фігури; світить уздовж погляду камери (як приціл); конус 45° від краю до краю; дальність
 // 50 м; тінь — лише в третій особі: у першій світло йде з ока, а з ока тіней не видно (кожна видима точка з'єднана зі
 // світлом тим самим відрізком, що й з оком; світло крізь стіну падає лише на сховане нею)
 import { poseMatrices } from './anim.js';
-import { LAMP_AT } from './gen/mesh.js';
+import { LAMP_AT } from '../gen/mesh.js';
 import { castRay } from './collision.js';
 
 // inner / outer — від осі, як у PlayCanvas (shadow-renderer-local.js: fov тіні = 2·outer): повна яскравість до 18°, до 27°

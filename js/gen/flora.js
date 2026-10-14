@@ -5,10 +5,10 @@
 // + мутація області: плавна по карті (сусідні області схожі) і власна (кожна область своя). Тож за кожним пагорбом —
 // нові види, у сусідніх всесвітах — ті самі, трохи змінені, у всесвіті — тисячі. Геометрію з генома будує gen/plants.js.
 // Лише точна арифметика (генерація).
-import { hash2, hash3, hash4, unit } from '../rng.js';
-import { noise2, noise3 } from '../noise.js';
-import { hsl } from '../universe.js';
-import { clamp01 } from '../num.js';
+import { hash2, hash3, hash4, unit } from '../laws/rng.js';
+import { noise2, noise3 } from '../laws/noise.js';
+import { hsl } from '../laws/universe.js';
+import { clamp01 } from '../laws/num.js';
 import { BIOMES } from './biomes.js';
 
 

@@ -1,7 +1,7 @@
 // Розподіл законів (п. 4 roadmap): node test/laws-stats.mjs [--d=0] [--N=20000] [--seed=текст] [--from=101]
 // Частки рівнів кожного закону (незвичне й вище, крайнє й вище, легендарне), класи всесвітів, квантилі величин.
-import { lawsOf } from '../js/universe.js';
-import { hashStr } from '../js/rng.js';
+import { lawsOf } from '../js/laws/universe.js';
+import { hashStr } from '../js/laws/rng.js';
 
 const arg = (k, v) => { const a = process.argv.find((s) => s.startsWith(`--${k}=`)); return a ? a.slice(k.length + 3) : v; };
 const d = +arg('d', 0), N = +arg('N', 20000), seed = hashStr(arg('seed', 'stats')), from = +arg('from', 101);

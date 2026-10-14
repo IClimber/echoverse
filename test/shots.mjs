@@ -167,30 +167,30 @@ for (const [gpu, sh, view] of COMBOS) {
       await waitFor(`eco.g.d === ${d} && eco.g.n === ${n} && !eco.g.dev.charge && eco.g.me.placed`, 60000);
       last = null;
     }
-    if (ph === 'comp') await ev(`(async () => { const S = await import('./js/sky.js'), g = eco.g, L = g.world.laws(g.d, g.n), day = L.sky.dayMin * 60 / L.phys.time;
+    if (ph === 'comp') await ev(`(async () => { const S = await import('./js/env/sky.js'), g = eco.g, L = g.world.laws(g.d, g.n), day = L.sky.dayMin * 60 / L.phys.time;
       for (let c = g.clock; c < g.clock + day * 40; c += day / 200) { const s = S.skyState(L, c), m = s.moons.find((o) => o.comp); if (m && m.dir[2] > 0.35 && s.day < 0.3) { g.clock = c; return true; } } return false; })()`);
-    else if (ph === 'moon') await ev(`(async () => { const S = await import('./js/sky.js'), g = eco.g, L = g.world.laws(g.d, g.n), day = L.sky.dayMin * 60 / L.phys.time;
+    else if (ph === 'moon') await ev(`(async () => { const S = await import('./js/env/sky.js'), g = eco.g, L = g.world.laws(g.d, g.n), day = L.sky.dayMin * 60 / L.phys.time;
       for (let c = g.clock; c < g.clock + day * 40; c += day / 200) { const s = S.skyState(L, c), m = s.moons.find((o) => !o.comp); if (m && m.dir[2] > 0.3 && s.day < 0.05) { g.clock = c; return true; } } return false; })()`);
-    else if (ph === 'dusk') await ev(`(async () => { const S = await import('./js/sky.js'), g = eco.g, L = g.world.laws(g.d, g.n), day = L.sky.dayMin * 60 / L.phys.time;
+    else if (ph === 'dusk') await ev(`(async () => { const S = await import('./js/env/sky.js'), g = eco.g, L = g.world.laws(g.d, g.n), day = L.sky.dayMin * 60 / L.phys.time;
       for (let c = g.clock; c < g.clock + day * 2; c += day / 2000) { const a = S.skyState(L, c).suns[0].dir[2], b = S.skyState(L, c + day / 2000).suns[0].dir[2]; if (a > 0.05 && a < 0.09 && b < a) { g.clock = c; return true; } } return false; })()`);
     else if (ph !== null) await ev(`eco.setPhase(${ph})`);
-    if (prep && !(await ev(`(async () => { const pairEclipse = async () => { const S = await import('./js/sky.js'), g = eco.g, L = g.world.laws(g.d, g.n), day = L.sky.dayMin * 60 / L.phys.time; for (let c = g.clock; c < g.clock + day * 400; c += day / 400) { const s = S.skyState(L, c), e = s.suns.find((o) => o.role === 'pair' && o.eclipse > 0.2 && o.dir[2] > 0.15) || s.suns.find((o) => o.role === 'main' && o.eclipse > 0.2 && o.dir[2] > 0.15); if (e) { g.clock = c; window.__look = e.dir; return true; } } return false; }; const meteor = async () => { const W = await import('./js/weather.js'), g = eco.g, L = g.world.laws(g.d, g.n); for (let c = g.clock; c < g.clock + 3600 * 6; c += 0.5) if (W.meteorsAt(L, c, 1).length) { g.clock = c; return true; } return false; }; return ${prep}; })()`))) { R.push({ gpu, sh, view, sc, skip: 'не підготувалось' }); continue; }
+    if (prep && !(await ev(`(async () => { const pairEclipse = async () => { const S = await import('./js/env/sky.js'), g = eco.g, L = g.world.laws(g.d, g.n), day = L.sky.dayMin * 60 / L.phys.time; for (let c = g.clock; c < g.clock + day * 400; c += day / 400) { const s = S.skyState(L, c), e = s.suns.find((o) => o.role === 'pair' && o.eclipse > 0.2 && o.dir[2] > 0.15) || s.suns.find((o) => o.role === 'main' && o.eclipse > 0.2 && o.dir[2] > 0.15); if (e) { g.clock = c; window.__look = e.dir; return true; } } return false; }; const meteor = async () => { const W = await import('./js/env/weather.js'), g = eco.g, L = g.world.laws(g.d, g.n); for (let c = g.clock; c < g.clock + 3600 * 6; c += 0.5) if (W.meteorsAt(L, c, 1).length) { g.clock = c; return true; } return false; }; return ${prep}; })()`))) { R.push({ gpu, sh, view, sc, skip: 'не підготувалось' }); continue; }
     if (prep && prep.includes('findAnom')) { await wait(3000); await ev('eco.g.me.fly = false; 1'); for (let i = 0; i < 300 && !(await ev('eco.g.me.ground || eco.g.me.hover')); i++) await wait(50); await wait(500); }
     await idle(); for (let i = 0; i < 300 && (await ev('eco.visMissing()')) !== 0; i++) await wait(50);
     // небо — з висоти 60 м над місцем (пагорби й дерева не закривають), гравець висить у польоті
     if (look !== 'land' && look !== 'bolt') { await ev('(() => { const me = eco.g.me; me.fly = true; me.z += 60; me.vz = 0; me.vis = me.pv = me.z; eco.g.cam[2] = me.z; return 1; })()'); last = null; await wait(800); }
     if (look === 'land') await ev('eco.look(0.8, 0.2, 9); 1');
     else if (look === 'sky') await ev('eco.look(0.8, -0.9, 9); 1');
-    else await ev(`(async () => { const S = await import('./js/sky.js'), g = eco.g, L = g.world.laws(g.d, g.n), s = S.skyState(L, g.clock);
+    else await ev(`(async () => { const S = await import('./js/env/sky.js'), g = eco.g, L = g.world.laws(g.d, g.n), s = S.skyState(L, g.clock);
       const v = ${look === 'bolt' ? '[g.boltForce.x - g.cam[0], g.boltForce.y - g.cam[1], 60]' : look === 'comp' ? 's.moons.find((o) => o.comp).dir' : look === 'moon' ? 's.moons.find((o) => !o.comp).dir' : look === 'aur' ? '[s.aurora.dir[0], s.aurora.dir[1], 0.45]' : '(window.__look || s.suns[0].dir)'}, l = Math.hypot(...v);
       eco.look(Math.atan2(v[1], v[0]), -Math.min(1.2, Math.asin(v[2] / l)), 9); return 1; })()`);
     if (look !== 'bolt') await wait(2500);
-    if (sc === 'meteors') await ev(`(async () => { const W = await import('./js/weather.js'), g = eco.g, L = g.world.laws(g.d, g.n); for (let c = g.clock; c < g.clock + 3600 * 6; c += 0.25) { const m = W.meteorsAt(L, c, 1); if (m.length) { const a = m[0].a; g.clock = c + 0.25; eco.look(Math.atan2(a[1], a[0]), -Math.min(1.2, Math.asin(a[2])), 9); return true; } } return false; })()`);
+    if (sc === 'meteors') await ev(`(async () => { const W = await import('./js/env/weather.js'), g = eco.g, L = g.world.laws(g.d, g.n); for (let c = g.clock; c < g.clock + 3600 * 6; c += 0.25) { const m = W.meteorsAt(L, c, 1); if (m.length) { const a = m[0].a; g.clock = c + 0.25; eco.look(Math.atan2(a[1], a[0]), -Math.min(1.2, Math.asin(a[2])), 9); return true; } } return false; })()`);
     await menu(true); await wait(look === 'bolt' ? 300 : 1500);
     if (gpu !== 'webgpu') await shot(`${gpu}-${sh}-${view}-${sc}`);
     let extra = '';
     if (sc === 'nightsky') {   // другий кадр через 1/40 доби: місяць і зорі зсунулись на захід (азимут місяця — у звіті)
-      const az = `(async () => { const S = await import('./js/sky.js'), g = eco.g, s = S.skyState(g.world.laws(g.d, g.n), g.clock), m = s.moons.find((o) => !o.comp).dir; return [Math.atan2(m[1], m[0]), m[2]]; })()`;
+      const az = `(async () => { const S = await import('./js/env/sky.js'), g = eco.g, s = S.skyState(g.world.laws(g.d, g.n), g.clock), m = s.moons.find((o) => !o.comp).dir; return [Math.atan2(m[1], m[0]), m[2]]; })()`;
       const a0 = await ev(az);
       await ev('(() => { const g = eco.g, L = g.world.laws(g.d, g.n); g.clock += L.sky.dayMin * 60 / L.phys.time / 40; return 1; })()'); await wait(1500);
       if (gpu !== 'webgpu') await shot(`${gpu}-${sh}-${view}-${sc}-b`);

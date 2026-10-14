@@ -1,4 +1,4 @@
-// weather.js — погода й вітер у просторі й часі (п. 4 roadmap, М8; лише рух, вигляд і показ — Math.* дозволено). Без DOM.
+// env/weather.js — погода й вітер у просторі й часі (п. 4 roadmap, М8; лише рух, вигляд і показ — Math.* дозволено). Без DOM.
 // Погода — поле: хмарність c = fBm((x − u·t)/S, (y − v·t)/S, t/T) пливе за переважним вітром (S — розмір плям,
 // T — час зміни, закони L.air.cS / cT), переведене в рівномірне q (емпірична таблиця fBm); стан — за порогами q з ваг
 // законів (ясно < хмарно < дощ < гроза), туман і пилова буря — свої поля. Параметри (хмарність, видимість, опади, пил,
@@ -6,12 +6,12 @@
 // Вітер у точці: база (L.air.wind, ясно на рівнині) × погода × доба × пориви × висота й відкритість; напрям — комірки
 // циркуляції за широтою й обертанням (пасати, західні; захоплена — з нічного боку до денного) ± відхилення поля.
 // Без повітря — ні погоди, ні вітру. Місце уточнює: у холоді — сніг, у пустелі дощ не долітає, кислота — кислотний дощ.
-import { hash3, unit } from './rng.js';
-import { fbm3, noise2 } from './noise.js';
-import { tile, T_DESERT, T_DRY } from './gen/chunk.js';
+import { hash3, unit } from '../laws/rng.js';
+import { fbm3, noise2 } from '../laws/noise.js';
+import { tile, T_DESERT, T_DRY } from '../gen/chunk.js';
 import { dayPhase, skyAxes, skyState } from './sky.js';
-import { SEA, LEVEL } from './universe.js';
-import { clamp01, smoothstep } from './num.js';
+import { SEA, LEVEL } from '../laws/universe.js';
+import { clamp01, smoothstep } from '../laws/num.js';
 
 export const W_CLEAR = 0, W_CLOUDY = 1, W_RAIN = 2, W_STORM = 3, W_FOG = 4, W_DUST = 5;
 const KINDS = ['clear', 'cloudy', 'rain', 'storm', 'fog', 'dust'];

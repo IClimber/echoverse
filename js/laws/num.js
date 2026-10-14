@@ -1,14 +1,14 @@
-// num.js — точна детермінована арифметика для генерації (CLAUDE.md, «Детермінізм генерації»). Дозволено: + − × ÷,
+// laws/num.js — точна детермінована арифметика для генерації (CLAUDE.md, «Детермінізм генерації»). Дозволено: + − × ÷,
 // Math.floor / ceil / round / abs / min / max / imul / sqrt (точні за IEEE 754 — однакові до біта в будь-якому рушії JS),
 // зсуви й функції цього модуля. Math.sin / cos / exp / log / pow / cbrt / ** — ні: їхній останній біт залежить від рушія
 // (13.10.2026: Node 22, Chrome 155 і Firefox дають різні біти). Трансцендентні функції — stdlib (js/lib/stdlib: порти
 // fdlibm / FreeBSD msun і Boost лише на точних операціях, похибка ≤ 1 ulp; до 13.10.2026 — власні наближення: синус
 // Бхаскари I з похибкою до 0,0017). Лінтер (eslint.config.js) забороняє неточні Math.* у файлах генерації.
-import sin from './lib/stdlib/sin.js';
-import cos from './lib/stdlib/cos.js';
-import cbrt from './lib/stdlib/cbrt.js';
-import log10 from './lib/stdlib/log10.js';
-import erfcinv from './lib/stdlib/erfcinv.js';
+import sin from '../lib/stdlib/sin.js';
+import cos from '../lib/stdlib/cos.js';
+import cbrt from '../lib/stdlib/cbrt.js';
+import log10 from '../lib/stdlib/log10.js';
+import erfcinv from '../lib/stdlib/erfcinv.js';
 
 export const PI = 3.141592653589793;
 export const nsqrt = (v) => v > 0 ? Math.sqrt(v) : 0;

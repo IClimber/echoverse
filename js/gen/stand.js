@@ -6,10 +6,10 @@ import { CS, CW, FR, SEC, ci, bv, emptyOf, solidB, B_AIR, B_LIQ, B_ICE, B_GRASS,
 import { BIOMES } from './biomes.js';
 import { speciesOf, regionAt, pickSpecies, groundTint } from './flora.js';
 import { M_LUSH } from './materials.js';
-import { LEVEL } from '../universe.js';
+import { LEVEL } from '../laws/universe.js';
 import { stoneTemplate } from './mesh.js';
 import { footprint } from './plants.js';
-import { hash2 } from '../rng.js';
+import { hash2 } from '../laws/rng.js';
 
 const G = 7;                                   // верхній блок рівнини (z верху — 4)
 const inR = (v, a, b) => v >= a && v <= b;

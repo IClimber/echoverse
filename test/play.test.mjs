@@ -1,9 +1,9 @@
 // Рух гравця, камера, пристрій для стрибків, формат файлу збереження.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { LEVEL } from '../js/universe.js';
-import { step, hits, support, standable, settle, placeAt, SPEED, PH1, GRAVITY, JUMP_V, FLOAT_Z, jumpHeight, SPRINT, FLY_SPEED, FLY_V, shapeOf } from '../js/player.js';
-import { landing, landingChunks, createDevice, CHARGE, HISTORY } from '../js/device.js';
+import { LEVEL } from '../js/laws/universe.js';
+import { step, hits, support, standable, settle, placeAt, SPEED, PH1, GRAVITY, JUMP_V, FLOAT_Z, jumpHeight, SPRINT, FLY_SPEED, FLY_V, shapeOf } from '../js/player/player.js';
+import { landing, landingChunks, createDevice, CHARGE, HISTORY } from '../js/player/device.js';
 import { serialize, deserialize } from '../js/save.js';
 import { B_AIR, B_LIQ, B_GRASS, B_STONE } from '../js/gen/chunk.js';
 import { fx, fmtN, sg, pc, atm } from '../js/fmt.js';
@@ -196,7 +196,7 @@ test('файл збереження: туди й назад, перевірка 
 });
 
 test('камера: базис руху; третя особа дивиться на ціль', async () => {
-  const { createCamera, viewProj, project, moveBasis, THIRD } = await import('../js/camera.js');
+  const { createCamera, viewProj, project, moveBasis, THIRD } = await import('../js/player/camera.js');
   const c = createCamera(THIRD), W = 1600, H = 900;                         // азимут 45° — від createCamera
   const [r, d] = moveBasis(c);
   assert.ok(Math.abs(r[0] - Math.SQRT1_2) < 1e-12 && Math.abs(r[1] + Math.SQRT1_2) < 1e-12 && Math.abs(d[0] - d[1]) < 1e-12);
@@ -207,8 +207,8 @@ test('камера: базис руху; третя особа дивиться 
 });
 
 test('текстури: усі шари, шар 0 нейтральний, різні всесвіти — різні візерунки', async () => {
-  const { texturesOf, TEX } = await import('../js/textures.js');
-  const { lawsOf } = await import('../js/universe.js');
+  const { texturesOf, TEX } = await import('../js/render/textures.js');
+  const { lawsOf } = await import('../js/laws/universe.js');
   const { LAYERS } = await import('../js/gen/materials.js');
   const a = texturesOf(lawsOf(1, 0, 0)), b = texturesOf(lawsOf(1, 2, 300));
   assert.equal(a.length, LAYERS * TEX * TEX * 4);
@@ -280,9 +280,9 @@ test('біг і політ: Shift — швидше; у польоті без г�
 });
 
 test('небо й час: біля старту — одне сонце, місяць, доба ~20 хв; далі — кілька сонць, кільця, вічний день; полудень світліший', async () => {
-  const { lawsOf } = await import('../js/universe.js');
-  const { skyState, dayPhase, clockStr } = await import('../js/sky.js');
-  const { hashStr } = await import('../js/rng.js');
+  const { lawsOf } = await import('../js/laws/universe.js');
+  const { skyState, dayPhase, clockStr } = await import('../js/env/sky.js');
+  const { hashStr } = await import('../js/laws/rng.js');
   const seed = hashStr('небо');
   let multi = 0, rings = 0, lock = 0, noMoon = 0;
   for (let n = -1500; n <= 1500; n++) {
@@ -307,7 +307,7 @@ test('небо й час: біля старту — одне сонце, міс�
 });
 
 test('тінь — від світила з найсильнішим прямим світлом: головне сонце сідає (диск ще яскравіший), друге високо — тінь від другого (14.10.2026)', async () => {
-  const { lightsOf } = await import('../js/sky.js');
+  const { lightsOf } = await import('../js/env/sky.js');
   const n = (v) => { const l = Math.hypot(...v); return v.map((x) => x / l); };
   const main = { dir: n([1, 0, 0.03]), col: [255, 240, 200], size: 0.04, bright: 1 }, sec = { dir: n([0, 1, 0.6]), col: [255, 220, 180], size: 0.04, bright: 0.75 };
   const o = lightsOf({ suns: [main, sec], moons: [], main, duskCol: [255, 140, 60], lock: false, I: 0.8, amb: 0.3, day: 0.6 }, 3);
@@ -317,7 +317,7 @@ test('тінь — від світила з найсильнішим прями�
 });
 
 test('світла неба: головне (з тінню) — найяскравіше; сонце, що показалось над обрієм на 1 %, яскравіше за місяць; серп слабший за повню; захід без провалу й стрибка яскравості', async () => {
-  const { lightsOf, aboveHorizon } = await import('../js/sky.js');
+  const { lightsOf, aboveHorizon } = await import('../js/env/sky.js');
   const n = (v) => { const l = Math.hypot(...v); return v.map((x) => x / l); };
   const r = 0.04, zOf = (f) => { let lo = -1, hi = 1; for (let i = 0; i < 60; i++) { const m = (lo + hi) / 2; if (aboveHorizon(Math.sin(m * r), r) < f) lo = m; else hi = m; } return Math.sin(lo * r); };
   assert.ok(Math.abs(aboveHorizon(0, r) - 0.5) < 1e-9 && aboveHorizon(-0.1, r) === 0 && aboveHorizon(0.1, r) === 1);
@@ -374,10 +374,10 @@ test('світла неба: головне (з тінню) — найяскра
 });
 
 test('атмосфера й погода: біля старту — придатне повітря ~1 атм; трапляються інші; погода детермінована й змінюється; місце уточнює', async () => {
-  const { lawsOf } = await import('../js/universe.js');
-  const { weatherAt, localWeather, W_STORM } = await import('../js/weather.js');
-  const { skyState, applyWeather } = await import('../js/sky.js');
-  const { hashStr } = await import('../js/rng.js');
+  const { lawsOf } = await import('../js/laws/universe.js');
+  const { weatherAt, localWeather, W_STORM } = await import('../js/env/weather.js');
+  const { skyState, applyWeather } = await import('../js/env/sky.js');
+  const { hashStr } = await import('../js/laws/rng.js');
   const seed = hashStr('повітря'), gases = new Set();
   let vac = 0;
   for (const d of [0, 3]) for (let n = -1000; n <= 1000; n++) {
@@ -417,8 +417,8 @@ test('атмосфера й погода: біля старту — придат
 });
 
 test('інша фізика: ковзкий ґрунт — інерція; опір повітря — межа падіння й ширяння; пружний ґрунт — відскок', async () => {
-  const { lawsOf, physOf } = await import('../js/universe.js');
-  const { hashStr } = await import('../js/rng.js');
+  const { lawsOf, physOf } = await import('../js/laws/universe.js');
+  const { hashStr } = await import('../js/laws/rng.js');
   const P = world(Array(40).fill('4'.repeat(40)));
   // ковзко: розганяєшся повільно і після відпускання ще їдеш
   const slip = { ...PH1, friction: 0.15 }, a = man(P, 5.5, 20.5), b = man(P, 5.5, 20.5);
@@ -480,7 +480,7 @@ test('нові сили: вітер — чесний опір (на землі �
 });
 
 test('тіла: левітуюче висить на висоті появи, звичайне падає й лежить; удар — легке відлітає, важке ледь зрушить; на тіло можна стати', async () => {
-  const { configureBodies } = await import('../js/engine/physics/bodies.js'); const { solidB: sB } = await import('../js/gen/chunk.js'); const pl = await import('../js/player.js'); const { LEVEL: LV } = await import('../js/universe.js');
+  const { configureBodies } = await import('../js/engine/physics/bodies.js'); const { solidB: sB } = await import('../js/gen/chunk.js'); const pl = await import('../js/player/player.js'); const { LEVEL: LV } = await import('../js/laws/universe.js');
   configureBodies({ level: LV, solid: sB, gravity: pl.GRAVITY, refMass: pl.PLAYER_MASS, refArea: pl.PLAYER_AREA });
   const { makeBody, stepBody, push } = await import('../js/engine/physics/bodies.js'); const { HIT_IMPULSE } = pl;
   const P = world(Array(40).fill('4'.repeat(40))), env = { g: 1, vT: 20, bounce: 0, friction: 1, wind: [0, 0] };
@@ -519,7 +519,7 @@ test('плавний спуск: уступ у 1 блок униз — ноги 
 });
 
 test('вітер: затишок за стіною, деревом чи каменем з навітряного боку (до 3 клітинок) і в печері; у повітрі не керуєш, вітер — опором', async () => {
-  const { windShelter } = await import('../js/player.js');
+  const { windShelter } = await import('../js/player/player.js');
   const open = world(Array(20).fill('4'.repeat(20)));
   assert.equal(windShelter(open, 10.5, 10.5, 4 * LEVEL, [5, 0]), 1);
   // стіна на x = 7 (вітер дує в +x — з боку меншого x)
@@ -554,7 +554,7 @@ test('вітер: затишок за стіною, деревом чи каме
 });
 
 test('тіла й вітер: сплячий левітуючий камінь вітер будить і відхиляє (легкий — далі, важкий — ледь), поле не дає відлетіти', async () => {
-  const { configureBodies } = await import('../js/engine/physics/bodies.js'); const { solidB: sB } = await import('../js/gen/chunk.js'); const pl = await import('../js/player.js'); const { LEVEL: LV } = await import('../js/universe.js');
+  const { configureBodies } = await import('../js/engine/physics/bodies.js'); const { solidB: sB } = await import('../js/gen/chunk.js'); const pl = await import('../js/player/player.js'); const { LEVEL: LV } = await import('../js/laws/universe.js');
   configureBodies({ level: LV, solid: sB, gravity: pl.GRAVITY, refMass: pl.PLAYER_MASS, refArea: pl.PLAYER_AREA });
   const { makeBody, stepBody } = await import('../js/engine/physics/bodies.js');
   const P = world(Array(60).fill('4'.repeat(60))), env = { g: 1.28, vT: 40, bounce: 0, friction: 1, wind: [20, 0] };
@@ -569,7 +569,7 @@ test('тіла й вітер: сплячий левітуючий камінь �
 });
 
 test('левітуюче тіло тримає висоту появи: над уступом униз і над водою — та сама висота, не відстань до ґрунту', async () => {
-  const { configureBodies, makeBody, stepBody } = await import('../js/engine/physics/bodies.js'); const { solidB: sB } = await import('../js/gen/chunk.js'); const pl = await import('../js/player.js');
+  const { configureBodies, makeBody, stepBody } = await import('../js/engine/physics/bodies.js'); const { solidB: sB } = await import('../js/gen/chunk.js'); const pl = await import('../js/player/player.js');
   configureBodies({ level: LEVEL, solid: sB, gravity: pl.GRAVITY, refMass: pl.PLAYER_MASS, refArea: pl.PLAYER_AREA });
   // суходіл висотою 4 рівні (x 0…9), уступ униз на 2 рівні (x 10…19), далі вода (x 20…39)
   const P = world(Array(9).fill('4'.repeat(10) + '2'.repeat(10) + 'w'.repeat(20))), env = { g: 1, vT: 20, bounce: 0, friction: 1, wind: [0, 0] };
@@ -581,10 +581,10 @@ test('левітуюче тіло тримає висоту появи: над �
 });
 
 test('погода в місці не мигтить на межі пустелі: пустеля й сухість — за околом з гістерезисом', async () => {
-  const { lawsOf } = await import('../js/universe.js');
-  const { areaClimate } = await import('../js/weather.js');
+  const { lawsOf } = await import('../js/laws/universe.js');
+  const { areaClimate } = await import('../js/env/weather.js');
   const { tile, T_DESERT, T_DRY } = await import('../js/gen/chunk.js');
-  const { hashStr } = await import('../js/rng.js');
+  const { hashStr } = await import('../js/laws/rng.js');
   const seed = hashStr('test');
   let checked = 0;
   for (let i = 0; i < 2000 && checked < 3; i++) {
@@ -616,7 +616,7 @@ test('погода в місці не мигтить на межі пустел�
 
 // Висота видимої поверхні під точкою (промінь проти трикутників зіткнень)
 async function surfAt(P, x, y, top = 40) {
-  const { colliderOf } = await import('../js/collision.js');
+  const { colliderOf } = await import('../js/player/collision.js');
   const { createList, rayCast } = await import('../js/engine/physics/collide.js');
   const L = colliderOf(P).gather(x - 0.01, y - 0.01, -2, x + 0.01, y + 0.01, top, createList());
   const r = rayCast(L, x, y, top, 0, 0, -1, top + 2);
@@ -644,10 +644,10 @@ test('схили: стоїш (до 80°), ноги фігури — на вид�
 });
 
 test('прогулянка справжнім рельєфом: випадкове введення з бігом і стрибками — капсула ніколи не в поверхні, на землі підлога під ногами', async () => {
-  const { lawsOf, physOf } = await import('../js/universe.js');
-  const { hashStr } = await import('../js/rng.js');
+  const { lawsOf, physOf } = await import('../js/laws/universe.js');
+  const { hashStr } = await import('../js/laws/rng.js');
   const { genChunk, bi, H } = await import('../js/gen/chunk.js');
-  const { liquidAt } = await import('../js/player.js');
+  const { liquidAt } = await import('../js/player/player.js');
   const seed = hashStr('test');
   let rnd = 99;
   const r = () => { rnd = (rnd * 1103515245 + 12345) >>> 0; return rnd / 4294967296; };
@@ -686,8 +686,8 @@ test('прогулянка справжнім рельєфом: випадков
 });
 
 test('камера третьої особи — куля: стіна, стовбур, тіло позаду — ближче; схил — око над ним; низька стеля — ціль під нею; не виходить з-під рідини', async () => {
-  const { createCamera, camHead, camCollide, eyeDir, THIRD, HEAD, CAM_R } = await import('../js/camera.js');
-  const { colliderOf, underLiquid } = await import('../js/collision.js');
+  const { createCamera, camHead, camCollide, eyeDir, THIRD, HEAD, CAM_R } = await import('../js/player/camera.js');
+  const { colliderOf, underLiquid } = await import('../js/player/collision.js');
   const cam = createCamera(THIRD);
   cam.yaw = Math.PI; cam.pitch3 = 0; cam.dist = 7;                   // око — у бік −x
   const at = (P, x, y, z) => { const src = colliderOf(P), head = [x, y, camHead(src, [x, y, z], HEAD)]; return { head, ...camCollide(cam, head, head, src, (a, b, c) => underLiquid(P, a, b, c)) }; };
@@ -721,8 +721,8 @@ test('камера третьої особи — куля: стіна, стов�
 });
 
 test('перша особа: V — перша ↔ третя, погляд — куди обернений гравець, кут огляду 70°, без згладжування; руки — у кутах кадру', async () => {
-  const { createCamera, viewProj, project, basis, rotate, smooth, facing, setYaw, NEXT, FIRST, THIRD, FOV1, LIMITS } = await import('../js/camera.js');
-  const { viewArms } = await import('../js/anim.js');
+  const { createCamera, viewProj, project, basis, rotate, smooth, facing, setYaw, NEXT, FIRST, THIRD, FOV1, LIMITS } = await import('../js/player/camera.js');
+  const { viewArms } = await import('../js/player/anim.js');
   assert.deepEqual([NEXT[FIRST], NEXT[THIRD]], [THIRD, FIRST]);
   const c = createCamera(FIRST);
   setYaw(c, 1.2 + Math.PI);
@@ -751,8 +751,8 @@ test('перша особа: V — перша ↔ третя, погляд — �
 });
 
 test('руки першої особи: viewArms читає зі стану гравця лише VIEW_KEYS — знімок для сцени дає те саме, що повний стан', async () => {
-  const { viewArms, animate, VIEW_KEYS } = await import('../js/anim.js');
-  const { createCamera, basis, FIRST, FOV1 } = await import('../js/camera.js');
+  const { viewArms, animate, VIEW_KEYS } = await import('../js/player/anim.js');
+  const { createCamera, basis, FIRST, FOV1 } = await import('../js/player/camera.js');
   const b = basis(createCamera(FIRST));
   const states = [
     { swim: true, moving: true }, { dive: true, wet: true, ground: true, moving: true }, { wet: true, ground: true, moving: true },
@@ -798,7 +798,7 @@ test('незгенероване під гравцем (телепорт у пе
 });
 
 test('під рідиною: око нижче поверхні стовпця рідини (поверхня — 0,15 під краєм верхнього блоку); видимість — від прозорості', async () => {
-  const { underLiquid, liquidVis } = await import('../js/collision.js');
+  const { underLiquid, liquidVis } = await import('../js/player/collision.js');
   const P = world(Array(4).fill('wwww'));                               // дно — верх k = 1 (z 1), рідина k 2…5, поверхня 2,85
   assert.equal(underLiquid(P, 1.5, 1.5, 2.84), true);
   assert.equal(underLiquid(P, 1.5, 1.5, 2.86), false);
@@ -810,7 +810,7 @@ test('під рідиною: око нижче поверхні стовпця �
 
 test('відкритість неба над точкою (опади, мокра стіна): skyK верху укриття, білінійно між клітинками; немає даних — відкрито', async () => {
   const { skyOpenAt, skyK } = await import('../js/world.js');
-  const { LEVEL } = await import('../js/universe.js');
+  const { LEVEL } = await import('../js/laws/universe.js');
   // клітинки x < 0 — під стелею на висоті 10 (печера), x ≥ 0 — відкрито (верх укриття — земля на 0)
   const top = (x) => x < 0 ? 10 : 0;
   assert.equal(skyOpenAt(top, 5.5, 0.5, 0.5), 1);
@@ -847,8 +847,8 @@ test('тіло чи стовбур накрили гравця (тіла з ни
 });
 
 test('поверхневий натяг: опускаючись на поверхню рідини біля крутого берега, гравець не входить у берег (стрес-тест)', async () => {
-  const { lawsOf, physOf } = await import('../js/universe.js');
-  const { hashStr } = await import('../js/rng.js');
+  const { lawsOf, physOf } = await import('../js/laws/universe.js');
+  const { hashStr } = await import('../js/laws/rng.js');
   const { genChunk, bi, H } = await import('../js/gen/chunk.js');
   const L = lawsOf(hashStr('stress'), 2, 600), C = new Map();
   assert.ok(L.liquid.tension, 'у цьому всесвіті рідина з натягом');
@@ -862,7 +862,7 @@ test('поверхневий натяг: опускаючись на повер�
 });
 
 test('опір повітря: стрибок 1,15 м і 0,97 с при 1 g і 1 атм, як у формулі, за будь-якого кроку; падіння — до межі, не далі; метан — Архімед', async () => {
-  const { physOf } = await import('../js/universe.js');
+  const { physOf } = await import('../js/laws/universe.js');
   const ph = physOf({ grav: 1, air: { rho: 1.225 }, phys: { friction: 1, bounce: 0 } });
   const air = (dt) => {
     const P = world(Array(9).fill('4'.repeat(9))), p = man(P, 4.5, 4.5), z0 = p.z;
@@ -889,7 +889,7 @@ test('опір повітря: стрибок 1,15 м і 0,97 с при 1 g і 1
 });
 
 test('тіла: тертя Кулона (гальмівний шлях v²/(2μg)), межа падіння — від площі проєкції й маси, вітер зрушує понад μ·m·g', async () => {
-  const { configureBodies } = await import('../js/engine/physics/bodies.js'); const { solidB: sB } = await import('../js/gen/chunk.js'); const pl = await import('../js/player.js'); const { LEVEL: LV } = await import('../js/universe.js');
+  const { configureBodies } = await import('../js/engine/physics/bodies.js'); const { solidB: sB } = await import('../js/gen/chunk.js'); const pl = await import('../js/player/player.js'); const { LEVEL: LV } = await import('../js/laws/universe.js');
   configureBodies({ level: LV, solid: sB, gravity: pl.GRAVITY, refMass: pl.PLAYER_MASS, refArea: pl.PLAYER_AREA });
   const { makeBody, stepBody, windMoves } = await import('../js/engine/physics/bodies.js');
   const P = world(Array(40).fill('4'.repeat(40)));

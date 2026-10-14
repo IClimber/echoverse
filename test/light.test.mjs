@@ -6,7 +6,7 @@ import { SKYLIGHT, SKY_MAX, skyBright, floraMesh } from '../js/gen/mesh.js';
 import { createLightField } from '../js/engine/world/skylight.js';
 import { CS, FR, SEC, B_ROCK, O_FLOAT, solidB } from '../js/gen/chunk.js';
 import { createWorld } from '../js/world.js';
-import { hashStr } from '../js/rng.js';
+import { hashStr } from '../js/laws/rng.js';
 import { unpack, regionOf, RW, RH } from '../js/gen/pack.js';
 
 const NW = CS + 2 * FR, wi = (x, y, k) => ((y + FR) * NW + x + FR) * NW + k + FR;
@@ -199,7 +199,7 @@ test('меші: вершини на межах секцій — однакове
 
 test('рослини зблизька: світло основ із головного потоку (0 — темно, null — як під небом)', async () => {
   const { genCol } = await import('../js/gen/chunk.js');
-  const { lawsOf } = await import('../js/universe.js');
+  const { lawsOf } = await import('../js/laws/universe.js');
   const { objPose } = await import('../js/gen/mesh.js');
   const L = lawsOf(hashStr('test'), 0, 0);
   let col = null;

@@ -1,6 +1,6 @@
 // gen/worker.js — генерація у Web Worker (module), щоб не смикати кадри: зведення стовпців і секції з мешами (job.js).
 // Запит {id, seed, q} → {id, data, mesh, ms}; масиви секцій і мешів передаються без копіювання.
-import { lawsOf } from '../universe.js';
+import { lawsOf } from '../laws/universe.js';
 import { runJob } from './job.js';
 
 const laws = new Map(), cols = new Map();

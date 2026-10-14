@@ -1,21 +1,21 @@
-// flora-stand.js — стенд «види рослин» (index.html?flora[&seed=…&d=…&n=…&far&small]): галерея видів, що трапляються
+// stands/flora.js — стенд «види рослин» (index.html?flora[&seed=…&d=…&n=…&far&small]): галерея видів, що трапляються
 // в одному всесвіті (області навколо центру карти), кожен — на клаптику землі свого біому, з підписом.
 // Види мають бути різні за будовою, а не перефарбовані. far — спрощені (для далечі), small — малі.
-import { createApp, pc } from './engine/graphics/app.js';
-import { createMaterials } from './engine/graphics/materials.js';
-import { createLights } from './engine/graphics/lights.js';
-import { floatMesh } from './engine/graphics/meshes.js';
-import { lawsOf } from './universe.js';
-import { hashStr } from './rng.js';
-import { tile, T_LUSH, T_DRY, T_DESERT } from './gen/chunk.js';
-import { BIOMES } from './gen/biomes.js';
-import { regionAt, speciesOf, groundTint, FORMS } from './gen/flora.js';
-import { template, place } from './gen/plants.js';
-import { Mesh } from './gen/mesh.js';
-import { texturesOf, TEX } from './textures.js';
-import { LAYERS, MAT_TABLE, M_LUSH, M_DRY, M_DESERT, M_SNOW, M_ROCK, M_SAND } from './gen/materials.js';
-import { createCamera, basis } from './camera.js';
-import { REF_Z, MIN_LIGHT, pcIntensity } from './sky.js';
+import { createApp, pc } from '../engine/graphics/app.js';
+import { createMaterials } from '../engine/graphics/materials.js';
+import { createLights } from '../engine/graphics/lights.js';
+import { floatMesh } from '../engine/graphics/meshes.js';
+import { lawsOf } from '../laws/universe.js';
+import { hashStr } from '../laws/rng.js';
+import { tile, T_LUSH, T_DRY, T_DESERT } from '../gen/chunk.js';
+import { BIOMES } from '../gen/biomes.js';
+import { regionAt, speciesOf, groundTint, FORMS } from '../gen/flora.js';
+import { template, place } from '../gen/plants.js';
+import { Mesh } from '../gen/mesh.js';
+import { texturesOf, TEX } from '../render/textures.js';
+import { LAYERS, MAT_TABLE, M_LUSH, M_DRY, M_DESERT, M_SNOW, M_ROCK, M_SAND } from '../gen/materials.js';
+import { createCamera, basis } from '../player/camera.js';
+import { REF_Z, MIN_LIGHT, pcIntensity } from '../env/sky.js';
 
 export async function runFlora() {
   const q = new URLSearchParams(location.search);

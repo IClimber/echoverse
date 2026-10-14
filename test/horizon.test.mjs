@@ -1,9 +1,9 @@
-// Справжній обрій з ока (js/horizon.js, 14.10.2026): з висоти h над поверхнею — нижче горизонталі на atan √(2h/R)
+// Справжній обрій з ока (js/env/horizon.js, 14.10.2026): з висоти h над поверхнею — нижче горизонталі на atan √(2h/R)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { lawsOf } from '../js/universe.js';
-import { hashStr } from '../js/rng.js';
-import { createHorizon, HZ_N } from '../js/horizon.js';
+import { lawsOf } from '../js/laws/universe.js';
+import { hashStr } from '../js/laws/rng.js';
+import { createHorizon, HZ_N } from '../js/env/horizon.js';
 
 const L = lawsOf(hashStr('test'), 0, 1), R = L.phys.planetR, FAR = 1400;
 const dip = (h) => { const t2 = 2 * h / R; return Math.sqrt(t2 / (1 + t2)); };

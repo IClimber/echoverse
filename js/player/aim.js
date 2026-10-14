@@ -1,14 +1,14 @@
-// aim.js — ціль гравця (п. 3 roadmap): промінь з ока уздовж погляду камери (як у Minecraft) до першого, у що влучає:
+// player/aim.js — ціль гравця (п. 3 roadmap): промінь з ока уздовж погляду камери (як у Minecraft) до першого, у що влучає:
 // видима поверхня (тоді блок — DDA по блоках від точки влучання: поверхня плавна, блок під нею — той, що зміниться
 // в п. 6), тіло, предмет (стовбур, крона, трава, камінь — трикутники того самого шаблону, що малюється й обводиться,
 // objShape; циліндр з даних стовпця лише відкидає зайве). Без DOM.
 // P — «щуп» світу (player.js); objAt(x, y) → {o, C, L} — предмет клітинки (world.js) чи null; o — початок, d — напрям
 // (одиничний), maxT — довжина
 import { castRay, isBody } from './collision.js';
-import { rayTriSoup } from './engine/physics/collide.js';
-import { solidB, CS, O_COVER } from './gen/chunk.js';
-import { objShape } from './gen/mesh.js';
-import { LEVEL } from './universe.js';
+import { rayTriSoup } from '../engine/physics/collide.js';
+import { solidB, CS, O_COVER } from '../gen/chunk.js';
+import { objShape } from '../gen/mesh.js';
+import { LEVEL } from '../laws/universe.js';
 
 export const REACH = 3;              // досяжність рук (як удар)
 

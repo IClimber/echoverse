@@ -3,13 +3,13 @@
 // стануть іншими), тож тоді — підняти GEN у universe.js і оновити еталони свідомо.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { hash2, hash3, hash4, hashStr, rng, unit } from '../js/rng.js';
-import { noise2, noise3, fbm3 } from '../js/noise.js';
-import { lawsOf, hsl, GEN, SEA } from '../js/universe.js';
+import { hash2, hash3, hash4, hashStr, rng, unit } from '../js/laws/rng.js';
+import { noise2, noise3, fbm3 } from '../js/laws/noise.js';
+import { lawsOf, hsl, GEN, SEA } from '../js/laws/universe.js';
 import { genChunk, digest, tile, ci, CS, T_WATER, blocks } from '../js/gen/chunk.js';
 import { chunkMesh } from '../js/gen/mesh.js';
 import { findSpawn } from '../js/world.js';
-import { GOLD, SPOTS } from '../js/golden.js';
+import { GOLD, SPOTS } from '../js/gen/golden.js';
 
 // клітинки з предметом, що заважає ходити (дерево, камінь на землі)
 const solidMask = (C) => { const m = new Uint8Array(CS * CS); for (const o of C.obj) if (blocks(o.k)) m[o.y * CS + o.x] = 1; return m; };
@@ -156,7 +156,7 @@ test('плавна поверхня: рівнина — пласка на вер
 });
 
 test('гравітація: з радіуса й густини планети (нормально навколо 1 g), ≈ 1 g біля старту; легка — вільніший рух', async () => {
-  const { physOf, FLOAT_G } = await import('../js/universe.js');
+  const { physOf, FLOAT_G } = await import('../js/laws/universe.js');
   const seed = hashStr('гравітація'), G = [];
   let lo = null, hi = null;
   assert.ok(Math.abs(lawsOf(seed, 0, 0).grav - 1) < 0.03, `(0, 0): ${lawsOf(seed, 0, 0).grav}`);
@@ -178,7 +178,7 @@ test('гравітація: з радіуса й густини планети (
 });
 
 test('левітуючі породи: біля старту немає; трапляються з різними умовами; ширяюче каміння — лише з такої породи, де вона левітує; острови — з неї ж', async () => {
-  const { floats, gravityAt } = await import('../js/universe.js');
+  const { floats, gravityAt } = await import('../js/laws/universe.js');
   const { O_FLOAT, B_FLOAT } = await import('../js/gen/chunk.js');
   const seed = hashStr('гравітація'), conds = new Set();
   let withFloat = null, islands = 0, anomU = null;
@@ -215,7 +215,7 @@ test('левітуючі породи: біля старту немає; тра�
 async function shoreHoles(L, cx0, cy0) {
   const { genCol, genSection, SEC } = await import('../js/gen/chunk.js');
   const { objPose } = await import('../js/gen/mesh.js');
-  const { LEVEL } = await import('../js/universe.js');
+  const { LEVEL } = await import('../js/laws/universe.js');
   const { createList, pushTri, rayCast } = await import('../js/engine/physics/collide.js');
   const S = createList(1 << 16), Q = [];
   for (let cx = cx0 - 1; cx <= cx0 + 1; cx++) for (let cy = cy0 - 1; cy <= cy0 + 1; cy++) {
@@ -263,7 +263,7 @@ test('берег: площина води доходить до плавної �
 });
 
 test('рідини: біля старту — безпечна вода; трапляються інші; сухий всесвіт — русла без рідини; гаряча — небезпечна; дно — не порожнеча', async () => {
-  const { L_WATER, L_DRY, HOT } = await import('../js/universe.js');
+  const { L_WATER, L_DRY, HOT } = await import('../js/laws/universe.js');
   const { T_BED, T_ICE } = await import('../js/gen/chunk.js');
   const seed = hashStr('рідини'), kinds = new Set();
   let dry = null, hot = null;
@@ -420,7 +420,7 @@ test('форми рельєфу: річки (вузькі смуги рідин�
 
 test('далечінь: плитка — узгоджений меш, висоти вершин — поверхня tile', async () => {
   const { farMesh, FT } = await import('../js/gen/far.js');
-  const { LEVEL } = await import('../js/universe.js');
+  const { LEVEL } = await import('../js/laws/universe.js');
   const { T_ICE, cliffTop } = await import('../js/gen/chunk.js');
   const L = lawsOf(hashStr('далечінь'), 0, 7);
   for (const s of [2, 4, 8]) {
@@ -459,7 +459,7 @@ test('печери: великі зали (порожнина ≥ 30 блокі�
 });
 
 test('рідкісність законів: класи всесвітів 30 / 45 / 20 / 5 %, крайнє й легендарне — рідко, біля старту — лише звичайне', async () => {
-  const { qOf, STRANGE_NAMES } = await import('../js/universe.js');
+  const { qOf, STRANGE_NAMES } = await import('../js/laws/universe.js');
   const seed = hashStr('test'), N = 20000, cls = [0, 0, 0, 0], dec = new Array(10).fill(0);
   let none = 0, ext = 0, leg = 0, isl = 0, anom = 0, volc = 0, w360 = 0, c0 = 0, n0 = 0, c4 = 0, inv = 0, p150 = 0;
   const W = [];
@@ -488,8 +488,8 @@ test('рідкісність законів: класи всесвітів 30 / 
 });
 
 test('рідкісність: qOf робить lane рівномірним', async () => {
-  const { qOf } = await import('../js/universe.js');
-  const { noise2 } = await import('../js/noise.js');
+  const { qOf } = await import('../js/laws/universe.js');
+  const { noise2 } = await import('../js/laws/noise.js');
   const dec = new Array(10).fill(0);
   let N = 0;
   for (let s = 1; s < 9; s++) for (let n = 0; n < 20000; n += 3) {
@@ -501,7 +501,7 @@ test('рідкісність: qOf робить lane рівномірним', asy
 
 test('печери за рідкісністю: лише в печерних областях (частка ≈ закону); звичайно мало, пронизані світи — рідкість', async () => {
   const { genCol, genBlocks, bv, B_AIR: AIR } = await import('../js/gen/chunk.js');
-  const { noise3 } = await import('../js/noise.js');
+  const { noise3 } = await import('../js/laws/noise.js');
   const seed = hashStr('test'), fr = [];
   const airOf = (L) => {
     let air = 0, tot = 0;
