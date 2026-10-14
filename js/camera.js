@@ -5,6 +5,7 @@
 // угору up = (−sin p · cos yaw, −sin p · sin yaw, cos p). Ця трійка — дзеркальна (+x — униз-праворуч, +y — униз-ліворуч,
 // як була початкова ізометрія), однакова в обох режимах, тож світ при перемиканні не віддзеркалюється.
 import { CS } from './gen/chunk.js';
+import { clamp } from './num.js';
 import { aabbInView, aabbInside } from './engine/core/frustum.js';
 import { createList, clearList, sweepSphere } from './engine/physics/collide.js';
 
@@ -66,7 +67,6 @@ export function setYaw(c, yaw) { c.yaw = c.yawT = yaw; }
 
 const SENS = 0.0022;                 // радіан на піксель руху миші
 
-const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 export const pitchOf = (c) => c.mode === FIRST ? c.pitch1 : c.pitch3;
 
 // Третя особа: напрям від цілі до ока. Нахил угору (від'ємний) не опускає камеру під землю — вона лишається за

@@ -4,15 +4,13 @@
 // objShape; циліндр з даних стовпця лише відкидає зайве). Без DOM.
 // P — «щуп» світу (player.js); objAt(x, y) → {o, C, L} — предмет клітинки (world.js) чи null; o — початок, d — напрям
 // (одиничний), maxT — довжина
-import { colliderOf } from './collision.js';
-import { createList, clearList, rayCast, rayTriSoup } from './engine/physics/collide.js';
+import { castRay, isBody } from './collision.js';
+import { rayTriSoup } from './engine/physics/collide.js';
 import { solidB, CS, O_COVER } from './gen/chunk.js';
 import { objShape } from './gen/mesh.js';
 import { LEVEL } from './universe.js';
 
 export const REACH = 3;              // досяжність рук (як удар)
-const isBody = (r) => !!r && r.hz !== undefined;
-const LST = createList(4096);
 
 // Перший твердий блок уздовж променя (Amanatides & Woo 1987, клітинка 1 × 1 × LEVEL): {x, y, k, b, t, n: [нормаль грані
 // входу]} чи null; незгенероване (−1) — стоп (null)
@@ -80,9 +78,7 @@ function objT(q, ro, d, maxT) {
 // Ціль уздовж променя: {kind: 'block' | 'body' | 'obj', t, p: [точка], n?, x, y, k, b (блок), body, obj: {o, C}} чи null
 export function aimRay(P, objAt, o, d, maxT = REACH) {
   const e = [o[0] + d[0] * maxT, o[1] + d[1] * maxT, o[2] + d[2] * maxT];
-  clearList(LST);
-  colliderOf(P).gather(Math.min(o[0], e[0]) - 0.1, Math.min(o[1], e[1]) - 0.1, Math.min(o[2], e[2]) - 0.1, Math.max(o[0], e[0]) + 0.1, Math.max(o[1], e[1]) + 0.1, Math.max(o[2], e[2]) + 0.1, LST);
-  const r = rayCast(LST, o[0], o[1], o[2], d[0], d[1], d[2], maxT, {});
+  const r = castRay(P, o, d, maxT);
   let best = null;
   const at = (t) => [o[0] + d[0] * t, o[1] + d[1] * t, o[2] + d[2] * t];
   if (r && isBody(r.ref)) best = { kind: 'body', t: r.t, p: at(r.t), n: [r.nx, r.ny, r.nz], body: r.ref };

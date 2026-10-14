@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { lawsOf, zOfLane, SPREAD } from '../js/universe.js';
 import { starOf, planetOf, pMin, tEq, airOf, tSurf, fieldOf } from '../js/astro.js';
-import { nsqrt, nroot4, nsin, ncos, ncbrt, nlog10, nqnorm, PI } from '../js/num.js';
+import { nsqrt, nroot4, nsin, ncos, ncbrt, nlog10, nqnorm, PI, clamp01, smooth01, smoothstep } from '../js/num.js';
 import { LIB_GOLD, libDigest } from '../js/golden.js';
 import { noise2 } from '../js/noise.js';
 import { hashStr } from '../js/rng.js';
@@ -31,6 +31,12 @@ test('точна арифметика: stdlib — похибка ≤ 1e-15, до
     near(nqnorm(q), z, 1e-12, `Φ⁻¹(${q})`);
   // відбиток бібліотеки на фіксованих аргументах: оновлення js/lib/stdlib, що змінює хоч один біт, — тут (тоді й GEN)
   assert.equal(libDigest(), LIB_GOLD);
+});
+
+test('плавний крок: clamp01, smooth01, smoothstep', () => {
+  assert.deepEqual([clamp01(-1), clamp01(2), clamp01(0.3)], [0, 1, 0.3]);
+  assert.deepEqual([smooth01(0.25), smooth01(-1), smooth01(2)], [0.15625, 0, 1]);
+  assert.equal(smoothstep(10, 20, 15), 0.5);
 });
 
 test('нормальний розподіл: z з номера — стандартне нормальне', () => {

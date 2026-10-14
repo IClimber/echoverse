@@ -6,6 +6,7 @@ import { step, hits, support, standable, settle, placeAt, SPEED, PH1, GRAVITY, J
 import { landing, landingChunks, createDevice, CHARGE, HISTORY } from '../js/device.js';
 import { serialize, deserialize } from '../js/save.js';
 import { B_AIR, B_LIQ, B_GRASS, B_STONE } from '../js/gen/chunk.js';
+import { fx, fmtN, sg, pc, atm } from '../js/fmt.js';
 
 // Світ з рядків: символ — стовпець. Цифра або буква a…z — висота суходолу в блоках (0…35; 'T' — висота 2 з деревом,
 // 'R' — висота 2 з каменем 0,4 заввишки); 'w' — водойма: дно на 2, рідина до 6 (тримає чи ні — liquid);
@@ -921,4 +922,9 @@ test('placeAt: гравець з нуля в новій точці — фігу�
   assert.deepEqual([p.vis, p.visX, p.visY, p.pv, p.px, p.py], [30, 10, 20, 30, 10, 20]);
   assert.ok(p.climb === null && !p.slide && !p.dive && !p.ground && p.footOff === 0 && p.stepOff === 0 && p.offX === 0 && p.offY === 0);
   assert.ok(p.fly && p.pose === 'crouch');
+});
+
+test('числа українською: кома, справжній мінус, знак, відсотки, тиск', () => {
+  assert.deepEqual([fx(-0.5, 2), fx(3), fmtN(-3), fmtN(0), fmtN(7)], ['−0,50', '3,0', '−3', '0', '+7']);
+  assert.deepEqual([sg(0.25, 1), sg(-1.5, 1), pc(0.05), pc(0.5), atm(0.005), atm(1.234)], ['+0,3', '−1,5', '5 %', '50 %', '0,005', '1,23']);
 });

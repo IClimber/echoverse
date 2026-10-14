@@ -4,7 +4,7 @@
 // часу «зносить») і прев'ю неба з оптики для набору атмосфер і зір. Лише показ: генерацію не змінює.
 import { lawsOf, physOf, STRANGE_NAMES, TIER_NAMES } from './universe.js';
 import { hashStr } from './rng.js';
-import { fmtN } from './debug.js';
+import { fx as fxN, fmtN } from './fmt.js';
 import { skyOptics } from './optics.js';
 import { starColor, skyState, clockStr, dayPhase, starsText, heldText } from './sky.js';
 import { physAt3 } from './worldphys.js';
@@ -14,7 +14,7 @@ import { weatherAt, WEATHER_NAMES } from './weather.js';
 const TIER_COL = ['#5d6b86', '#e0c060', '#f08a4b', '#ff4d6d'];
 const WCOL = ['#8fb8e8', '#9aa3b0', '#4f79b8', '#3c3f8f', '#c9ccd2', '#d6a65a'];
 const el = (tag, css = '', txt = '') => { const e = document.createElement(tag); if (css) e.style.cssText = css; if (txt) e.textContent = txt; return e; };
-const fx = (v, d = 2) => v.toFixed(d).replace('.', ',').replace('-', '−');
+const fx = (v, d = 2) => fxN(v, d);
 const css = (c) => `rgb(${c.map((v) => Math.max(0, Math.min(255, v)) | 0).join(',')})`;
 
 // Величини для гістограм: назва, функція від законів, закон рівнів (кольором), логарифмічна вісь

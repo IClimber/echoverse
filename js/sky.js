@@ -8,10 +8,9 @@
 import { skyOptics } from './optics.js';
 import { hash3, unit } from './rng.js';
 import { hsl } from './universe.js';
+import { clamp01, smoothstep } from './num.js';
 
 const TAU = Math.PI * 2;
-const clamp01 = (v) => v < 0 ? 0 : v > 1 ? 1 : v;
-const smooth = (a, b, v) => { const t = clamp01((v - a) / (b - a)); return t * t * (3 - 2 * t); };
 const mix = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 const norm = (v) => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -125,7 +124,7 @@ export function stormAt(L, clock) {
   const len = L.sky.lock ? 300 : L.sky.dayMin * 15, t = localTime(L, clock) / len, seg = Math.floor(t), u = t - seg;
   const h = hash3(L.seed, seg, 0x5703);
   if (unit(h) >= 0.02 * (L.star ? L.star.act : 0.3) / 0.3) return 0;
-  return (0.3 + 0.7 * unit(hash3(L.seed, seg, 0x5704))) * Math.min(1, u / 0.08) * (1 - smooth(0.3, 1, u));
+  return (0.3 + 0.7 * unit(hash3(L.seed, seg, 0x5704))) * Math.min(1, u / 0.08) * (1 - smoothstep(0.3, 1, u));
 }
 
 // Стан неба всесвіту L у мить clock: світила, світло для граней, кольори неба й туману (оптика з фізики, optics.js), зорі,
@@ -252,7 +251,7 @@ export function skyState(L, clock) {
   // світло: денне — від сонць над обрієм (колір — їхня суміш), нічне — від місяців
   let lx = 0, ly = 0, lz = 0, cr = 0, cg = 0, cb = 0, w = 0;
   for (const s of suns) {
-    const k = (s.bright * smooth(-0.05, 0.25, s.dir[2])) ** 2.2;   // лінійна вага
+    const k = (s.bright * smoothstep(-0.05, 0.25, s.dir[2])) ** 2.2;   // лінійна вага
     if (k <= 0) continue;
     lx += s.dir[0] * k; ly += s.dir[1] * k; lz += s.dir[2] * k; cr += s.lit[0] * k; cg += s.lit[1] * k; cb += s.lit[2] * k; w += k;
   }
@@ -283,7 +282,7 @@ export function skyState(L, clock) {
   const pole = [A.nn[0] * ct - A.nn[1] * stl, A.nn[0] * stl + A.nn[1] * ct];
   const aurora = {
     dir: [sg * pole[0], sg * pole[1]], pole, dist: dl * Math.PI / 180 * Rkm, R: Rkm, width: 150 + 150 * I0,
-    k: Math.min(1, 1.2 * M.k) * (1 + 2 * I0) * smooth(20, 0, Math.abs(dl)) * (1 - day), col: hsl3(M.hue), t: localTime(L, clock),
+    k: Math.min(1, 1.2 * M.k) * (1 + 2 * I0) * smoothstep(20, 0, Math.abs(dl)) * (1 - day), col: hsl3(M.hue), t: localTime(L, clock),
   };
   // зорі вдень видно, якщо небо темне (розріджене повітря, вакуум, повне затемнення)
   const dark = clamp01(1 - Math.max(...zenith) / 90);
@@ -373,12 +372,12 @@ export function moonLight(m, suns) {
 // (bright^2,2, з затемненням) — тьмяна далека зоря над обрієм ночі не скасовує; усі закриті — 1
 export function twilightOf(suns) {
   let T = 0, W = 0;
-  for (const s of suns) { const z0 = -Math.sin(s.size), w = s.bright ** 2.2; T += w * (1 - smooth(z0 - TWILIGHT_Z, z0, s.dir[2])); W += w; }
+  for (const s of suns) { const z0 = -Math.sin(s.size), w = s.bright ** 2.2; T += w * (1 - smoothstep(z0 - TWILIGHT_Z, z0, s.dir[2])); W += w; }
   return W > 0 ? T / W : 1;
 }
 // Внесок сонця в денне світло, лінійно (головне в зеніті — 1): яскравість (з затемненням) × сутінки (світить і трохи
 // під обрієм — розсіяне небом)
-export const sunDay = (s) => (s.bright * smooth(-0.1, 0.22, s.dir[2])) ** 2.2;
+export const sunDay = (s) => (s.bright * smoothstep(-0.1, 0.22, s.dir[2])) ** 2.2;
 // Частка диска над обрієм: z — синус висоти центру, r — кутовий радіус (сегмент круга)
 export function aboveHorizon(z, r) {
   const h = Math.max(-1, Math.min(1, Math.asin(Math.max(-1, Math.min(1, z))) / r));
@@ -392,7 +391,7 @@ export function lightsOf(sk, max = 3) {
     const z0 = -Math.sin(s.size), c = sunDay(s), b = s.bright ** 2.2 * aboveHorizon(s.dir[2], s.size);   // z0 — диск зайшов повністю
     C += c;
     if (b <= 0) continue;
-    const p = c * smooth(z0, DIRECT_Z, s.dir[2]);                // пряме світло цього сонця
+    const p = c * smoothstep(z0, DIRECT_Z, s.dir[2]);                // пряме світло цього сонця
     CP += p;
     L.push({ dir: s.dir, b, p, sun: true, col: (s.lit || s.col).map((v) => v / 255) });   // повний колір зорі
   }

@@ -5,7 +5,7 @@
 import { hash2, hash3, unit } from '../rng.js';
 import { noise2, noise3, fbm3 } from '../noise.js';
 import { SEA, L_WATER, L_DRY, WORLD_H, KMIN, KMAX, floats, gravityAt, LEVEL } from '../universe.js';
-import { nsqrt } from '../num.js';
+import { nsqrt, clamp01, smooth01 } from '../num.js';
 import { BIOMES, pickBiome, Z_TEMP, Z_COLD, Z_HOT, Z_WET, Z_DRY, Z_DESERT, Z_SNOW, Z_PEAK, Z_BEACH } from './biomes.js';
 import { regionAt, speciesOf, pickSpecies } from './flora.js';
 
@@ -23,7 +23,6 @@ export const O_TREE = 1, O_ROCK = 2, O_FLOAT = 3, O_COVER = 4;
 export const blocks = (o) => o === O_TREE || o === O_ROCK;
 export const SURF_Z = SEA * LEVEL - 0.15;     // поверхня рідини й льоду — трохи нижча за рівень моря
 
-const clamp01 = (v) => v < 0 ? 0 : v > 1 ? 1 : v;
 
 // Висота 0…1 у точці (x, y). coarseE — висота без дрібниць (для родин кривої 3.1), fineE — внесок дрібниць (e − coarseE;
 // для клімату: сніг не за кожним горбиком). Ерозія: пагорби й дрібниці ×0,25…1,75 областями (пласкі рівнини ↔
@@ -53,12 +52,11 @@ function lonely(L, x, y, r, dense, rs) {
 }
 
 const absv = (v) => v < 0 ? -v : v;
-const ss = (t) => { t = t < 0 ? 0 : t > 1 ? 1 : t; return t * t * (3 - 2 * t); };   // плавний крок 0…1
 // Маска області закону o = {share, thr} масштабу S (0 — поза, 1 — усередині; край — плавно); n — номер (області
 // повільно змінюються вздовж номера)
 function regionM(seed, o, S, px, py, n) {
   if (o.share <= 0.003) return 0;
-  return ss((noise3(seed, px / S, py / S, n * 0.005) - o.thr) / 0.12 + 0.5);
+  return smooth01((noise3(seed, px / S, py / S, n * 0.005) - o.thr) / 0.12 + 0.5);
 }
 const DIR6 = [[1, 0], [0.8, 0.6], [0.6, 0.8], [0, 1], [-0.6, 0.8], [-0.8, 0.6]];   // напрямки (дюни, куести, рифти)
 // Об'єкт на ґратці з кроком S (кратер, вулкан, шпиль): у клітинці ґратки — з імовірністю prob, центр — у середніх
@@ -168,20 +166,20 @@ function peaks(L, px, py, out) {
 export const FAM_D = [0.5, 0.6, 1, 0.4, 0.3, 0.5];
 export function famF(id, u, A, P, c, N, V) {
   if (id === 0) return A * 0.25 * u;                                                         // пенеплен: майже рівнина
-  if (id === 1) return A * 0.3 * u + P * ss((u - c) / 0.08) * (1 - 0.9 * V);                  // плато, прорізане долинами
-  if (id === 2) return A * 0.5 * u + P * ss((u - c) / 0.05) + A * 0.3 * (u > c ? u - c : 0);   // уступ до плоскогір'я
+  if (id === 1) return A * 0.3 * u + P * smooth01((u - c) / 0.08) * (1 - 0.9 * V);                  // плато, прорізане долинами
+  if (id === 2) return A * 0.5 * u + P * smooth01((u - c) / 0.05) + A * 0.3 * (u > c ? u - c : 0);   // уступ до плоскогір'я
   if (id === 3) {                                                                             // трапові сходи
     const t = clamp01((u - 0.08) / 0.84) * N, f = Math.floor(t);
-    return A * 0.3 * u + P * (f + ss((t - f - 0.7) / 0.3)) / N;
+    return A * 0.3 * u + P * (f + smooth01((t - f - 0.7) / 0.3)) / N;
   }
-  if (id === 4) return A * 0.4 * u + P * ss((u - c) / 0.025) + A * 0.1 * (u > c ? u - c : 0); // столові гори (тепуї)
-  return P * ss(u / 0.12) - (1.25 * P + 4) * ss((u - 0.3) / 0.3);                            // перевернутий: високі береги, внутрішнє море
+  if (id === 4) return A * 0.4 * u + P * smooth01((u - c) / 0.025) + A * 0.1 * (u > c ? u - c : 0); // столові гори (тепуї)
+  return P * smooth01(u / 0.12) - (1.25 * P + 4) * smooth01((u - 0.3) / 0.3);                            // перевернутий: високі береги, внутрішнє море
 }
 // Долини розчленованого плато: мережа (дві октави ліній нуля шуму з меандром), 0…1
 function dissectV(L, px, py) {
   const S = L.land.dissS, wq = 0.4 * noise2(L.sDs ^ 0x2e, px / 120, py / 120);
   const r1 = absv(noise2(L.sDs, px / S + wq, py / S)), r2 = absv(noise2(L.sDs ^ 0x1d, px / (S * 0.4), py / (S * 0.4) + wq));
-  const v1 = ss(1 - r1 / 0.07), v2 = 0.6 * ss(1 - r2 / 0.05);
+  const v1 = smooth01(1 - r1 / 0.07), v2 = 0.6 * smooth01(1 - r2 / 0.05);
   return v1 > v2 ? v1 : v2;
 }
 
@@ -202,7 +200,7 @@ function relief3(L, px, py, uc, fineB) {
       if (m > best) { best = m; famTop = i; }
     }
     if (ws > 0) {
-      const k = ws > 1 ? 1 / ws : 1, rise = ss(uc / 0.05), V = w[1] > 0 ? dissectV(L, px, py) : 0;
+      const k = ws > 1 ? 1 / ws : 1, rise = smooth01(uc / 0.05), V = w[1] > 0 ? dissectV(L, px, py) : 0;
       F = A * uc * (1 - ws * k); dk = 1 - ws * k;
       for (let i = 0; i < 6; i++) if (w[i] > 0) {
         F += w[i] * k * famF(i, uc, A, D.P, D.fam[i].c, D.trapN, V);
@@ -229,7 +227,7 @@ function relief3(L, px, py, uc, fineB) {
       const half = R.W / 2, ww = R.W * 0.6;
       let dep = 0;
       if (r < half) dep = 1;
-      else if (r < half + ww) { const t = (r - half) / ww * 3, f = Math.floor(t); dep = 1 - (f + ss((t - f - 0.6) / 0.4)) / 3; }
+      else if (r < half + ww) { const t = (r - half) / ww * 3, f = Math.floor(t); dep = 1 - (f + smooth01((t - f - 0.6) / 0.4)) / 3; }
       bl -= R.D * m * dep;
     }
   }
@@ -317,7 +315,7 @@ export function tile(L, x, y, out = {}, lite = false) {
   // опори скель не підрізані); fa — частка широких форм (решта — вузькі); fb — смуга блоків над h. У жерлі — ні
   const C = L.land.cliff;
   if (C.share > 0.003 && !out.magma) {
-    const v = noise3(L.sCl, px / C.S, py / C.S, L.n * 0.005), m = ss((v - C.thr) / 0.12 + 0.5);
+    const v = noise3(L.sCl, px / C.S, py / C.S, L.n * 0.005), m = smooth01((v - C.thr) / 0.12 + 0.5);
     out.cl = v > C.thr - 0.1;
     if (m > 0) {
       out.fx = C.F * m * (0.5 + 0.5 * clamp01(0.5 + noise2(L.sCl ^ 0x4f1, px / 60, py / 60)));

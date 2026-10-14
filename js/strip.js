@@ -5,7 +5,7 @@ import { tile, genChunk, digest, T_WATER, T_ICE, T_LUSH, T_DRY, T_DESERT, O_TREE
 import { regionAt, speciesOf, pickSpecies, groundTint } from './gen/flora.js';
 import { GOLD, SPOTS, LIB_GOLD, libDigest } from './golden.js';
 import { hashStr } from './rng.js';
-import { fmtN } from './debug.js';
+import { fmtN } from './fmt.js';
 import { skyState, bodiesOf } from './sky.js';
 
 const SIZE = 96, PX = 2;                       // клітинок на бік, px на клітинку

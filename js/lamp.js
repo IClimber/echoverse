@@ -5,8 +5,7 @@
 // світлом тим самим відрізком, що й з оком; світло крізь стіну падає лише на сховане нею)
 import { poseMatrices } from './anim.js';
 import { LAMP_AT } from './gen/mesh.js';
-import { colliderOf } from './collision.js';
-import { createList, clearList, rayCast } from './engine/physics/collide.js';
+import { castRay } from './collision.js';
 
 // inner / outer — від осі, як у PlayCanvas (shadow-renderer-local.js: fov тіні = 2·outer): повна яскравість до 18°, до 27°
 // плавно гасне (smoothstep у spot.js) — пляма ~45°. Згасання — типове PlayCanvas, лінійне (R − d)/R: без адаптації
@@ -16,13 +15,9 @@ import { createList, clearList, rayCast } from './engine/physics/collide.js';
 export const LAMP = { range: 50, inner: 18, outer: 27, intensity: 2, color: [1, 1, 1], bias: 0.4, normalBias: 0.1 };
 const BACK = 0.03;                     // перешкода між ціллю камери й склом — джерело на стільки перед нею
 
-const LST = createList(1024);
 // Перешкода на відрізку o → o + d·maxT (d — одиничний): видима поверхня, стовбури, каміння, тіла (як aimRay) → t чи Infinity
 export function segHit(P, o, d, maxT) {
-  const e = [o[0] + d[0] * maxT, o[1] + d[1] * maxT, o[2] + d[2] * maxT];
-  clearList(LST);
-  colliderOf(P).gather(Math.min(o[0], e[0]) - 0.1, Math.min(o[1], e[1]) - 0.1, Math.min(o[2], e[2]) - 0.1, Math.max(o[0], e[0]) + 0.1, Math.max(o[1], e[1]) + 0.1, Math.max(o[2], e[2]) + 0.1, LST);
-  const r = rayCast(LST, o[0], o[1], o[2], d[0], d[1], d[2], maxT, {});
+  const r = castRay(P, o, d, maxT);
   return r ? r.t : Infinity;
 }
 

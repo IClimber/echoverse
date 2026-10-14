@@ -7,18 +7,18 @@
 // перешкод (скільки клітинок навколо перевіряти), liquid — рідина всесвіту ({swim — тримає на плаву, danger}).
 // ph — рух від гравітації (physOf): up, speed, settle, g.
 import { solidB, climbB, climbSide, B_LIQ, B_ICE } from './gen/chunk.js';
-import { KMIN, LEVEL } from './universe.js';
-import { colliderOf } from './collision.js';
+import { KMIN, LEVEL, G0, PLAYER_MASS, PLAYER_AREA } from './universe.js';
+import { clamp } from './num.js';
+import { colliderOf, isBody } from './collision.js';
 import { capsule, overlap, sweep, findFloor, floorNormal, stands, moveH, moveAir, depenetrate } from './engine/physics/character.js';
 
 export const SPEED = 4.2;            // м/с (при 1 g; хода в Minecraft — 4,3)
 export const FOOT = 0.24;            // півширина габариту
 export const BODY = 0.98;            // зріст, м (2 блоки; 12.10.2026: одиниця гри — 1 м, розміри як були)
-export const PLAYER_MASS = 70;                // маса гравця (тисне тіло, на якому стоїть; штовхає)
 export const BODY_RHO = 985;                 // густина тіла гравця, кг/м³ (Архімед у рідині, що не тримає)
-export const PLAYER_AREA = 0.9;               // опір гравця Cd·A, м² (закон п. 4): межа падіння ≈ 35 м/с при 1 g, 1 атм
 export const HIT_IMPULSE = 150;               // удар гравця (маса × швидкість): камінчик — ~6 од/с, брила — ледь
-export const GRAVITY = 9.81;         // прискорення при 1 g, м/с² (рішення 12.10.2026: справжнє)
+export { PLAYER_MASS, PLAYER_AREA };          // маса й опір гравця — universe.js (там і межа падіння physOf)
+export const GRAVITY = G0;           // прискорення при 1 g, м/с² (universe.js)
 export const JUMP_V = 4.77;          // поштовх стрибка, м/с: при 1 g і 1 атм (з опором повітря) — 1,15 м (на уступ 1 м) і
                                      // 0,97 с у повітрі
 export const FLOAT_Z = 0.6;          // той, хто пливе у воді, тримається ногами на стільки нижче поверхні (густіша — вище)
@@ -57,8 +57,6 @@ const WET_GRIP = 0.6;                // мокра стіна (дощ, сніг 
 const MANTLE = 0.35;                 // виліз нагору: підлога за R + MANTLE від стіни (пошук від 0,9 зросту на 1,4 зросту)
 export const SWIM_V = 2.0;           // під рідиною: угору / униз, м/с (/√в'язкість)
 const walkZ = (ph) => WALK_Z[ph.up >= 2 ? 1 : 0];
-// посилання трикутника зіткнень (collision.js): тіло (bodies.js) чи предмет (стовбур, камінь — круглі призми)
-const isBody = (r) => !!r && r.hz !== undefined;
 // за що не чіпляєшся: тіло й дерево (12.10.2026, рішення користувача: лазіння по деревах прибрано; камінь — можна)
 const noGrip = (r) => isBody(r) || (!!r && !!r.tree);
 const R2 = Math.SQRT1_2;
@@ -609,7 +607,6 @@ function mantle(p, C, sh, ph, nx, ny) {
   return true;
 }
 
-const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 // Кінець кроку: вигляд (уступ, ноги на видимій землі), блок під ногами, рідина
 function finish(p, dt, P, ph) {

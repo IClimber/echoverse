@@ -4,10 +4,10 @@
 // за висотою над ґрунтом + нахил плями + приплив компаньйона (з його напряму на небі в мить clock).
 import { physOf, gravityAt } from './universe.js';
 import { noise2 } from './noise.js';
+import { smooth01 } from './num.js';
 import { skyState } from './sky.js';
 import { airAt } from './climate.js';
 
-const ss = (t) => { t = t < 0 ? 0 : t > 1 ? 1 : t; return t * t * (3 - 2 * t); };
 // Часова аномалія в (x, y) (М10, легендарний закон L.tanom): плями шуму (як аномалії гравітації); у плямі поле b:
 // < −0,25 — повільна (k_п), > 0,25 — швидка (k_ш), між — k = 1 (повільна й швидка не стикаються); ws, wf — ваги з
 // плавним краєм (суміш анімацій у шейдерах), k — множник плину часу для тіл, плину рідин, гойдання, опадів
@@ -18,11 +18,11 @@ export function timeK(L, x, y) {
   const a = noise2(L.sAn ^ 0x71e0, x / A.S, y / A.S), thr = 0.62 - 0.32 * A.freq;
   if (a <= thr) return NO_T;
   const s = Math.min(1, (a - thr) / 0.12), b = noise2(L.sAn ^ 0x71e1, x / (A.S * 2), y / (A.S * 2));
-  const ws = s * ss((-b - 0.25) / 0.15), wf = s * ss((b - 0.25) / 0.15);
+  const ws = s * smooth01((-b - 0.25) / 0.15), wf = s * smooth01((b - 0.25) / 0.15);
   return { k: 1 + (A.ks - 1) * ws + (A.kf - 1) * wf, ws, wf };
 }
 // Зворотна пляма: множник тяжіння на висоті h (м) над ґрунтом — k₀ біля ґрунту до H_a, далі плавно до 1 за H_f
-export function revK(L, k0, h) { const R = L.anom.rev; return k0 + (1 - k0) * ss((h - R.Ha) / R.Hf); }
+export function revK(L, k0, h) { const R = L.anom.rev; return k0 + (1 - k0) * smooth01((h - R.Ha) / R.Hf); }
 // Висота рівноваги (k = 0) над ґрунтом у зворотній плямі (x, y) чи null (тяжіння тут не зворотне)
 export function revEq(L, x, y) {
   const R = L.anom && L.anom.rev;
@@ -56,6 +56,6 @@ export function physAt3(L, x, y, z, clock = 0, ground = null) {
   const tx = a.tx * G * Math.abs(k) + (t ? G * t[0] : 0), ty = a.ty * G * Math.abs(k) + (t ? G * t[1] : 0);
   // повітря на висоті (тиск — e^(−z / H)): межа падіння й сила вітру
   const A = airAt(L, z);
-  const base = physOf({ ...L, grav: Math.max(0.02, Math.abs(gz)) }, A.rho);
+  const base = physOf(L, A.rho, Math.max(0.02, Math.abs(gz)));
   return { ...base, g: gz, g0: G, vT0: physOf(L, A.rho).vT, P: A.P, rho: A.rho, tilt: tx || ty ? [tx, ty] : null, anom: a.k !== 1 ? k : null, tide: t ? -t[2] : 0, rev: !!a.rev };
 }

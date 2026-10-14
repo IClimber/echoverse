@@ -9,6 +9,7 @@
 // на скільки зігнуті ноги (висота кульша — стегно й гомілка)
 import { chain, translate, rotZ, rotY, rotX, scale } from './engine/core/mat.js';
 import { PIVOT, FIG_K } from './gen/mesh.js';
+import { clamp } from './num.js';
 
 const RATE = 14;                     // як швидко кути наздоганяють ціль, 1/с
 const STRIDE = 11;                   // кроків (радіан фази) на секунду при звичайній швидкості
@@ -16,7 +17,6 @@ const SEG = PIVOT.hip - PIVOT.knee;  // довжина стегна й гомі�
 // висота кульша над найнижчою точкою гомілки: стегно під кутом a вперед від вертикалі, коліно зігнуте на b (гомілка —
 // брусок: нахилена, вона спирається на ребро — переднє, коли ступня позаду, заднє — коли попереду)
 export const hipH = (a, b) => SEG * (Math.cos(a) + Math.cos(a - b)) + (a - b < 0 ? 0.055 : 0.075) * FIG_K * Math.abs(Math.sin(a - b));
-const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const KEYS = ['legL', 'legR', 'kneeL', 'kneeR', 'armL', 'armR', 'up', 'bob', 'lean', 'waist', 'spread', 'drop', 'shift', 'lookP', 'lookY'];
 
 // me — стан гравця (player.js) і ще: look {p — нахил погляду (+ — униз), y — поворот відносно тіла}, carry (тіло в руках),

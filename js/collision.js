@@ -6,7 +6,7 @@
 import { chunkMesh } from './gen/mesh.js';
 import { CS, CW, FR, SEC, bv, solidB, B_STONE, B_LIQ } from './gen/chunk.js';
 import { lawsOf, LEVEL } from './universe.js';
-import { pushTri, prismTris, boxTris } from './engine/physics/collide.js';
+import { pushTri, prismTris, boxTris, createList, clearList, rayCast } from './engine/physics/collide.js';
 
 const MAX_SECS = 128;                // секцій у кеші (найдавніша — геть)
 const NB = CW * CW * (SEC + 2 * FR);
@@ -172,3 +172,15 @@ export function underLiquid(P, x, y, z) {
 // Видимість під рідиною (кінець лінійного туману, одиниць) — від прозорості поверхні liquid.alpha: вода 15,6, кислота 8,8,
 // метан 32,7, лава 0,8
 export const liquidVis = (alpha) => Math.max(0.8, 40 * (1 - alpha) / Math.max(1e-3, alpha));
+
+// Посилання трикутника — тіло (bodies.js: коробка з hz), а не предмет (призма стовбура чи каменю) і не земля (null)
+export const isBody = (r) => !!r && r.hz !== undefined;
+// Перша перешкода на відрізку o → o + d·maxT (d — одиничний): видима поверхня, стовбури, каміння, тіла —
+// {t, nx, ny, nz, ref} (rayCast рушія) чи null
+const RAY = createList(4096);
+export function castRay(P, o, d, maxT) {
+  const e = [o[0] + d[0] * maxT, o[1] + d[1] * maxT, o[2] + d[2] * maxT];
+  clearList(RAY);
+  colliderOf(P).gather(Math.min(o[0], e[0]) - 0.1, Math.min(o[1], e[1]) - 0.1, Math.min(o[2], e[2]) - 0.1, Math.max(o[0], e[0]) + 0.1, Math.max(o[1], e[1]) + 0.1, Math.max(o[2], e[2]) + 0.1, RAY);
+  return rayCast(RAY, o[0], o[1], o[2], d[0], d[1], d[2], maxT, {});
+}

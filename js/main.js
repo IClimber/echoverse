@@ -17,7 +17,8 @@ import { GEN, SEA, physOf, gravityAt, LEVEL } from './universe.js';
 import { physAt3, timeK } from './worldphys.js';
 import { tempAt, tempParts, snowy, radNow, airAt } from './climate.js';
 import { CS, SEC, B_LIQ, B_MAGMA, solidB } from './gen/chunk.js';
-import { debugText, fmtN } from './debug.js';
+import { debugText } from './debug.js';
+import { fx, fmtN, atm } from './fmt.js';
 import { animate, VIEW_KEYS } from './anim.js';
 import { clockStr, skyState, lightsOf, lightSlots, stormAt, setStormOverride } from './sky.js';
 import { weatherAt, localWeather, areaClimate, reliefAt, windHeightK, lightningNear } from './weather.js';
@@ -33,8 +34,6 @@ import { createOcclusion } from './occlusion.js';
 
 const $ = (id) => document.getElementById(id);
 const SAVE_MS = 10000;                     // автозбереження
-const CAM_KEY = 'echoverse-camera';         // вибраний вигляд (на браузер)
-const VIEW_KEY = 'echoverse-view';          // дальність, чанків (на браузер)
 const PHYS_DT = 1 / 120, AI_DT = 1 / 30;      // такти: фізика (гравець, тіла); світ, моби й NPC
 const AI_BUDGET = 2;                          // мс на такт світу: що не встигло — на наступному
 const LIGHT_MS = 1;                           // мс на такт світу для світла неба (поширення між секціями, перебудови)
@@ -62,7 +61,8 @@ function boot(renderer) {
 
   let g = null;                              // поточна гра
   let occOff = QS.get('occ') === '0';        // ?occ=0 — без відсікання закритого (порівняння)
-  const camera = createCamera(load(CAM_KEY) === FIRST ? FIRST : THIRD);   // збережене 'iso' (вид згори прибрано) — третя особа
+  const cfg = loadSettings(QS);              // налаштування гравця (на браузер): графіка, вид, дальність
+  const camera = createCamera(cfg.camera);
   const streamer = createStreamer();
   const physT = createTicker(PHYS_DT), aiT = createTicker(AI_DT, 4);
   // Дальність (8–32 чанки): камера, ліміти пам'яті світу, стрімінг. Пам'ять GPU — скільки потребує коло дальності (без
@@ -75,7 +75,7 @@ function boot(renderer) {
     streamer.force();
     return c;
   };
-  setView(+(load(VIEW_KEY) || 16));
+  setView(cfg.view);
   // Відеокарті забракло пам'яті (WebGPU — out-of-memory, WebGL2 — втрата контексту): звільнити інші всесвіти й зменшити
   // дальність на 4 чанки (запам'ятовується, як вибір у налаштуваннях); не частіше разу на 5 с — одна нестача дає кілька подій
   let oomAt = -1e9;
@@ -90,11 +90,11 @@ function boot(renderer) {
     oomAt = now;
     renderer.releaseOthers();
     const c = Math.round(VIEW_R / CS);
-    if (c > 8) { store(VIEW_KEY, setView(c - 4)); toast(`Відеокарті бракує пам'яті — дальність ${c - 4} чанків`); }
+    if (c > 8) { saveSetting('view', setView(c - 4)); toast(`Відеокарті бракує пам'яті — дальність ${c - 4} чанків`); }
     else toast('Відеокарті бракує пам\'яті');
   };
   renderer.onOutOfMemory(onOom);
-  $('view').addEventListener('input', () => store(VIEW_KEY, setView(+$('view').value)));
+  $('view').addEventListener('input', () => saveSetting('view', setView(+$('view').value)));
   let showDebug = false, showHelp = true, toastUntil = 0;
   profNeed();
   const perf = { fps: 60, cpu: 0, upd: 0, drw: 0, frameMs: 0, p99: 0 };
@@ -349,7 +349,7 @@ function boot(renderer) {
     camera.mode = NEXT[was];
     if (was === FIRST) camera.pitch3 = camera.pitch3T = Math.min(LIMITS.third.pitch[1], Math.max(LIMITS.third.pitch[0], camera.pitch1));
     else camera.pitch1 = camera.pitch1T = Math.min(LIMITS.first.pitch[1], Math.max(LIMITS.first.pitch[0], camera.pitch3));
-    store(CAM_KEY, camera.mode);
+    saveSetting('camera', camera.mode);
     toast({ first: 'Камера: перша особа', third: 'Камера: третя особа' }[camera.mode]);
   }
 
@@ -357,7 +357,7 @@ function boot(renderer) {
   function showMenu() { unlockPointer(); $('menu').hidden = false; $('settings').hidden = true; $('menu').firstElementChild.hidden = false; $('resume').hidden = !g; renderWorlds(); }
 
   // ---- Налаштування: графіка (після перезавантаження), тіні й дальність (одразу) ----
-  const info = renderer.R.info || null, cfg = loadSettings(QS);
+  const info = renderer.R.info || null;
   const showCard = (set) => { $('settings').hidden = !set; $('menu').firstElementChild.hidden = set; };
   $('openSettings').onclick = () => showCard(true);
   $('back').onclick = () => showCard(false);
@@ -586,11 +586,8 @@ function boot(renderer) {
     if (z === undefined) { const c = g.world.column(d, n, Math.floor(x), Math.floor(y)); z = (c ? c.h : 8) * LEVEL; }
     return landing(P, x, y, z, ph);
   }
-  const gStr = (L) => L.grav.toFixed(2).replace('.', ',') + ' g';
   const OVER_NAMES = { clear: 'ясно', rain: 'дощ', snow: 'сніг', acid: 'кислотний дощ', dust: 'пилова буря' };
   const STAR_CLS = ['червоний карлик (M)', 'помаранчева зоря (K)', 'жовта зоря (G)', 'жовто-біла зоря (F)', 'біла зоря (A)', 'блакитна зоря (B)'];
-  const num = (v, d = 1) => v.toFixed(d).replace('.', ',').replace('-', '−');
-  const atmStr = (P) => (P < 0.01 ? P.toPrecision(1) : P < 0.1 ? P.toFixed(3) : P < 10 ? P.toFixed(2) : P.toFixed(0)).replace('.', ',') + ' атм';
   const liqStr = (lq) => lq.name + (lq.danger ? ` (${lq.danger})` : '');
   const addrStr = (d, n) => d === g.d ? `всесвіт ${fmtN(n)}` : `глибина ${d}, всесвіт ${fmtN(n)}`;
 
@@ -616,7 +613,7 @@ function boot(renderer) {
     g.d = d; g.n = n; g.world.setCurrent(d, n); placeAt(g.me, at[0], at[1], at[2]); g.me.fly = false;
     const msg = [];
     if (depth) msg.push(`глибина ${d}`);
-    if (Math.abs(L.grav - was) >= 0.12) msg.push(`гравітація ${gStr(L)} — ${L.grav < was ? 'легше' : 'важче'}`);
+    if (Math.abs(L.grav - was) >= 0.12) msg.push(`гравітація ${fx(L.grav, 2)} g — ${L.grav < was ? 'легше' : 'важче'}`);
     const lq = L.liquid;
     if (lq.kind !== P.liquid.kind || lq.danger !== P.liquid.danger) msg.push(`у водоймах — ${liqStr(lq)}`);
     if (!L.air.breath && (P.air.breath || L.air.gas !== P.air.gas)) msg.push(`повітря ${L.air.gasName}`);
@@ -626,14 +623,14 @@ function boot(renderer) {
     if (Math.abs(dT) >= 15) msg.push(`${dT > 0 ? 'тепліше' : 'холодніше'}: ${Math.round(L.clim.Tpatch - 273.15)} °C`);
     const pr = (L.air.pressure + 1e-4) / (P.air.pressure + 1e-4);
     if (L.air.vacuum && !P.air.vacuum) msg.push('повітря майже немає');
-    else if (!L.air.vacuum && (pr > 1.6 || pr < 1 / 1.6)) msg.push(`тиск ${atmStr(L.air.pressure)}`);
+    else if (!L.air.vacuum && (pr > 1.6 || pr < 1 / 1.6)) msg.push(`тиск ${atm(L.air.pressure)} атм`);
     if (L.star.cls !== P.star.cls || L.star.n !== P.star.n) msg.push(STAR_CLS[L.star.cls] + (L.star.n > 1 ? ` (зір ${L.star.n})` : ''));
     if (L.comp && !P.comp) msg.push(L.planet.held === 'comp' ? 'на небі стоїть планета-компаньйон' : 'на небі — планета-компаньйон');
     const H = L.planet.held;
     if (H !== P.planet.held) { if (H === 'sun') msg.push('вічний день'); else if (H === 'moon') msg.push('місяць стоїть на небі'); else if (H === 'res') msg.push('доба — 2 роки (резонанс 3:2)'); }
     if (L.tanom && !P.tanom) msg.push('часові аномалії');
     if (L.anom.rev && !P.anom.rev) msg.push('зворотна гравітація');
-    if (Math.abs(L.phys.time / P.phys.time - 1) > 0.3) msg.push(`час тече ${L.phys.time > P.phys.time ? 'швидше' : 'повільніше'} (×${L.phys.time.toFixed(1).replace('.', ',')})`);
+    if (Math.abs(L.phys.time / P.phys.time - 1) > 0.3) msg.push(`час тече ${L.phys.time > P.phys.time ? 'швидше' : 'повільніше'} (×${fx(L.phys.time)})`);
     if (msg.length) toast(msg.join(' · ').replace(/^./, (c) => c.toUpperCase()));
     $('flash').classList.add('on');
     requestAnimationFrame(() => requestAnimationFrame(() => $('flash').classList.remove('on')));
@@ -962,31 +959,31 @@ function boot(renderer) {
       b.ix = b.ps === undefined ? b.x : b.px + (b.x - b.px) * k; b.iy = b.ps === undefined ? b.y : b.py + (b.y - b.py) * k; b.iz = b.ps === undefined ? b.z : b.pz + (b.z - b.pz) * k;
     }
     const lines = g.showColl && me.placed ? collLines(me) : null;
-    const fx = me.ix ?? me.x, fy = me.iy ?? me.y, fz = me.iv ?? me.vis ?? me.z;
+    const ix = me.ix ?? me.x, iy = me.iy ?? me.y, iz = me.iv ?? me.vis ?? me.z;
     // ліхтарик: перша особа — з ока, третя — зі скла на лобі (поза тієї самої фігури, що малюється), уздовж погляду камери;
     // камеру в тісноті підтягнуло до голови (фігури не видно) — з ока, як у першій: скло за 0,27 м перед оком, впритул до стіни
     const lamp = g.lamp && me.placed ? lampPose({
       first: camera.mode === FIRST || Math.hypot(...g.view.eye) <= FIG_NEAR, eye: [g.cam[0] + g.view.eye[0], g.cam[1] + g.view.eye[1], g.cam[2] + g.view.eye[2]], look: lookDir(),
-      anim, foot: [fx, fy, fz], yaw: me.yaw, safe: g.cam, hit: (o, d, t) => segHit(g.world.probe(g.d, g.n), o, d, t),
+      anim, foot: [ix, iy, iz], yaw: me.yaw, safe: g.cam, hit: (o, d, t) => segHit(g.world.probe(g.d, g.n), o, d, t),
     }) : null;
     g.lampEye = !!lamp && !lamp.shadow;      // F3: світить з ока
     const sk = renderer.draw({
       lines, lamp, under: g.under ? L.liquid : null, skyLight: (x, y, z) => g.world.skyLight(g.d, g.n, x, y, z),
       camera, target: g.cam, view: g.view, laws: L, far: g.far, occ: g.occ, charge: g.dev.charge ? g.dev.charge.to : null, clock: g.clock, bodies, aim: g.aimFx === false ? null : g.aim, weather: { W: loc.W, loc }, bolt: g.bolt, rain: me.placed && loc.type ? rainMap(now) : null,
       // вигляд гравця: положення — інтерпольоване, стан — усе, що читають руки першої особи (VIEW_KEYS у anim.js)
-      me: me.placed ? { ...Object.fromEntries(VIEW_KEYS.map((k) => [k, me[k]])), x: fx, y: fy, z: fz, anim, ao: g.world.skyLight(g.d, g.n, fx, fy, fz + 0.5) } : null,
+      me: me.placed ? { ...Object.fromEntries(VIEW_KEYS.map((k) => [k, me[k]])), x: ix, y: iy, z: iz, anim, ao: g.world.skyLight(g.d, g.n, ix, iy, iz + 0.5) } : null,
     });
-    setText('addr', g.rec.stand ? `Стенд руху · g ${gStr(L)} · тертя ${String(+L.phys.friction.toFixed(2)).replace('.', ',')}${wOver === 'rain' ? ' · дощ' : ''}`
+    setText('addr', g.rec.stand ? `Стенд руху · g ${fx(L.grav, 2)} g · тертя ${String(+L.phys.friction.toFixed(2)).replace('.', ',')}${wOver === 'rain' ? ' · дощ' : ''}`
       : `Глибина ${g.d} · всесвіт ${fmtN(g.n)} · ${clockStr(sk.phase)}${L.sky.lock ? ' (вічно)' : ''}`);
     // тяжіння тут: база × аномалія плями (зворотна — окремо) − приплив компаньйона; плин часу плями
     const ph = g.ph, gl = ph ? ph.g : L.grav, tk = me.placed ? timeK(L, me.x, me.y).k : 1;
     const an = (ph && ph.tide && Math.abs(ph.tide) > 0.01 ? ` (приплив ${ph.tide > 0 ? '+' : '−'}${Math.round(Math.abs(ph.tide) * 100)} %)` : '')
-      + (ph && ph.rev ? ' · зворотна гравітація' : ph && ph.anom ? ` · аномалія ×${num(ph.anom)}` : '') + (Math.abs(tk - 1) > 0.05 ? ` · час ×${num(tk)}` : '');
-    setText('coords', `x ${Math.floor(me.x)} · y ${Math.floor(me.y)} · висота ${Math.round(me.z - SEA * LEVEL)} м · гравітація ${num(gl, 2)} g${an}${me.wet ? ` · у рідині: ${liqStr(L.liquid)}${L.liquid.danger ? ' — небезпечно' : ''}` : ''}`);
+      + (ph && ph.rev ? ' · зворотна гравітація' : ph && ph.anom ? ` · аномалія ×${fx(ph.anom)}` : '') + (Math.abs(tk - 1) > 0.05 ? ` · час ×${fx(tk)}` : '');
+    setText('coords', `x ${Math.floor(me.x)} · y ${Math.floor(me.y)} · висота ${Math.round(me.z - SEA * LEVEL)} м · гравітація ${fx(gl, 2)} g${an}${me.wet ? ` · у рідині: ${liqStr(L.liquid)}${L.liquid.danger ? ' — небезпечно' : ''}` : ''}`);
     const A = L.air;
     const I = stormAt(L, g.clock), rad = radNow(L, I), Pz = A.vacuum ? 0 : airAt(L, me.z).P;
     setText('env', `${loc.name}${g.temp !== undefined ? ` · ${Math.round(g.temp)} °C` : ''}${W.windK > 0.3 ? ` · вітер ${W.windK.toFixed(0)} м/с${g.lee < 0.5 ? ' (затишок)' : g.me.windPush ? ' (зносить)' : ''}` : ''}`
-      + `${!A.vacuum && (Pz < 0.85 || Pz > 1.2) ? ` · тиск ${atmStr(Pz)}` : ''}${A.breath ? '' : ` · повітря ${A.gasName}`}`
+      + `${!A.vacuum && (Pz < 0.85 || Pz > 1.2) ? ` · тиск ${atm(Pz)} атм` : ''}${A.breath ? '' : ` · повітря ${A.gasName}`}`
       + `${rad > 0.3 ? ` · радіація ${rad > 0.65 ? 'висока' : 'помірна'}` : ''}${I > 0.05 ? ' · буря зорі' : ''}`);
     $('charge').hidden = !ch;
     if (ch) {
@@ -1053,8 +1050,6 @@ function boot(renderer) {
 }
 
 function showErr(s) { $('err').textContent = s; $('err').hidden = !s; }
-function load(k) { try { return localStorage.getItem(k); } catch { return null; } }
-function store(k, v) { try { localStorage.setItem(k, v); } catch { /* приватне вікно: не пам'ятаємо */ } }
 function randomSeed() {
   const a = new Uint32Array(1);
   crypto.getRandomValues(a);

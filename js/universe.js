@@ -5,7 +5,7 @@
 import { hash2, hash3, unit } from './rng.js';
 import { noise2 } from './noise.js';
 import { BIOMES, BIOME_IN_ZONE, ZONES } from './gen/biomes.js';
-import { nsqrt, ncbrt, nlog10, nsin, ncos, nqnorm, PI, pwlXY } from './num.js';
+import { nsqrt, ncbrt, nlog10, nsin, ncos, nqnorm, PI, pwlXY, clamp01 } from './num.js';
 import { starOf, planetOf, pMin, tEq, airOf, tSurf, kTr, fieldOf, radOf, rhoAir, scaleH, VACUUM } from './astro.js';
 
 export const GEN = 17;        // версія генератора; зберігається у світі (змінений генератор — інші незмінені чанки)
@@ -46,7 +46,6 @@ export const HOT = 45, COLD = 5;    // межі температури безп�
 export const MAX_AMP = 48;   // найбільша амплітуда рельєфу в рівнях (легка гравітація — вищі гори)
 export const FLOAT_G = 0.6;  // гравітація, нижче якої крок угору — 2 рівні
 
-const clamp01 = (v) => v < 0 ? 0 : v > 1 ? 1 : v;
 const frac = (v) => v - Math.floor(v);
 
 // HSL → RGB (кусково-лінійно, без тригонометрії)
@@ -578,19 +577,23 @@ export function gravityAt(L, x, y) {
   return { k, tx: tx * A.tilt * s * 1.5, ty: ty * A.tilt * s * 1.5, rev };
 }
 
+export const G0 = 9.81;              // прискорення при 1 g, м/с² (рішення 12.10.2026: справжнє)
+export const PLAYER_MASS = 70;       // маса гравця, кг (тисне тіло, на якому стоїть; штовхає)
+export const PLAYER_AREA = 0.9;      // опір гравця Cd·A, м² (закон п. 4): межа падіння ≈ 35 м/с при 1 g, 1 атм
+
 // Рух у всесвіті: на скільки рівнів можна піднятися кроком (up), множник швидкості ходи, як швидко ноги наздоганяють
 // нову висоту (легка гравітація — «пливе»), межа швидкості падіння vT (опір повітря: густе й легка гравітація —
 // повільне падіння, без повітря — майже без межі), тертя ґрунту (1 — звичайне, менше — ковзко), пружність.
-// Зійти пішки можна з будь-якої висоти (шкоди від падіння ще немає)
-export function physOf(L, rho = L.air ? L.air.rho : 1.225) {
-  const g = L.grav, P = L.phys || { friction: 1, bounce: 0 };
+// Зійти пішки можна з будь-якої висоти (шкоди від падіння ще немає). g — тяжіння, у g (типово — всесвіту; physAt3 — у точці)
+export function physOf(L, rho = L.air ? L.air.rho : 1.225, g = L.grav) {
+  const P = L.phys || { friction: 1, bounce: 0 };
   return {
     up: g < FLOAT_G ? 2 : 1,
     speed: g > 1 ? Math.max(0.55, 1 - 0.18 * (g - 1)) : 1 + 0.1 * (1 - g),
     settle: Math.min(20, Math.max(5, 14 * g)),
-    // межа падіння гравця (м/с): вага = опір, m·g = ½·ρ·v²·CdA (m 70 кг, CdA 0,9 м², ρ — густина повітря зі складу й
-    // температури, на висоті — з physAt3)
-    vT: Math.min(500, Math.sqrt(2 * 70 * 9.81 * g / (Math.max(rho, 1.225e-4) * 0.9))),
+    // межа падіння гравця (м/с): вага = опір, m·g = ½·ρ·v²·CdA (ρ — густина повітря зі складу й температури, на висоті —
+    // з physAt3)
+    vT: Math.min(500, Math.sqrt(2 * PLAYER_MASS * G0 * g / (Math.max(rho, 1.225e-4) * PLAYER_AREA))),
     friction: P.friction, bounce: P.bounce,
     g,
   };

@@ -11,6 +11,7 @@ import { fbm3, noise2 } from './noise.js';
 import { tile, T_DESERT, T_DRY } from './gen/chunk.js';
 import { dayPhase, skyAxes, skyState } from './sky.js';
 import { SEA, LEVEL } from './universe.js';
+import { clamp01, smoothstep } from './num.js';
 
 export const W_CLEAR = 0, W_CLOUDY = 1, W_RAIN = 2, W_STORM = 3, W_FOG = 4, W_DUST = 5;
 const KINDS = ['clear', 'cloudy', 'rain', 'storm', 'fog', 'dust'];
@@ -25,8 +26,6 @@ const LOOK = [
   { clouds: 0.3, vis: 0.38, precip: 0, dust: 1, wind: 2.4, dim: 0.25 },
 ];
 const PARAMS = ['clouds', 'vis', 'precip', 'dust', 'wind', 'dim'];
-const clamp01 = (v) => v < 0 ? 0 : v > 1 ? 1 : v;
-const ss = (a, b, v) => { const t = clamp01((v - a) / (b - a)); return t * t * (3 - 2 * t); };
 const EDGE = 0.05, HYST = 0.05, OCT = 2, MIN_HOLD = 60;
 
 // Розподіл fBm3 (OCT октав): таблиця квантилів, раз на запуск (емпірично, 20 000 значень)
@@ -62,7 +61,7 @@ export function prevailing(L, clock = 0) {
   }
   const W = 30 * Math.min(3, Math.max(0.5, Math.sqrt(L.planet.rot / 24))), k = Math.floor(lat / W), r = lat - k * W;
   const sg = k % 2 === 0 ? -1 : 1, dx = sg * 0.94, dy = sg * 0.34;
-  return { dir: [A.e[0] * dx + A.nn[0] * dy, A.e[1] * dx + A.nn[1] * dy], calm: 0.5 + 0.5 * ss(0, 5, Math.min(r, W - r)) };
+  return { dir: [A.e[0] * dx + A.nn[0] * dy, A.e[1] * dx + A.nn[1] * dy], calm: 0.5 + 0.5 * smoothstep(0, 5, Math.min(r, W - r)) };
 }
 
 // Поля погоди в точці: хмарне q, туман qf, пил qd (рівномірні 0…1) і параметри вигляду P (плавно через пороги)
@@ -72,9 +71,9 @@ function fields(L, clock, x, y, only) {
   const q = fq(fbm3(L.ds ^ 0x3ea7, sx, sy, st, OCT)), qf = fq(fbm3(L.ds ^ 0x7f0, sx * 1.7, sy * 1.7, st * 1.3, OCT)), qd = fq(fbm3(L.ds ^ 0xd57, sx * 0.8, sy * 0.8, st * 0.9, OCT));
   const Th = thresholds(L), [t1, t2, t3] = Th.t;
   // параметри: від ясної вгору порогами хмарного поля; туман і пил — поверх ясної й хмарної
-  const P = {}, wet = ss(t2 - EDGE, t2 + EDGE, q), wf = ss(Th.fog - EDGE, Th.fog + EDGE, qf) * (1 - wet), wd = ss(Th.dust - EDGE, Th.dust + EDGE, qd) * (1 - wet) * (1 - wf);
+  const P = {}, wet = smoothstep(t2 - EDGE, t2 + EDGE, q), wf = smoothstep(Th.fog - EDGE, Th.fog + EDGE, qf) * (1 - wet), wd = smoothstep(Th.dust - EDGE, Th.dust + EDGE, qd) * (1 - wet) * (1 - wf);
   for (const k of only || PARAMS) {
-    let v = LOOK[0][k] + (LOOK[1][k] - LOOK[0][k]) * ss(t1 - EDGE, t1 + EDGE, q) + (LOOK[2][k] - LOOK[1][k]) * wet + (LOOK[3][k] - LOOK[2][k]) * ss(t3 - EDGE, t3 + EDGE, q);
+    let v = LOOK[0][k] + (LOOK[1][k] - LOOK[0][k]) * smoothstep(t1 - EDGE, t1 + EDGE, q) + (LOOK[2][k] - LOOK[1][k]) * wet + (LOOK[3][k] - LOOK[2][k]) * smoothstep(t3 - EDGE, t3 + EDGE, q);
     v += (LOOK[W_FOG][k] - v) * wf; v += (LOOK[W_DUST][k] - v) * wd;
     P[k] = v;
   }

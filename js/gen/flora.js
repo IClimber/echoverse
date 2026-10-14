@@ -8,9 +8,9 @@
 import { hash2, hash3, hash4, unit } from '../rng.js';
 import { noise2, noise3 } from '../noise.js';
 import { hsl } from '../universe.js';
+import { clamp01 } from '../num.js';
 import { BIOMES } from './biomes.js';
 
-const clamp01 = (v) => v < 0 ? 0 : v > 1 ? 1 : v;
 
 // Форми: big — великі (заважають ходити), h — висота в одиницях (до множника всесвіту treeH), name — для F3
 const F = (big, lo, hi, name) => ({ big, h: [lo, hi], name });

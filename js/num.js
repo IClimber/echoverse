@@ -33,3 +33,7 @@ export function pwlXY(X, Y, x) {
   return Y[Y.length - 1];
 }
 export const clamp = (v, lo, hi) => v < lo ? lo : v > hi ? hi : v;
+export const clamp01 = (v) => v < 0 ? 0 : v > 1 ? 1 : v;
+// плавний крок 0…1 (t обрізано до 0…1) і між a та b
+export const smooth01 = (t) => { t = clamp01(t); return t * t * (3 - 2 * t); };
+export const smoothstep = (a, b, v) => smooth01((v - a) / (b - a));
