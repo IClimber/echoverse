@@ -57,7 +57,9 @@ export function createGen(seed, onDone) {
       console.warn('генератор: воркерів немає, генеруємо в головному потоці');
       for (const b of busy.values()) back.push(b);
       busy.clear(); inWork.clear(); ws = [];
+      const rest = queue.drain();                   // ще не взяті — прив'язані до воркерів, яких уже немає
       queue = createQueue(1);
+      for (const [key, q, pri] of rest) queue.want(key, q, pri, 0);
       for (const b of back) queue.want(b.key, b.q, 0, 0);
       return;
     }

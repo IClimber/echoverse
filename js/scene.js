@@ -214,7 +214,8 @@ export async function createScene(canvas, settings = {}) {
   const group = (T) => {
     let g = tmpl.get(T);
     if (!g) {
-      if (tmpl.size > 400) { for (const v of tmpl.values()) { v.inst.destroy(); v.mesh.destroy(); stats.gpuBytes -= v.bytes; } tmpl.clear(); }
+      // кеш переповнено — меші всіх шаблонів знищуються: обрис цілі скинути (інакше лишився б на знищеному меші — ключ той самий)
+      if (tmpl.size > 400) { setOutline(null, null); for (const v of tmpl.values()) { v.inst.destroy(); v.mesh.destroy(); stats.gpuBytes -= v.bytes; } tmpl.clear(); }
       const idx = T.verts > 65535 ? new Uint32Array(T.verts) : new Uint16Array(T.verts);
       for (let i = 0; i < T.verts; i++) idx[i] = i;
       const mesh = floatMesh(G, { pos: T.p, nor: T.n, col: T.c, mat: T.m, idx });

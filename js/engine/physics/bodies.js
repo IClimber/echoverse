@@ -7,9 +7,9 @@
 // Інтерфейс (положення, швидкість, маса, форма) — такий, щоб за потреби пересадити на фізичний рушій.
 
 // Сталі гри (висота блоку, що тверде, прискорення при 1 g, еталон маси й площі для межі падіння) — задає гра через
-// configureBodies; рушій від гри не залежить
-let LEVEL = 0.5, solidB = (v) => v > 0, GRAVITY = 25.6, REF_MASS = 70, REF_AREA = 0.47;
-export function configureBodies({ level, solid, gravity, refMass = 70, refArea = 0.47 }) {
+// configureBodies; рушій від гри не залежить. Типові — людина на Землі (СІ)
+let LEVEL = 0.5, solidB = (v) => v > 0, GRAVITY = 9.81, REF_MASS = 70, REF_AREA = 0.9;
+export function configureBodies({ level, solid, gravity, refMass = 70, refArea = 0.9 }) {
   LEVEL = level; solidB = solid; GRAVITY = gravity; REF_MASS = refMass; REF_AREA = refArea;
 }
 

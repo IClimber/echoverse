@@ -17,6 +17,15 @@ test('черга: пріоритети й повторний запит', () => 
   assert.equal(Q.size, 0);
 });
 
+test('черга: drain — усі живі роботи з пріоритетами, черга порожня', () => {
+  const Q = createQueue(3);
+  Q.want('a', { v: 1 }, 5, 0); Q.want('b', {}, 1, 2); Q.want('c', {}, 3, -1); Q.want('a', { v: 2 }, 4, 0);
+  const all = Q.drain().sort((u, v) => u[2] - v[2]);
+  assert.deepEqual(all.map((r) => [r[0], r[2]]), [['b', 1], ['c', 3], ['a', 4]]);
+  assert.deepEqual(all[2][1], { v: 2 });
+  assert.equal(Q.size, 0); assert.equal(Q.take(0), null); assert.equal(Q.take(2), null);
+});
+
 test('черга: вільні роботи — будь-кому, прив\'язані — своєму; keepOnly', () => {
   const Q = createQueue(2);
   Q.want('x', {}, 2, -1); Q.want('y', {}, 1, 1);

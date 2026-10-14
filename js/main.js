@@ -8,7 +8,7 @@ import { createWorld, findSpawn, keepFor } from './world.js';
 import { colliderOf, underLiquid } from './collision.js';
 import { createList } from './engine/physics/collide.js';
 import { createDevice, landing, landingChunks, CHARGE } from './device.js';
-import { step, standableB, settle, hits, SHAPE, windShelter, SPRINT, GRAVITY, FOOT, BODY, PLAYER_MASS, HIT_IMPULSE } from './player.js';
+import { step, standableB, settle, placeAt, hits, SHAPE, windShelter, SPRINT, GRAVITY, FOOT, BODY, PLAYER_MASS, HIT_IMPULSE } from './player.js';
 import { stepBody, windMoves, push, collideBodies } from './engine/physics/bodies.js';
 import { initInput, moveAxis, turnAxis, sprintHeld, crouchHeld, vertAxis, takeActions, takeWheel, takeDrag, clearInput, lockPointer, unlockPointer, locked, devKey } from './input.js';
 import { listWorlds, putWorld, deleteWorld, serialize, deserialize, newId } from './save.js';
@@ -152,7 +152,7 @@ function boot(renderer) {
       for (let r = 0; r <= 3000; r += 16) for (let a = 0; a < 6.283; a += Math.max(0.05, 16 / Math.max(r, 1))) {
         const x = Math.floor(me.x + r * Math.cos(a)) + 0.5, y = Math.floor(me.y + r * Math.sin(a)) + 0.5, q = kind === 'time' ? timeK(L, x, y) : gravityAt(L, x, y);
         if (kind === 'time' ? q.ws > 0.9 || q.wf > 0.9 : kind === 'rev' ? q.rev && q.k < -0.2 : !q.rev && Math.abs(q.k - 1) > 0.4) {
-          me.x = x; me.y = y; me.z += 200; me.vz = 0; me.fly = true; me.visX = me.px = x; me.visY = me.py = y; me.vis = me.pv = me.z;
+          placeAt(me, x, y, me.z + 200); me.fly = true;
           g.cam = [x, y, me.z]; streamer.force();
           return [x, y, q.k];
         }
@@ -221,7 +221,7 @@ function boot(renderer) {
         }
       }
       if (!best) return null;
-      me.x = best[0]; me.y = best[1]; me.z = best[2]; me.vz = 0; me.vis = me.z; me.offX = me.offY = 0; me.visX = me.px = me.x; me.visY = me.py = me.y; me.pv = me.z;
+      placeAt(me, ...best);
       g.cam = [...best];
       streamer.force();
       return best;
@@ -293,8 +293,7 @@ function boot(renderer) {
       let k = 70;
       while (k > 0 && !(solidB(standBlock(Math.floor(sp[0]), Math.floor(sp[1]), k - 1)) || standBlock(Math.floor(sp[0]), Math.floor(sp[1]), k - 1) === B_LIQ)) k--;
       const s = settle(g.world.probe(g.d, g.n), sp[0], sp[1], k * LEVEL);
-      Object.assign(me, { x: s[0], y: s[1], z: s[2], vz: 0, vx: 0, vy: 0, climb: null, fly: false, dive: false, ground: false, stepOff: 0, offX: 0, offY: 0, yaw: sp[2] });
-      me.vis = me.z; me.visX = me.px = me.x; me.visY = me.py = me.y; me.pv = me.z;
+      placeAt(me, s[0], s[1], s[2]); me.fly = false; me.yaw = sp[2];
       g.cam = [me.x, me.y, me.z];
       setYaw(camera, sp[2] + Math.PI);
       return s;
@@ -614,7 +613,7 @@ function boot(renderer) {
     drop();                                                     // тіло лишається у своєму всесвіті
     g.dev.done([g.d, g.n]);
     g.prev = [g.d, g.n];
-    g.d = d; g.n = n; g.world.setCurrent(d, n); g.me.x = at[0]; g.me.y = at[1]; g.me.z = at[2]; g.me.vz = 0; g.me.vx = 0; g.me.vy = 0; g.me.ground = false; g.me.stepOff = 0; g.me.offX = g.me.offY = 0; g.me.visX = g.me.x; g.me.visY = g.me.y; g.me.fly = false;
+    g.d = d; g.n = n; g.world.setCurrent(d, n); placeAt(g.me, at[0], at[1], at[2]); g.me.fly = false;
     const msg = [];
     if (depth) msg.push(`глибина ${d}`);
     if (Math.abs(L.grav - was) >= 0.12) msg.push(`гравітація ${gStr(L)} — ${L.grav < was ? 'легше' : 'важче'}`);
@@ -808,8 +807,7 @@ function boot(renderer) {
     if (!me.placed) {
       const at = placeIn(g.d, g.n, me.x, me.y, me.z);
       if (at !== undefined) {
-        me.x = at[0]; me.y = at[1]; me.z = at[2];
-        me.ground = false; me.stepOff = 0; me.vis = me.z; me.offX = me.offY = 0; me.visX = me.px = me.x; me.visY = me.py = me.y; me.pv = me.z;
+        placeAt(me, at[0], at[1], at[2]);
         g.cam = [me.x, me.y, me.z]; me.placed = true;
         $('loading').hidden = true;
         $('mouseHint').hidden = locked();
@@ -834,7 +832,7 @@ function boot(renderer) {
         if (!me.climb) me.yaw = facing(camera);      // туди, куди дивиться камера (у третій — спиною до неї); S — задкує; на стіні — у стіну
         simBodies(PHYS_DT, L, W);
         warnLiquid();
-        if (g.dev.update(PHYS_DT)) { tryJump(); me.px = me.visX ?? me.x; me.py = me.visY ?? me.y; me.pv = me.vis ?? me.z; }   // стрибок — без «шлейфу»
+        if (g.dev.update(PHYS_DT)) tryJump();                       // стрибок — без «шлейфу» (placeAt)
         if (!me.placed) break;
       }
       if (!me.climb) me.yaw = facing(camera);       // і в кадрі без кроку фізики (камера — щокадру)

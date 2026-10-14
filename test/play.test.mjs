@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { LEVEL } from '../js/universe.js';
-import { step, hits, support, standable, settle, SPEED, PH1, GRAVITY, JUMP_V, FLOAT_Z, jumpHeight, SPRINT, FLY_SPEED, FLY_V, shapeOf } from '../js/player.js';
+import { step, hits, support, standable, settle, placeAt, SPEED, PH1, GRAVITY, JUMP_V, FLOAT_Z, jumpHeight, SPRINT, FLY_SPEED, FLY_V, shapeOf } from '../js/player.js';
 import { landing, landingChunks, createDevice, CHARGE, HISTORY } from '../js/device.js';
 import { serialize, deserialize } from '../js/save.js';
 import { B_AIR, B_LIQ, B_GRASS, B_STONE } from '../js/gen/chunk.js';
@@ -915,4 +915,14 @@ test('тіла: тертя Кулона (гальмівний шлях v²/(2μg
   const s = makeBody({ x: 10.5, y: 10.5, z: 4 * LEVEL, hx: 0.1, hy: 0.1, hz: 0.1, lift: 0 });
   const wc = Math.sqrt(2 * s.mass * GRAVITY / (1.225 * 1.05 * 0.04));
   assert.ok(!windMoves(s, { ...env, wind: [wc * 0.95, 0] }) && windMoves(s, { ...env, wind: [wc * 1.05, 0] }), `поріг ${wc}`);
+});
+
+test('placeAt: гравець з нуля в новій точці — фігура й інтерполяція там само; політ і поза — як були', () => {
+  const p = { x: 1, y: 2, z: 3, vx: 1, vy: 2, vz: -5, vis: 3.2, visX: 1, visY: 2, pv: 3.1, footOff: -0.1, stepOff: 0.2, offX: 0.1, offY: 0.1,
+    climb: { kind: 'wall', nx: 1, ny: 0 }, slide: true, dive: true, ground: true, fly: true, pose: 'crouch' };
+  placeAt(p, 10, 20, 30);
+  assert.deepEqual([p.x, p.y, p.z, p.vx, p.vy, p.vz], [10, 20, 30, 0, 0, 0]);
+  assert.deepEqual([p.vis, p.visX, p.visY, p.pv, p.px, p.py], [30, 10, 20, 30, 10, 20]);
+  assert.ok(p.climb === null && !p.slide && !p.dive && !p.ground && p.footOff === 0 && p.stepOff === 0 && p.offX === 0 && p.offY === 0);
+  assert.ok(p.fly && p.pose === 'crouch');
 });

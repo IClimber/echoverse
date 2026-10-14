@@ -56,6 +56,13 @@ export function createQueue(nw) {
       return [v.key, v.q];
     },
     get size() { return live.size; },
+    // Усі живі роботи [key, q, pri]; черга порожніє (перенос у нову чергу — gen/client.js, коли впали всі воркери)
+    drain() {
+      const out = [];
+      for (const h of [...heaps, free]) { for (const v of h) if (fresh(v)) out.push([v.key, v.q, v.pri]); h.length = 0; }
+      live.clear();
+      return out;
+    },
     // Прибрати застарілі вузли, якщо купи розрослися (багато оновлень пріоритету)
     compact() {
       for (const h of [...heaps, free]) if (h.length > live.size * 2 + 64) {

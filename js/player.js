@@ -168,6 +168,15 @@ export function settle(P, x, y, z) {
   return [x, y, f && stands(f, STAND_Z) ? f.z : zz];
 }
 
+// Гравець — у точку (x, y, z) з нуля (телепорт, стрибок пристроєм, поява): без швидкості, опори, лазіння, сповзання,
+// пірнання й зсувів вигляду; фігура й інтерполяція кадру (main.js px, py, pv) — одразу там, без «шлейфу». Політ і поза — як були
+export function placeAt(p, x, y, z) {
+  p.x = x; p.y = y; p.z = z; p.vx = p.vy = p.vz = 0;
+  p.ground = false; p.onBody = null; p.climb = null; p.slide = false; p.sv = null; p.dive = false; p.tiltV = null;
+  p.stepOff = 0; p.footOff = 0; p.offX = 0; p.offY = 0;
+  p.visX = p.px = x; p.visY = p.py = y; p.vis = p.pv = z;
+}
+
 // Поверхня рідини під ногами не нижче за z − drop (на ній стоять при поверхневому натягу) або null
 function liqFloor(P, x, y, z, drop) {
   const tx = Math.floor(x), ty = Math.floor(y);
