@@ -203,7 +203,7 @@ export function createLightField(SL, { sec, col }) {
     },
     // Секцію витіснено (запис уже dead): сховище не рахуємо
     removeSection(T) { if (T.lt) nStore--; },
-    // Прийшло зведення стовпця (cx, cy): його небо — сусідам за гранями стовпця. range(cx, cy) — [czLo, czHi]
+    // Прийшло зведення стовпця (cx, cy): його небо — сусідам за гранями стовпця. czs(cx, cy) — [czLo, czHi]
     // завантажених секцій стовпця
     addColumn(cx, cy, czs) {
       for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {

@@ -269,8 +269,7 @@ export function skyState(L, clock) {
   let Bm = 0;
   for (const m of moons) { m.light = moonLight(m, suns); Bm += m.light; }
   const nl = S.night * airN, I = ((nl + (1 - nl) * dayT) ** 2.2 + kB * Bm) ** (1 / 2.2);
-  const nightTint = [0.62, 0.72, 1.0];
-  const tint = mix(nightTint, sunCol, day);   // повний колір зорі (13.10.2026, рішення користувача; було 60 % + 40 % білого)
+  const tint = mix(NIGHT_TINT, sunCol, day);   // повний колір зорі (13.10.2026, рішення користувача; було 60 % + 40 % білого)
   // небо: удень — оптика, уночі — колір ночі законів (× airN); захід — сяйво біля сонця
   const nZ = S.nightCol.map((v) => v * airN), nH = [(S.nightCol[0] * 1.7 + 10) * airN, (S.nightCol[1] * 1.7 + 10) * airN, (S.nightCol[2] * 1.6 + 12) * airN];
   const horizon = mix(mix(nH, O.hor, day), Og.glow, dusk * 0.6), zenith = mix(mix(nZ, O.zen, day), Og.glow, dusk * 0.15);

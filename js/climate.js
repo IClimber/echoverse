@@ -4,6 +4,7 @@
 import { fbm3 } from './noise.js';
 import { SEA, LEVEL } from './universe.js';
 import { dayPhase, yearPhase } from './sky.js';
+import { W_STORM } from './weather.js';
 
 const TAU = Math.PI * 2;
 // Температура (°C) у точці (x, y, z) у мить clock; W — погода (weather.js weatherAt; хмари гасять добу, опади холодять).
@@ -17,7 +18,7 @@ export function tempParts(L, x, y, z, clock, W = null) {
   const height = Math.max(0.84 * C.Teq - 273.15, patch + biome - C.lapse * Math.max(0, zs)) - patch - biome;
   const day = L.sky.lock ? 0 : C.Ad * (1 - 0.5 * (W ? W.clouds : 0)) * Math.cos(TAU * (dayPhase(L, clock) - 0.58));
   const season = L.sky.year && !L.sky.lock ? C.As * Math.sin(TAU * (yearPhase(L, clock) - 0.08)) : 0;
-  const weather = W ? (W.kind === 3 ? -4 : W.precip > 0.3 ? -2 : 0) : 0;
+  const weather = W ? (W.kind === W_STORM ? -4 : W.precip > 0.3 ? -2 : 0) : 0;
   return { T: patch + biome + height + day + season + weather, patch, biome, height, day, season, weather };
 }
 // Радіація зараз (0…1): база всесвіту (L.air.rad) + буря зорі сили I (sky.js stormAt): + 0,5·I·clamp(1,1 − B)/(1 + 4P/g)

@@ -256,12 +256,12 @@
 | `js/noise.js` | градієнтний шум 2D/3D, fBm |
 | `js/num.js` | точна арифметика генерації (фасад stdlib): `nsqrt`, `nroot4`, `ncbrt`, `nlog10`, `nsin`, `ncos`, `nqnorm`, `pwl`, `pwlXY`, `clamp`, `PI` |
 | `js/lib/stdlib/` | stdlib-js: `sin`, `cos`, `cbrt`, `log10`, `erfcinv` — ES-модулі без імпортів; `fetch.sh` — закріплені теги |
-| `js/astro.js` | закони фізики світу: `starOf`, `planetOf`, `pMin`, `keplerH`, `tEq`, `airOf` (`VACUUM`), `tSurf`, `fieldOf`, `radOf`, `rhoAir`, `scaleH`, `kTr` |
+| `js/astro.js` | закони фізики світу: `starOf`, `planetOf`, `pMin`, `tEq`, `airOf` (`VACUUM`), `tSurf`, `fieldOf`, `radOf`, `rhoAir`, `scaleH`, `kTr` |
 | `js/universe.js` | `GEN`, `LEVEL`, `SEA`, `MAX_AMP`, `FLOAT_G`, `hsl`, `lawsOf(seed, d, n)` — зоря, планета, повітря, поле, клімат, компаньйон, аномалії (`zOfLane`, `SPREAD`, `levelOf`), рельєф, рослинність, біоми, палітра, світло, зерна шумів; `physOf` — рух від гравітації |
 | `js/gen/biomes.js` | зони `Z_*`, 33 біоми `BIOMES`, `pickBiome` |
 | `js/gen/flora.js` | `FORMS`, `regionAt`, `speciesOf` (види області в біомі, геноми), `pickSpecies`, `groundTint` |
 | `js/gen/plants.js` | будова рослин і каміння з генома (`template`), `place` |
-| `js/gen/chunk.js` | `elevation`, `famF` / `relief3`, `rocks3`, `mountain`, `tile`, `cliffBands` / `cliffTop`, `lattice`, `genCol`, `genSection`, `genCoarse`, `genChunk`, `genColumn`, `topZ`, `solidMask`, `digest` |
+| `js/gen/chunk.js` | `elevation`, `famF` / `relief3`, `rocks3`, `mountain`, `tile`, `cliffBands` / `cliffTop`, `lattice`, `genCol`, `genSection`, `genCoarse`, `genChunk`, `genColumn`, `digest` |
 | `js/gen/mesh.js` | `Mesh`, `chunkMesh` (тверде, рідина, рослини, ширяюче каміння; з `step` — груба ґратка з обрізами), `figureParts`, `PIVOT`, `LAMP_AT`, `lampGlow`, `farFlora`, `floraMesh` (з `shadeProxy`), `objShape` |
 | `js/gen/far.js` | плитки далечі (`farMesh`, `FT`) |
 | `js/gen/job.js`, `worker.js`, `client.js`, `queue.js` | роботи генератора (`runJob`: `colSummary`, секція, `flora`, `far`, `lod`, `relit`, `obj`); module worker; пул воркерів (`POOL` = ядра − 2, 1…8; по 8 робіт на воркер; стовпець і його секції — в одного, `workerOf`; упав — роботи наступному, жодного — головний потік); черга — купи пріоритетів з лінивим видаленням |
@@ -270,8 +270,8 @@
 | `js/gen/stand.js` | стенд `?move` |
 | `js/world.js` | закони (кеш), стовпці й секції за всесвітами (`ck`, `sk`), ліміти від дальності (`keepFor`), витіснення (`setCurrent`), `block`, `obst`, `topAt`, `column`, `skyLight`, тіла (`bodiesNear`), `probe`, запити (`wantCol`, `wantSec`, `wantFlora`, `wantFar`), `findSpawn` |
 | `js/occlusion.js` | відсікання закритого гри (`createOcclusion`) |
-| `js/camera.js` | режими `first` / `third`, `basis`, `moveBasis`, `viewProj`, `project`, `chunksInView`; `camHead`, `camCollide`, `CAM_R`; LOD (`LOD_R`, `lodOf`, `colDist`, `setLod`) |
-| `js/textures.js`, `js/gen/materials.js` | текстури шарами (`texturesOf(L)`); номери матеріалів, `TOP_MAT` / `SIDE_MAT` / `LIP_MAT` |
+| `js/camera.js` | режими `first` / `third`, `basis`, `moveBasis`, `viewProj`, `project`, `boxInView`; `camHead`, `camCollide`, `CAM_R`; LOD (`LOD_R`, `lodOf`, `colDist`, `setLod`) |
+| `js/textures.js`, `js/gen/materials.js` | текстури шарами (`texturesOf(L)`); номери матеріалів, `TOP_MAT` / `SIDE_MAT` |
 | `js/anim.js` | анімація фігури (`animate`, `poseMatrices`, `hipH`), руки першої особи `viewArms` |
 | `js/stream.js` | підвантаження (`columnsInCircle`, `colPri`, `farTiles`), `visibleMissing` |
 | `js/sky.js` | небо й час: `dayPhase`, `yearPhase`, `starColor`, `bodiesOf`, `covered`, `phaseOf`, `twilightOf`, `moonLight`, `stormAt`, `skyState`, `applyWeather`, `starsText`, `heldText`; світла `lightsOf`, `pcIntensity`, `REF_Z`, `MIN_LIGHT` |

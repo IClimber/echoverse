@@ -80,12 +80,6 @@ export function overlapSphere(L, cx, cy, cz, R, out = {}) {
   }
   return best < 0 ? null : out;
 }
-// Найменша відстань від точки до трикутників (∞ — порожньо)
-export function minDist(L, cx, cy, cz) {
-  let m = Infinity;
-  for (let i = 0; i < L.n; i++) m = Math.min(m, dist2(cx, cy, cz, L.t, i * 12));
-  return Math.sqrt(m);
-}
 // Найближча точка списку: out = {d, x, y, z, i} або null (список порожній)
 const NQ = [0, 0, 0];
 export function nearest(L, cx, cy, cz, out = {}) {

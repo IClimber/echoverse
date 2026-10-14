@@ -32,7 +32,6 @@ export function initInput(target = window) {
     if (a || /^(Key[WASD]|Arrow)/.test(e.code) || ((e.ctrlKey || e.metaKey) && GAME_KEY.test(e.code))) e.preventDefault();
   });
   target.addEventListener('keyup', (e) => held.delete(e.code));
-  target.addEventListener('blur', () => held.clear());
   target.addEventListener('wheel', (e) => { wheel += e.deltaY; }, { passive: true });
   // Права кнопка: із захопленою мишею — використати; без захоплення — обертати камеру, клацання без руху — використати
   target.addEventListener('mousedown', (e) => {
@@ -53,7 +52,7 @@ export function initInput(target = window) {
     if ((dragging || locked()) && Math.abs(e.movementX) < 250 && Math.abs(e.movementY) < 250) { dragX += e.movementX; dragY += e.movementY; }
   });
   target.addEventListener('contextmenu', (e) => { if (!(e.target instanceof HTMLInputElement)) e.preventDefault(); });
-  target.addEventListener('blur', () => { dragging = false; });
+  target.addEventListener('blur', () => { held.clear(); dragging = false; });   // вікно без фокусу: клавіші й тягнення відпущені
 }
 
 // Рух на екрані: x — праворуч, y — униз (−1…1)

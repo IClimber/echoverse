@@ -1,5 +1,5 @@
 // debug.js — панель F3: зерно, адреса, клітинка, чанк і його відбиток, закони всесвіту, швидкодія.
-import { CS, TYPE_NAMES, BLOCK_NAMES, O_ROCK, O_TREE, digest, tile } from './gen/chunk.js';
+import { CS, SEC, TYPE_NAMES, BLOCK_NAMES, O_ROCK, O_TREE, digest, tile } from './gen/chunk.js';
 import { canLift } from './carry.js';
 import { physOf, STRANGE_NAMES, TIER_NAMES, FAM_NAMES, LEVEL } from './universe.js';
 import { BIOMES } from './gen/biomes.js';
@@ -99,7 +99,6 @@ function moonsLine(L) {
   const M = L.sky.moons.map((m) => `${f0(m.Rkm)} км на ${f0(m.D)} R (${f1(m.period)} діб)`), C = L.comp;
   return `${M.length ? M.join(', ') : 'немає'}${C ? ` · компаньйон: ${COMP[C.type]}, приплив ${pc(C.f)} g, ρ ×${f2(C.rhoR)}, R ×${f2(C.Rr)}` : ''}${L.sky.rings ? ' · кільця' : ''}`;
 }
-// Світло неба: тут (блок тулуба) і поле всесвіту
 // Ліхтарик (L): дальність, конус (від краю до краю), тінь — лише зі скла на лобі в третій особі
 function lampLine(g, R) {
   if (!g.lamp) return 'вимкнено';
@@ -108,6 +107,7 @@ function lampLine(g, R) {
   if (R && R.info && R.info.shadows === 'off') return `${base} · тіні вимкнено`;
   return `${base} · тінь: ${f2((R ? R.stats.lampTris || 0 : 0) / 1e6)} млн трикутників, ${R ? R.stats.lampDraws || 0 : 0} викликів`;
 }
+// Світло неба: тут (блок тулуба) і поле всесвіту
 function lightLine(g) {
   const { world, me } = g, s = world.lightAt(g.d, g.n, Math.floor(me.x), Math.floor(me.y), Math.floor((me.z ?? 0) / LEVEL + 1)), ls = world.lightStats(g.d, g.n);
   const here = s >= 0 ? `${s}/30 (рівень ${(s / 2).toFixed(1).replace('.', ',')}, яскравість ${Math.round(world.skyLight(g.d, g.n, me.x, me.y, (me.z ?? 0) + 0.5) * 100)} %)` : s === -2 ? 'в опаковому' : 'невідомо';
@@ -131,7 +131,7 @@ export function debugText(g, perf, meshCount, cam, R, lod) {
     `середовище ${E ? envLine(E) : '—'}`,
     `місяці     ${moonsLine(L)}`,
     `клітинка   ${c ? `поверхня ${c.h}, ${TYPE_NAMES[c.t]}; під ногами — ${me.ground && under > 0 ? BLOCK_NAMES[under] : '—'}${me.ground ? '' : me.swim ? ', пливе' : ', у повітрі'}` : '—'}`,
-    `чанк       ${cx}, ${cy}, секція ${Math.floor(kf / 16)}  відбиток стовпця ${C ? digest(C) : '—'}`,
+    `чанк       ${cx}, ${cy}, секція ${Math.floor(kf / SEC)}  відбиток стовпця ${C ? digest(C) : '—'}`,
     `дивність   ${STRANGE_NAMES[L.strange.cls]} (qs ${L.strange.qs.toFixed(2)})${Object.keys(L.tiers).length ? '; ' + Object.entries(L.tiers).map(([k, t]) => `${k} — ${TIER_NAMES[t]}`).join(', ') : ''}`,
     `закони     море ${L.seaE.toFixed(2)}, рельєф ${L.amp}, t ${L.temp.toFixed(2)}, вологість ${L.wet.toFixed(2)}`,
     `рідина     ${L.liquid.name}, ${L.liquid.tC} °C, густина ${L.liquid.density}${L.liquid.swim ? ', тримає' : ', не тримає'}${L.liquid.danger ? ' — небезпечна: ' + L.liquid.danger : ''}${me.swim ? '  (пливе)' : ''}, в'язкість ${L.liquid.visc.toFixed(1)}${L.liquid.tension ? ', поверхневий натяг' : ''}`,

@@ -158,22 +158,6 @@ export function push(b, j) {
   if (b.ax !== undefined) b.ax = null;             // удар зриває з місця: поле підхопить там, де тіло спиниться
 }
 
-// Промінь з (ox, oy, oz) у напрямку d (одиничний) до maxT: найближче тіло зі списку й відстань, або null
-export function rayBody(list, ox, oy, oz, d, maxT) {
-  let best = null, bt = maxT;
-  for (const b of list) {
-    let t0 = 0, t1 = bt;
-    for (const [o, dd, c, hh] of [[ox, d[0], b.x, b.hx], [oy, d[1], b.y, b.hy], [oz, d[2], b.z, b.hz]]) {
-      if (Math.abs(dd) < 1e-9) { if (o < c - hh || o > c + hh) { t0 = 1; t1 = 0; } continue; }
-      let a = (c - hh - o) / dd, e = (c + hh - o) / dd;
-      if (a > e) [a, e] = [e, a];
-      t0 = Math.max(t0, a); t1 = Math.min(t1, e);
-    }
-    if (t0 <= t1 && t0 < bt) { bt = t0; best = b; }
-  }
-  return best ? { b: best, t: bt } : null;
-}
-
 // Зіткнення тіл між собою (після кроку тіл): сітка сусідства 4×4 од. → пари; перекриття коробок → вісь найменшого
 // проникнення; розсунути за оберненими масами (у блоки не штовхаємо: що впирається — стоїть, рухається інше), імпульс
 // уздовж нормалі з відскоком і тертям (дотичний, не більше 0,5 · тертя · нормальний). Сплячі — як нерухомі перешкоди;

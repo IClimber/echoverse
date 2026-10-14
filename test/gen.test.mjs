@@ -4,12 +4,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { hash2, hash3, hash4, hashStr, rng, unit } from '../js/rng.js';
-import { noise2, noise3, fbm2, fbm3 } from '../js/noise.js';
+import { noise2, noise3, fbm3 } from '../js/noise.js';
 import { lawsOf, hsl, GEN, SEA } from '../js/universe.js';
 import { genChunk, digest, tile, ci, CS, T_WATER, blocks } from '../js/gen/chunk.js';
 import { chunkMesh } from '../js/gen/mesh.js';
 import { findSpawn } from '../js/world.js';
 import { GOLD, SPOTS } from '../js/golden.js';
+
+// клітинки з предметом, що заважає ходити (дерево, камінь на землі)
+const solidMask = (C) => { const m = new Uint8Array(CS * CS); for (const o of C.obj) if (blocks(o.k)) m[o.y * CS + o.x] = 1; return m; };
 
 test('хеші й PRNG — еталонні значення', () => {
   assert.equal(hash2(1, 2), 3278122630);
@@ -32,7 +35,6 @@ test('PRNG рівномірний, unit — [0, 1)', () => {
 test('шум — еталонні значення, межі, неперервність', () => {
   assert.equal(noise2(7, 0.3, -1.7), -0.10684699798626311);
   assert.equal(noise3(7, 12.25, -3.5, 0.75), -0.008036613464355469);
-  assert.equal(fbm2(9, 1.1, 2.2, 4), 0.20744540592679994);
   assert.equal(fbm3(9, -1.1, 2.2, 0.03, 3), 0.2406274916469641);
   for (let i = 0; i < 2000; i++) {
     const x = i * 0.137 - 50, y = i * 0.071 - 20, a = noise3(3, x, y, i * 0.01);
@@ -177,7 +179,7 @@ test('гравітація: з радіуса й густини планети (
 
 test('левітуючі породи: біля старту немає; трапляються з різними умовами; ширяюче каміння — лише з такої породи, де вона левітує; острови — з неї ж', async () => {
   const { floats, gravityAt } = await import('../js/universe.js');
-  const { solidMask, O_FLOAT, B_FLOAT } = await import('../js/gen/chunk.js');
+  const { O_FLOAT, B_FLOAT } = await import('../js/gen/chunk.js');
   const seed = hashStr('гравітація'), conds = new Set();
   let withFloat = null, islands = 0, anomU = null;
   for (let n = -800; n <= 800; n++) {
@@ -355,7 +357,7 @@ test('біоми й види: у всесвіті багато біомів і �
 });
 
 test('рослини: дерева не впритул (між стовбурами — прохід), трава не заважає; шаблони всіх форм — валідні й у бюджеті', async () => {
-  const { O_TREE, O_COVER, solidMask } = await import('../js/gen/chunk.js');
+  const { O_TREE, O_COVER } = await import('../js/gen/chunk.js');
   const { template, footprint } = await import('../js/gen/plants.js');
   const { FORMS } = await import('../js/gen/flora.js');
   const seed = hashStr('ліс');

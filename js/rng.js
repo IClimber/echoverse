@@ -47,4 +47,3 @@ export function rng(seed) {
 export const range = (r, lo, hi) => lo + (hi - lo) * r();
 export const int = (r, lo, hi) => lo + Math.floor(r() * (hi - lo + 1));
 export const pick = (r, arr) => arr[Math.floor(r() * arr.length)];
-export const chance = (r, p) => r() < p;

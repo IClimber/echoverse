@@ -46,14 +46,6 @@ export function noise3(s, x, y, z) {
 // fBm: октави з частотою ×2 і амплітудою × gain; результат нормовано до амплітуди першої октави.
 // Зерно кожної октави своє, тож октави не корелюють.
 const octSeed = (s, i) => s + Math.imul(i, 0x9e3779b9) | 0;
-export function fbm2(s, x, y, oct, gain = 0.5) {
-  let sum = 0, amp = 1, norm = 0, f = 1;
-  for (let i = 0; i < oct; i++) {
-    sum += amp * noise2(octSeed(s, i), x * f, y * f);
-    norm += amp; amp *= gain; f *= 2;
-  }
-  return sum / norm;
-}
 export function fbm3(s, x, y, z, oct, gain = 0.5) {
   let sum = 0, amp = 1, norm = 0, f = 1;
   for (let i = 0; i < oct; i++) {

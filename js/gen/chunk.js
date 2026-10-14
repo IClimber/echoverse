@@ -24,8 +24,6 @@ export const blocks = (o) => o === O_TREE || o === O_ROCK;
 export const SURF_Z = SEA * LEVEL - 0.15;     // поверхня рідини й льоду — трохи нижча за рівень моря
 
 const clamp01 = (v) => v < 0 ? 0 : v > 1 ? 1 : v;
-export const isWater = (t) => t === T_WATER;
-export const topZ = (h, t) => t === T_ICE ? SURF_Z : h * LEVEL;   // висота твердої поверхні (у водоймі — дна)
 
 // Висота 0…1 у точці (x, y). coarseE — висота без дрібниць (для родин кривої 3.1), fineE — внесок дрібниць (e − coarseE;
 // для клімату: сніг не за кожним горбиком). Ерозія: пагорби й дрібниці ×0,25…1,75 областями (пласкі рівнини ↔
@@ -276,9 +274,9 @@ export function tile(L, x, y, out = {}, lite = false) {
   const e = carve(L, px, py, L.seaE + bl * span, W, span);
   const xr = rocks3(L, px, py), mt = mountain(L, px, py), xb = peaks(L, px, py, out) + mt + xr, ex = e + xb * span;
   if (ex < L.seaE) {
-    // Дно: що далі від берега (нижче рівня моря), то глибше; біля берега — мілина (рівень SEA − 1)
-    // дно: біля берега мілко, далі — глибина океанів закону (до сотень блоків); під водою не порожнеча
-    // (глибина закону — від повільного шуму материків: далеко від них глибоко; від берега — схилом, не обривом)
+    // Дно: біля берега мілина (рівень SEA − 1), далі від берега (нижче рівня моря) — глибше, до глибини океанів закону
+    // (сотні блоків; від повільного шуму материків: далеко від них глибоко; від берега — схилом, не обривом); під водою
+    // не порожнеча
     const M = L.mount;
     let deep = 0;
     if (M) {
@@ -380,7 +378,7 @@ export function climbSide(block, x, y, k) {
 const CLIMB_N = [[-1, 0], [1, 0], [0, -1], [0, 1]];
 const TOP_BLOCK = [B_BED, B_ICE, B_SAND, B_GRASS, B_DRY, B_DESERT, B_SNOW, B_ROCK, B_MUD];   // за типом поверхні T_*
 const SUB_BLOCK = [B_SOIL, B_SOIL, B_SANDSTONE, B_SOIL, B_SOIL, B_SANDSTONE, B_SOIL, B_STONE, B_SOIL];
-// Об'єм блоків (секція чи стовпець): x, y ∈ −1…CS (рамка), k ∈ −1…nk (рамка знизу й згори); індекс — стовпець
+// Об'єм блоків (секція чи стовпець): x, y ∈ −FR…CS+FR−1, k ∈ −FR…nk+FR−1 (рамка FR з усіх боків); індекс — стовпець
 // за стовпцем. k — локальний (від k0 об'єму)
 export const bv = (x, y, k, nk) => ((y + FR) * CW + x + FR) * (nk + 2 * FR) + k + FR;
 export const bi = (x, y, k) => bv(x, y, k, H);           // стовпець 0…H−1 (тести, відбитки)
@@ -662,7 +660,6 @@ export function genChunk(L, cx, cy) {
   return { d: L.d, n: L.n, cx, cy, h: col.h, t: col.t, v: col.v, bm: col.bm, top: shelterTop(col, L), sky: col.sky, b: V.b, k0: 0, nk: H, obj: col.obj, sp: col.sp };
 }
 
-// Секція (cx, cy, cz) стовпця col: блоки SEC заввишки; порожня (усе повітря) — {empty: true}
 // Секція (cx, cy, cz) стовпця col: блоки SEC заввишки; усе повітря — {empty: true}, уся тверда (з рамкою: граней
 // немає) — {empty: true, solid: true}
 export function genSection(L, col, cz) {
@@ -728,13 +725,6 @@ export function genCoarse(L, col, cz, s) {
     if (own && I < n && J < n) for (let k = SEC - 1; k >= 0; k--) if (run[k + s] === B_LIQ && run[k + s + 1] === B_AIR) { lt[i] = k0 + k; liq++; break; }
   }
   return { b, h, bm, v, lt, n, s, k0, empty: !liq && (air === W * W * W || solid === W * W * W) };
-}
-
-// Клітинки з предметом, що заважає ходити (дерево, камінь на землі)
-export function solidMask(C) {
-  const m = new Uint8Array(CS * CS);
-  for (const o of C.obj) if (blocks(o.k)) m[o.y * CS + o.x] = 1;
-  return m;
 }
 
 // Відбиток чанка (свої клітинки, блоки об'єму й предмети) — для тестів і F3: однаковий у всіх рушіях

@@ -1,4 +1,4 @@
-// Ізометрія, рух гравця, пристрій для стрибків, формат файлу збереження.
+// Рух гравця, камера, пристрій для стрибків, формат файлу збереження.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { LEVEL } from '../js/universe.js';
@@ -76,7 +76,7 @@ test('рух: між двома деревами по діагоналі мож�
   const P = world(['22222', '22T22', '222T2', '22222']);
   assert.equal(hits(P, 2.5, 1.5, LEVEL * 2), true);
   assert.equal(hits(P, 2.95, 1.05, LEVEL * 2), false);
-  // рух (1, 0) у базисі ізометрії — уздовж (1, −1)/√2; через середину між стовбурами (3, 2)
+  // рух (1, 0) у типовому базисі (азимут 45°) — уздовж (1, −1)/√2; через середину між стовбурами (3, 2)
   const p = man(P, 2, 3);
   run(p, 1, 0, 40, P);
   assert.ok(p.x > 3.2 && p.y < 1.8, `застряг у (${p.x.toFixed(2)}, ${p.y.toFixed(2)})`);
@@ -195,7 +195,7 @@ test('файл збереження: туди й назад, перевірка 
 });
 
 test('камера: базис руху; третя особа дивиться на ціль', async () => {
-  const { createCamera, viewProj, project, moveBasis, chunksInView, THIRD } = await import('../js/camera.js');
+  const { createCamera, viewProj, project, moveBasis, THIRD } = await import('../js/camera.js');
   const c = createCamera(THIRD), W = 1600, H = 900;                         // азимут 45° — від createCamera
   const [r, d] = moveBasis(c);
   assert.ok(Math.abs(r[0] - Math.SQRT1_2) < 1e-12 && Math.abs(r[1] + Math.SQRT1_2) < 1e-12 && Math.abs(d[0] - d[1]) < 1e-12);
@@ -203,8 +203,6 @@ test('камера: базис руху; третя особа дивиться 
   const at = project(v.m, [0, 0, 0], W, H);
   assert.ok(Math.abs(at[0] - W / 2) < 1e-6 && Math.abs(at[1] - H / 2) < 1e-6);   // ціль — у центрі екрана
   assert.equal(project(v.m, [v.eye[0] * 2, v.eye[1] * 2, v.eye[2] * 2], W, H), null);  // за камерою — не видно
-  const list = chunksInView(v.m, [0, 0, 0], 112, [0, 15]);
-  assert.ok(list.length > 10 && list.length < 200 && list[0].dist2 <= list[list.length - 1].dist2);
 });
 
 test('текстури: усі шари, шар 0 нейтральний, різні всесвіти — різні візерунки', async () => {
@@ -483,7 +481,7 @@ test('нові сили: вітер — чесний опір (на землі �
 test('тіла: левітуюче висить на висоті появи, звичайне падає й лежить; удар — легке відлітає, важке ледь зрушить; на тіло можна стати', async () => {
   const { configureBodies } = await import('../js/engine/physics/bodies.js'); const { solidB: sB } = await import('../js/gen/chunk.js'); const pl = await import('../js/player.js'); const { LEVEL: LV } = await import('../js/universe.js');
   configureBodies({ level: LV, solid: sB, gravity: pl.GRAVITY, refMass: pl.PLAYER_MASS, refArea: pl.PLAYER_AREA });
-  const { makeBody, stepBody, push, rayBody } = await import('../js/engine/physics/bodies.js'); const { HIT_IMPULSE } = pl;
+  const { makeBody, stepBody, push } = await import('../js/engine/physics/bodies.js'); const { HIT_IMPULSE } = pl;
   const P = world(Array(40).fill('4'.repeat(40))), env = { g: 1, vT: 20, bounce: 0, friction: 1, wind: [0, 0] };
   const run = (b, n) => { for (let i = 0; i < n; i++) stepBody(b, 1 / 60, P, env); };
   const fl = makeBody({ x: 20.5, y: 20.5, z: 4 * LEVEL + 2, hx: 0.2, hy: 0.2, hz: 0.15, lift: 1.3, hover: 1.5 });
@@ -498,8 +496,6 @@ test('тіла: левітуюче висить на висоті появи, з
   push(small, [HIT_IMPULSE, 0, 0]); push(big, [HIT_IMPULSE, 0, 0]);
   run(small, 60); run(big, 60);
   assert.ok(small.x - x0 > 1 && big.x - x1 < 0.05, `легке ${small.x - x0}, важке ${big.x - x1}`);
-  const hitR = rayBody([big, fl], 18.5, 20.5, fl.z, [1, 0, 0], 3);
-  assert.equal(hitR.b, fl);
   // гравець стає на тіло
   const Pb = { ...P, bodies: () => [fl] };
   assert.ok(Math.abs(support(Pb, fl.x, fl.y, fl.z + fl.hz + 0.5).z - (fl.z + fl.hz)) < 1e-9);

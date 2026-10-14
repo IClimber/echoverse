@@ -7,10 +7,9 @@ export const LAYERS = 25;
 // проріджування малих рослин 1…THIN_N (0 — не проріджувати): рушій не малює вершину далі від цілі камери, ніж
 // межа між eco_thin.x (мітка 0) і eco_thin.y (мітка THIN_N) — трава й квіти до краю кола зблизька рідшають поштучно
 export const MAT_BITS = 5, THIN_N = 2047;
-// За типом поверхні (T_WATER … T_BED): верх (у водоймі — дно), бічна грань, верхня смуга бічної грані (край дерну)
+// За типом поверхні (T_WATER … T_BED): верх (у водоймі — дно), бічна грань
 export const TOP_MAT = [M_BED, M_ICE, M_SAND, M_LUSH, M_DRY, M_DESERT, M_SNOW, M_ROCK, M_MUD];
 export const SIDE_MAT = [M_SOIL, M_SOIL, M_SANDSIDE, M_SOIL, M_SOIL, M_SANDSIDE, M_CLIFF, M_CLIFF, M_SOIL];
-export const LIP_MAT = [M_SOIL, M_ICE, M_SAND, M_LIP, M_LIP, M_DESERT, M_SNOW, M_CLIFF, M_SOIL];
 // Таблиця матеріалів для рушія (engine/graphics/chunks.js, eco_mat): [номер, емісія 0…1, гойдання вітром, поворот клітинок
 // текстури (0 — будь-який, 1 — лише 180°, 2 — без повороту), плин текстури (× (0,05; 0,03) за секунду)]. Решта — нулі.
 // Вода й лава пливуть (лава — повільно й світиться сама), край дерну — без повороту; брижі, пласти й кора — лише на 180°;

@@ -641,8 +641,6 @@ function boot(renderer) {
   // Випадкова адреса (для перевірок): номер — у межах ±100 000, з глибиною — 0…12
   const rnd = (k) => { const a = new Uint32Array(1); crypto.getRandomValues(a); return a[0] % k; };
 
-  // Тіла біля гравця (ширяюче каміння): крок фізики; гравець, що стоїть на тілі, тисне його вагою й їде разом з ним;
-  // тіло, у яке йде гравець, штовхається (легке — відкотиться, важке — ні)
   // Вітер біля гравця: погода в його точці (поле, weather.js) × висота й відкритість (середня висота поверхні в колі
   // 48 м — після зсуву > 8 м); hk — множник висоти гравця (тіла — свій)
   function windHere(L) {
@@ -654,6 +652,8 @@ function boot(renderer) {
   }
   // Висота ґрунту (верх стовпця) — для зворотних плям тяжіння (worldphys.js)
   const groundZ = (x, y) => g.world.topAt(g.d, g.n, Math.floor(x), Math.floor(y));
+  // Тіла біля гравця (ширяюче каміння): крок фізики; гравець, що стоїть на тілі, тисне його вагою й їде разом з ним;
+  // тіло, у яке йде гравець, штовхається (легке — відкотиться, важке — ні)
   function simBodies(dt, L, W) {
     const me = g.me, reg = g.world.ents(g.d, g.n), ob = me.ground ? me.onBody : null;
     let near = reg.awake();
@@ -709,7 +709,6 @@ function boot(renderer) {
     const me = g.me;
     if (g.carry) { drop(); me.takeAt = now; return; }
     const a = g.aim;
-    if (a === undefined) return;
     if (!a) return;
     if (a.kind !== 'body') { toast('Поки що взяти можна лише камінь'); return; }
     const b = a.body, q = canLift(b, g.ph ? g.ph.g : 1);

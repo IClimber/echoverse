@@ -17,7 +17,7 @@ const SEG = PIVOT.hip - PIVOT.knee;  // довжина стегна й гомі�
 // брусок: нахилена, вона спирається на ребро — переднє, коли ступня позаду, заднє — коли попереду)
 export const hipH = (a, b) => SEG * (Math.cos(a) + Math.cos(a - b)) + (a - b < 0 ? 0.055 : 0.075) * FIG_K * Math.abs(Math.sin(a - b));
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-const KEYS = ['legL', 'legR', 'kneeL', 'kneeR', 'armL', 'armR', 'up', 'tuck', 'bob', 'lean', 'waist', 'spread', 'drop', 'shift', 'lookP', 'lookY'];
+const KEYS = ['legL', 'legR', 'kneeL', 'kneeR', 'armL', 'armR', 'up', 'bob', 'lean', 'waist', 'spread', 'drop', 'shift', 'lookP', 'lookY'];
 
 // me — стан гравця (player.js) і ще: look {p — нахил погляду (+ — униз), y — поворот відносно тіла}, carry (тіло в руках),
 // hitAt / throwAt / takeAt / useAt — мітки дій (мс)
@@ -118,7 +118,7 @@ export function poseMatrices(a, ox, oy, oz, yaw) {
     const y = side * PIVOT.armY, z = PIVOT.shoulder;
     return chain(torso, translate(0, y, z), rotX(side * (a.spread || 0)), rotY(-fwd), translate(0, -y, -z));
   };
-  const tL = thigh(a.legL + a.tuck), tR = thigh(a.legR + a.tuck * 0.4), both = (a.both || 0) * 1.4;
+  const tL = thigh(a.legL), tR = thigh(a.legR), both = (a.both || 0) * 1.4;
   return {
     core: torso,
     head: chain(torso, translate(0, 0, PIVOT.neck), rotZ(a.lookY || 0), rotY(a.lookP || 0), translate(0, 0, -PIVOT.neck)),

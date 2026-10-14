@@ -1,6 +1,6 @@
 // save.js — збереження світів у IndexedDB і експорт/імпорт файлом.
-// Світ = зерно + зміни: незмінені чанки не зберігаються (генеруються знову). Сховище chunks — під зміни (етап 3).
-// Запис світу: {id, name, seedText, seed, gen, created, played, player: {d, n, x, y}, history: [[d, n], …]}.
+// Світ = зерно + зміни: незмінені чанки не зберігаються (генеруються знову). Сховище chunks — під зміни (п. 6 roadmap).
+// Запис світу: {id, name, seedText, seed, gen, created, played, player: {d, n, x, y, z?}, clock?, history: [[d, n], …]}.
 
 const DB = 'echoverse', VER = 1;
 export const FORMAT = 'echoverse', FILE_V = 1;

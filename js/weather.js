@@ -65,9 +65,6 @@ export function prevailing(L, clock = 0) {
   return { dir: [A.e[0] * dx + A.nn[0] * dy, A.e[1] * dx + A.nn[1] * dy], calm: 0.5 + 0.5 * ss(0, 5, Math.min(r, W - r)) };
 }
 
-// Погода в точці (x, y) у мить clock: {kind, clouds, vis, precip, dust, dim, wind [x, y] (м/с, рівнина), windK, flash, q,
-// drift [x, y] (м) — на скільки поле хмар зсунулось за вітром від clock 0: хмари неба пливуть з ним рівномірно};
-// prev — попередній результат у цій точці (гістерезис назви: біля порогу й першу хвилину стану — як була)
 // Поля погоди в точці: хмарне q, туман qf, пил qd (рівномірні 0…1) і параметри вигляду P (плавно через пороги)
 function fields(L, clock, x, y, only) {
   const A = L.air, t = clock * (L.phys ? L.phys.time : 1), Pw = prevailingC(L, clock), v0 = A.wind;
@@ -92,6 +89,9 @@ function prevailingC(L, clock) {
   return L._pw;
 }
 
+// Погода в точці (x, y) у мить clock: {kind, clouds, vis, precip, dust, dim, wind [x, y] (м/с, рівнина), windK, flash, q,
+// drift [x, y] (м) — на скільки поле хмар зсунулось за вітром від clock 0: хмари неба пливуть з ним рівномірно};
+// prev — попередній результат у цій точці (гістерезис назви: біля порогу й першу хвилину стану — як була)
 export function weatherAt(L, clock, x = 0, y = 0, prev = null) {
   if (L.air.vacuum) return { kind: W_CLEAR, clouds: 0, vis: 1, precip: 0, dust: 0, dim: 0, wind: [0, 0], windK: 0, flash: 0, q: 0, since: clock, drift: [0, 0] };
   const { q, qf, qd, P, Th, Pw, t, sx, sy, st, v0 } = fields(L, clock, x, y), [t1, t2, t3] = Th.t;
@@ -128,8 +128,8 @@ export function windHeightK(z, zbar) {
 }
 
 // Блискавка в мить clock біля (x, y): клітини 1 км × відрізки 0,5 с, імовірність 0,005 × сила грози в клітині (у пиловій
-// бурі — × DUST_BOLT); ціль —
-// найвища точка в радіусі 30 м (висоти tile) — {x, y, t0 (початок), k (сила 0…1)} найближча в радіусі R чи null
+// бурі — × DUST_BOLT); ціль — найвища точка в радіусі 30 м (висоти tile). {x, y, t0 (початок), k (сила 0…1)} найближча
+// в радіусі R чи null
 const DUST_BOLT = 0.04;
 export function lightningNear(L, clock, x, y, R = 3000) {
   if (L.air.vacuum) return null;
