@@ -15,7 +15,8 @@ import { Mesh } from '../gen/mesh.js';
 import { texturesOf, TEX } from '../render/textures.js';
 import { LAYERS, MAT_TABLE, M_LUSH, M_DRY, M_DESERT, M_SNOW, M_ROCK, M_SAND } from '../gen/materials.js';
 import { createCamera, basis } from '../player/camera.js';
-import { REF_Z, MIN_LIGHT, pcIntensity } from '../env/sky.js';
+import { REF_Z, MIN_LIGHT, pcIntensity, starColor } from '../env/sky.js';
+import { skyOptics } from '../env/optics.js';
 
 export async function runFlora() {
   const q = new URLSearchParams(location.search);
@@ -58,13 +59,14 @@ export async function runFlora() {
   const node = new pc.GraphNode(), mi = new pc.MeshInstance(floatMesh(G, M.finish()), mat, node);
   node.setLocalPosition(-cx, -cy, -2);                   // центр галереї — на початку координат
   G.root.addChild(node); G.layers.world.addMeshInstances([mi]);
-  // Світло: одне напрямлене з тінями (напрям і колір — закони всесвіту); розсіяне без неба — scene.ambientLight
+  // Світло: одне напрямлене з тінями (напрям — закони всесвіту, колір і частка розсіяного — оптика неба для головної зорі
+  // на висоті REF_Z, optics.js); розсіяне без неба — scene.ambientLight
   // (lighting/ambient-light). Сили — як у грі (sky.js lightsOf): верх при сонці на REF_Z — рівно колір палітри
-  const Lt = L.light, LG = createLights(G, { shadows: q.get('shadows') || 'pcf3' });
+  const Lt = { az: L.light.az, ...skyOptics(L, starColor(L.star.T), Math.asin(REF_Z)) }, LG = createLights(G, { shadows: q.get('shadows') || 'pcf3' });
   const dir = [0.32 * Math.cos(Lt.az) - 0.55 * Math.sin(Lt.az), 0.32 * Math.sin(Lt.az) + 0.55 * Math.cos(Lt.az), REF_Z];
   const rho = Lt.amb / (Lt.amb + (1 - Lt.amb) * REF_Z), Ed = (1 - rho ** 2.2) / REF_Z;
   LG.setDirectionalCount(1); LG.setShadowDistance(400);
-  LG.setDirectional(0, { dir, color: Lt.col.map((x) => x / 255), intensity: pcIntensity(Ed) });
+  LG.setDirectional(0, { dir, color: Lt.sun.map((x) => x / 255), intensity: pcIntensity(Ed) });
   G.scene.ambientLight = new pc.Color(rho, rho, rho);
   G.cam.clearColor = new pc.Color(...L.pal.sky.map((x) => x / 255));
   MT.setFrame({ minLight: MIN_LIGHT ** 2.2, time: 0, target: [0, 0, 0], eye: [0, 0, 0], fade: [-2, -1], cut2: [0, 0, 0, 0], seam: 1e6, curve: 0, wind: [0, 0, 0, 0] });
