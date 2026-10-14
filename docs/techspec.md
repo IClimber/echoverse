@@ -46,6 +46,7 @@ node test/shots.mjs > shots.log 2>&1        # сцени, помилки кон�
 node test/shots.mjs --sw > shots.log 2>&1   # програмний рендер: лише помилки, к/с так не міряти
 node test/perf.mjs --api=webgpu --ports=8125,8124   # к/с A/B: версії — сервери на своїх портах (worktree)
 node test/pixels.mjs --api=webgl2 --ports=8125,8124 # попіксельне порівняння кадрів двох версій
+node test/stands.mjs > stands.log 2>&1       # стенди без помилок, ?strip — відбитки
 pgrep -fc "[r]emote-debugging-port"         # після тестів — 0
 ```
 Повні параметри — у шапці кожного скрипта. Вивід — у файл, не через `| tail`; нового рядка понад хвилину — зависання.
@@ -58,4 +59,4 @@ pgrep -fc "[r]emote-debugging-port"         # після тестів — 0
 ## Перевірка, що все працює
 1. `npm test` — без помилок.
 2. `python3 serve.py` і `node test/shots.mjs` (без GPU — `--sw`) — сцени без помилок консолі.
-3. `http://localhost:8123/?strip` у Chrome (і Firefox) — «усі 12 відбитків збігаються».
+3. `node test/stands.mjs` — стенди без помилок, `?strip` — «усі 12 відбитків збігаються» (Firefox — вручну `http://localhost:8123/?strip`).
