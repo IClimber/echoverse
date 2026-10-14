@@ -2,11 +2,12 @@
 // розсіяного світла). d — одиничний напрям у світі гри (z угору); результат — лінійний колір (кольори неба в законах —
 // екранні, тож ^2,2). З ECO_BAKE (запікання): без дисків і ореолів сонць, місяців, зір, сяйва, спалаху; нижче обрію —
 // колір обрію × 0,3 (земля відбиває менше за небо); не темніше 0,02 (чорне небо без повітря — не нуль); × eco_bakeK (калібрування сили розсіяного, js/scene.js).
-// Уніформи — через dev.scope (js/scene.js): uZen, uHor, uMain, uDusk (rgb, сила), uSun[3] (напрям, кутовий радіус),
-// uSunCol[3] (колір прямого світла зорі — диск її кольору, яскравість), uMoon[4] (місяці й компаньйон), uMoonCol[4] (rgb, тип: 0 — місяць, 1 — газовий гігант,
+// Уніформи — через dev.scope (js/scene.js): uZen, uHor, uDuskDir (напрям на сонце заходу — сяйво), uDusk (rgb, сила), uSun[3] (напрям, кутовий радіус),
+// uSunCol[3] (колір прямого світла зорі — диск її кольору, яскравість), uSunSp[3] (світло зорі на тілах: колір × яскравість поза
+// нашим повітрям, справжній кутовий радіус), uSunSh[3] (світло в тіні планети від цього сонця: заломлене повітрям; без повітря — 0), uMoon[4] (місяці й компаньйон), uMoonCol[4] (rgb, тип: 0 — місяць, 1 — газовий гігант,
 // 2 — кам'яний, 3 — крижаний), uMoon2[4] (другий колір візерунка, радіус планети в радіусах тіла), uMoonA[4] / uMoonB[4]
 // (вісь і нульовий меридіан тіла: візерунок компаньйона — у його системі — повернутий до нас одним боком чи крутиться;
-// .w — півширина півтіні, кутова, і відстань до тіла в його радіусах), uShade (світло в тіні планети: заломлене повітрям; без повітря — 0), uNSun, uNMoon, uDay, uStars (яскравість, відтінок),
+// .w — масштаб розмірів тіла (10 — місяць, 1 — компаньйон) і відстань до тіла в його радіусах), uNSun, uNMoon, uDay, uStars (яскравість, відтінок),
 // uCel (обертання зоряного неба), uRing (r0, r1, непрозорість, смуг), uRingCol, uPole, uCloud (хмарність, зсув x, y,
 // темність), uCloudCol, uFlash, uAur (напрям на магнітний полюс x, y, сила, час), uAurCol, uAurG (відстань до середини овалу вздовж uAur.xy, км;
 // радіус планети, км; півширина овалу, км), uFwd (погляд камери — диски світил у площині кадру), uCloudC
@@ -21,16 +22,17 @@
 export const SKY_GLSL = `
 uniform vec3 uZen;
 uniform vec3 uHor;
-uniform vec3 uMain;
+uniform vec3 uDuskDir;
 uniform vec4 uDusk;
 uniform vec4 uSun[3];
 uniform vec4 uSunCol[3];
+uniform vec4 uSunSp[3];
+uniform vec4 uSunSh[3];
 uniform vec4 uMoon[4];
 uniform vec4 uMoonCol[4];
 uniform vec4 uMoon2[4];
 uniform vec4 uMoonA[4];
 uniform vec4 uMoonB[4];
-uniform vec3 uShade;
 uniform int uNSun;
 uniform int uNMoon;
 uniform float uDay;
@@ -107,7 +109,7 @@ vec3 ecoSky(vec3 d) {
 #endif
   float above = smoothstep(-0.02, 0.01, uph);
   vec3 c = uph < 0.0 ? uHor * (1.0 + uph * 0.35) : mix(uHor, uZen, smoothstep(0.0, 0.55, uph));
-  float g = max(dot(d, uMain), 0.0);
+  float g = max(dot(d, uDuskDir), 0.0);
   c += uDusk.rgb * uDusk.a * (pow(g, 5.0) * 0.6 + pow(g, 40.0) * 0.4) * smoothstep(-0.25, 0.05, uph);
 #ifndef ECO_BAKE
   vec3 c0 = c;                                   // небо перед світилами (без зір)
@@ -160,20 +162,29 @@ vec3 ecoSky(vec3 d) {
     if (e.w < 1.0) {
       vec3 n = ecoBodyN(e.xyz, uMoon[i].xyz, uMoon[i].w, e.w), fa = uMoonA[i].xyz, fb = uMoonB[i].xyz;
       vec3 nb = vec3(dot(n, fb), dot(n, cross(fa, fb)), dot(n, fa));   // нормаль у системі тіла: візерунок обертається з ним
-      float lit = smoothstep(-0.05, 0.15, dot(n, uMain)), ty = uMoonCol[i].a;
+      float ty = uMoonCol[i].a;
       vec3 mc = uMoonCol[i].rgb;
       if (ty > 0.5 && ty < 1.5) mc = mix(mc, uMoon2[i].rgb, smoothstep(0.3, 0.7, 0.5 + 0.5 * sin(nb.z * 16.0 + ecoFbm(nb.xy * 4.0 + nb.z * 3.0) * 2.5)));
       else if (ty > 1.5 && ty < 2.5) mc = mix(mc, uMoon2[i].rgb, smoothstep(0.48, 0.56, ecoFbm(nb.xy * 3.0 + nb.z * 5.0 + 3.0)));
       else if (ty > 2.5) mc = mix(mc, uMoon2[i].rgb, 0.4 * smoothstep(0.45, 0.65, ecoFbm(nb.xy * 6.0 + nb.z * 2.0)));
-      // тінь планети: циліндр радіусом Rp від головного сонця. Точка тіла (у радіусах тіла від ока) — Dm·o + n, центр
-      // планети — під оком на Rp; t — глибина за планетою, r — відстань від осі тіні; півтінь — ±t·(кутовий радіус сонця)
-      // (не вужча за піксель); затемнення — від краю півтіні до тіні, глибше за вершину конуса тіні — частка (Rp / w)².
-      // Rp, Dm — з CPU (uMoon2.a, uMoonB.w): на піксель диска — кілька множень
+      // освітлення всіма сонцями (14.10.2026): кожне — своїм кольором і яскравістю поза нашим повітрям (uSunSp) зі свого
+      // боку; тінь планети від кожного — циліндр радіусом Rp уздовж напряму на сонце. Точка тіла (у радіусах тіла від ока)
+      // — Dm·o + n, центр планети — під оком на Rp; t — глибина за планетою, r — відстань від осі тіні; півтінь —
+      // ±t·(масштаб тіла × справжній кутовий радіус сонця) (не вужча за піксель); затемнення — від краю півтіні до тіні,
+      // глибше за вершину конуса тіні — частка (Rp / w)²; світло в тіні — заломлене повітрям (uSunSh). Внески — лінійна
+      // сума (одне біле сонце — як до 14.10.2026). Rp, Dm — з CPU (uMoon2.a, uMoonB.w): на піксель і сонце — кілька множень
       float Dm = uMoonB[i].w, Rp = uMoon2[i].a;
-      vec3 Q = Dm * uMoon[i].xyz + n + vec3(0.0, 0.0, Rp);
-      float t = -dot(Q, uMain), r = length(Q + t * uMain), w = max(t * uMoonA[i].w, 0.002 * Dm);
-      float sha = t > 0.0 ? smoothstep(0.0, 1.0, (Rp + w - r) / (2.0 * max(min(Rp, w), 1e-6))) * min(1.0, Rp * Rp / (w * w)) : 0.0;
-      c = mix(c, mix(c0, mc * (0.14 + 0.86 * lit * mix(vec3(1.0), uShade, sha)), 1.0 - 0.45 * uDay), ecoEdge(e.w, uMoon[i].w));
+      vec3 Q = Dm * uMoon[i].xyz + n + vec3(0.0, 0.0, Rp), E = vec3(0.0);
+      for (int k = 0; k < 3; k++) {
+        if (k >= uNSun) break;
+        vec3 sd = uSun[k].xyz;
+        float lit = smoothstep(-0.05, 0.15, dot(n, sd));
+        if (lit <= 0.0) continue;
+        float t = -dot(Q, sd), r = length(Q + t * sd), w = max(t * uMoonA[i].w * uSunSp[k].w, 0.002 * Dm);
+        float sha = t > 0.0 ? smoothstep(0.0, 1.0, (Rp + w - r) / (2.0 * max(min(Rp, w), 1e-6))) * min(1.0, Rp * Rp / (w * w)) : 0.0;
+        E += pow(uSunSp[k].rgb * lit * mix(vec3(1.0), uSunSh[k].rgb, sha), vec3(2.2));
+      }
+      c = mix(c, mix(c0, mc * (0.14 + 0.86 * pow(E, vec3(1.0 / 2.2))), 1.0 - 0.45 * uDay), ecoEdge(e.w, uMoon[i].w));
     }
   }
   c += glow;
@@ -260,16 +271,17 @@ vec3 ecoSky(vec3 d) {
 export const SKY_WGSL = `
 uniform uZen: vec3f;
 uniform uHor: vec3f;
-uniform uMain: vec3f;
+uniform uDuskDir: vec3f;
 uniform uDusk: vec4f;
 uniform uSun: array<vec4f, 3>;
 uniform uSunCol: array<vec4f, 3>;
+uniform uSunSp: array<vec4f, 3>;
+uniform uSunSh: array<vec4f, 3>;
 uniform uMoon: array<vec4f, 4>;
 uniform uMoonCol: array<vec4f, 4>;
 uniform uMoon2: array<vec4f, 4>;
 uniform uMoonA: array<vec4f, 4>;
 uniform uMoonB: array<vec4f, 4>;
-uniform uShade: vec3f;
 uniform uNSun: i32;
 uniform uNMoon: i32;
 uniform uDay: f32;
@@ -370,7 +382,7 @@ fn ecoSky(d: vec3f) -> vec3f {
 #endif
   let above = ecoSs(-0.02, 0.01, uph);
   var c: vec3f = select(mix(uniform.uHor, uniform.uZen, ecoSs(0.0, 0.55, uph)), uniform.uHor * (1.0 + uph * 0.35), uph < 0.0);
-  let g = max(dot(d, uniform.uMain), 0.0);
+  let g = max(dot(d, uniform.uDuskDir), 0.0);
   c += uniform.uDusk.rgb * uniform.uDusk.a * (pow(g, 5.0) * 0.6 + pow(g, 40.0) * 0.4) * ecoSs(-0.25, 0.05, uph);
 #ifndef ECO_BAKE
   let c0 = c;
@@ -426,22 +438,30 @@ fn ecoSky(d: vec3f) -> vec3f {
       let fa = uniform.uMoonA[i].xyz;
       let fb = uniform.uMoonB[i].xyz;
       let nb = vec3f(dot(n, fb), dot(n, cross(fa, fb)), dot(n, fa));
-      let lit = ecoSs(-0.05, 0.15, dot(n, uniform.uMain));
       let ty = uniform.uMoonCol[i].a;
       let m2 = uniform.uMoon2[i];
       var mc = uniform.uMoonCol[i].rgb;
       if (ty > 0.5 && ty < 1.5) { mc = mix(mc, m2.rgb, ecoSs(0.3, 0.7, 0.5 + 0.5 * sin(nb.z * 16.0 + ecoFbm(nb.xy * 4.0 + nb.z * 3.0) * 2.5))); }
       else if (ty > 1.5 && ty < 2.5) { mc = mix(mc, m2.rgb, ecoSs(0.48, 0.56, ecoFbm(nb.xy * 3.0 + nb.z * 5.0 + 3.0))); }
       else if (ty > 2.5) { mc = mix(mc, m2.rgb, 0.4 * ecoSs(0.45, 0.65, ecoFbm(nb.xy * 6.0 + nb.z * 2.0))); }
+      // освітлення всіма сонцями й тінь планети від кожного (як у GLSL)
       let Dm = uniform.uMoonB[i].w;
       let Rp = m2.a;
       let Q = Dm * mo.xyz + n + vec3f(0.0, 0.0, Rp);
-      let t = -dot(Q, uniform.uMain);
-      let r = length(Q + t * uniform.uMain);
-      let w = max(t * uniform.uMoonA[i].w, 0.002 * Dm);
-      var sha = 0.0;
-      if (t > 0.0) { sha = smoothstep(0.0, 1.0, (Rp + w - r) / (2.0 * max(min(Rp, w), 1e-6))) * min(1.0, Rp * Rp / (w * w)); }
-      c = mix(c, mix(c0, mc * (0.14 + 0.86 * lit * mix(vec3f(1.0), uniform.uShade, sha)), 1.0 - 0.45 * uniform.uDay), ecoEdge(e.w, mo.w));
+      var E = vec3f(0.0);
+      for (var k = 0; k < 3; k++) {
+        if (k >= uniform.uNSun) { break; }
+        let sd = uniform.uSun[k].xyz;
+        let lit = ecoSs(-0.05, 0.15, dot(n, sd));
+        if (lit <= 0.0) { continue; }
+        let t = -dot(Q, sd);
+        let r = length(Q + t * sd);
+        let w = max(t * uniform.uMoonA[i].w * uniform.uSunSp[k].w, 0.002 * Dm);
+        var sha = 0.0;
+        if (t > 0.0) { sha = smoothstep(0.0, 1.0, (Rp + w - r) / (2.0 * max(min(Rp, w), 1e-6))) * min(1.0, Rp * Rp / (w * w)); }
+        E += pow(uniform.uSunSp[k].rgb * lit * mix(vec3f(1.0), uniform.uSunSh[k].rgb, sha), vec3f(2.2));
+      }
+      c = mix(c, mix(c0, mc * (0.14 + 0.86 * pow(E, vec3f(1.0 / 2.2))), 1.0 - 0.45 * uniform.uDay), ecoEdge(e.w, mo.w));
     }
   }
   c += glow;

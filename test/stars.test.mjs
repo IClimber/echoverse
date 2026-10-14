@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { lawsOf } from '../js/universe.js';
 import { hashStr } from '../js/rng.js';
-import { skyState, bodiesOf, lightsOf, starColor, skyAxes } from '../js/sky.js';
+import { skyState, bodiesOf, lightsOf, lightSlots, starColor, skyAxes } from '../js/sky.js';
 
 const near = (v, want, eps, msg) => assert.ok(Math.abs(v - want) <= eps, `${msg}: ${v} замість ${want} ± ${eps}`);
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -124,4 +124,30 @@ test('припливне захоплення: частки, тіло стоїт
   assert.ok(k.moon > 0 && k.moon / N < 0.03, `місяць захоплює в ${k.moon} з ${N}`);
   assert.ok(checked > 20, `захоплених тіл перевірено ${checked}`);
   for (let n = -8; n <= 8; n++) assert.equal(lawsOf(hashStr('test'), 0, n).planet.held, null, `біля старту ${n}`);
+});
+
+test('тіла освітлюють усі сонця системи (14.10.2026): уночі компаньйон — від сонць під обрієм, не від далекої зорі над ним; тінь планети від кожного; тіні від компаньйона немає; захід — від яскравого сонця', () => {
+  // «1wkl2u4», глибина 12, всесвіт −73942: головна G (100 %), тісна K (~30 %), далека G за 392 а. о. (0,0014 %);
+  // газовий гігант радіусом 25° стоїть на висоті 10°; доба 7,2 хв годинника
+  const L = lawsOf(4054018289, 12, -73942), c0 = 76930.5, role = (st, r) => st.suns.findIndex((s) => s.role === r);
+  const st = skyState(L, c0), comp = st.moons.find((m) => m.comp);   // 03:24: головна −32°, тісна −27°, далека 73°
+  assert.ok(st.suns[role(st, 'main')].dir[2] < -0.5 && st.suns[role(st, 'far')].dir[2] > 0.9);
+  near(comp.phase, 0.932, 0.01, 'майже повний — від сонць під обрієм');
+  near(comp.light, 0.0883, 0.003, 'світло компаньйона — сума сонць');
+  assert.ok(st.I > 0.35, `ніч світліша за рівень ночі: ${st.I}`);
+  const o = lightsOf(st, lightSlots(L));
+  assert.equal(o.dirs[0], null, 'тіні немає: компаньйон тіні не кидає, далека зоря непомітна');
+  assert.ok(o.dirs.some((l) => l && l.dir === comp.dir) && o.dirs.every((l) => !l || !l.sun), 'світить компаньйон, а не далека зоря');
+  const e = skyState(L, c0 - 840), ce = e.moons.find((m) => m.comp);   // 04:49 — тінь планети від головної й тісної
+  assert.ok(ce.ecl[role(e, 'main')] > 0.005 && ce.ecl[role(e, 'pair')] > 0.005 && ce.ecl[role(e, 'far')] === 0, `тінь планети: ${ce.ecl}`);
+  assert.ok(skyState(L, c0 - 540).dusk < 0.02, '21:27 — далека зоря сходить без заходу');
+  const dawn = skyState(L, c0 - 810);                                 // 06:28 — головне на 3°
+  assert.ok(dawn.dusk > 0.75 && dawn.duskDir === dawn.suns[role(dawn, 'main')].dir, `світанок ${dawn.dusk}`);
+});
+
+test('тінь — від найяскравішого: уночі тьмяне далеке сонце високо й повний місяць — тінь від місяця', () => {
+  const n = (v) => { const l = Math.hypot(...v); return v.map((x) => x / l); };
+  const mainS = { dir: n([1, 0, -0.5]), size: 0.04, bright: 1, bright0: 1 }, far = { dir: n([0.2, 0.3, 0.93]), size: 0.02, bright: 0.0062, bright0: 0.0062, col: [255, 240, 230] };
+  const o = lightsOf({ suns: [mainS, far], moons: [{ dir: n([-0.8, 0, 0.6]), size: 0.08 }], main: far, I: 0.24, amb: 0.3, day: 0.006, airN: 1 }, 3);
+  assert.ok(o.dirs[0] && !o.dirs[0].sun, 'слот 0 — місяць');
 });

@@ -112,8 +112,8 @@ export async function runLight() {
   const LG = createLights(G, { shadows: QS.get('shadows') || 'pcf3' });
   LG.setDirectionalCount(1);
   const sc = dev.scope, U = (k, v) => sc.resolve(k).setValue(v);
-  const Z16 = new Float32Array(16);
-  U('uMoon[0]', Z16); U('uMoonCol[0]', Z16); U('uMoon2[0]', Z16); U('uMoonA[0]', Z16); U('uMoonB[0]', Z16); U('uShade', [0, 0, 0]); U('uNMoon', 0); U('uAurG', [0, 6371, 150, 0]); U('uFwd', [1, 0, 0]); U('uMet[0]', Z16); U('uMetB[0]', Z16); U('uNMet', 0); U('uHz[0]', Z16); U('uCloudC', [1e6, 0, 1, 800]);
+  const Z16 = new Float32Array(16), Z12 = new Float32Array(12);
+  U('uMoon[0]', Z16); U('uMoonCol[0]', Z16); U('uMoon2[0]', Z16); U('uMoonA[0]', Z16); U('uMoonB[0]', Z16); U('uSunSp[0]', Z12); U('uSunSh[0]', Z12); U('uNMoon', 0); U('uAurG', [0, 6371, 150, 0]); U('uFwd', [1, 0, 0]); U('uMet[0]', Z16); U('uMetB[0]', Z16); U('uNMet', 0); U('uHz[0]', Z16); U('uCloudC', [1e6, 0, 1, 800]);
   U('uCloudMap', new pc.Texture(dev, { width: 1, height: 1, format: pc.PIXELFORMAT_R8, mipmaps: false })); U('uNSun', 1); U('uStars', [0, 0]);
   U('uCel', new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1])); U('uRing', [0, 0, 0, 0]); U('uRingCol', [0, 0, 0]); U('uPole', [0, 0, 1]);
   U('uCloud', [0, 0, 0, 0]); U('uCloudCol', [1, 1, 1]); U('uFlash', 0); U('uAur', [0, 1, 0, 0]); U('uAurCol', [0, 0, 0]);
@@ -167,7 +167,7 @@ export async function runLight() {
     const sl = Math.hypot(...sun); for (let i = 0; i < 3; i++) sun[i] /= sl;
     const dk = Math.max(0, Math.min(1, sun[2] * 4 + 0.3));
     U('uZen', [0.25 * dk + 0.02, 0.45 * dk + 0.03, 0.85 * dk + 0.08]); U('uHor', [0.7 * dk + 0.06, 0.8 * dk + 0.07, 0.95 * dk + 0.12]);
-    U('uMain', sun); U('uDusk', [1, 0.5, 0.2, Math.max(0, 1 - Math.abs(sun[2]) * 5) * 0.6]);
+    U('uDuskDir', sun); U('uDusk', [1, 0.5, 0.2, Math.max(0, 1 - Math.abs(sun[2]) * 5) * 0.6]);
     U('uSun[0]', new Float32Array([...sun, 0.04, 0, 0, 0, 0, 0, 0, 0, 0])); U('uSunCol[0]', new Float32Array([1, 0.95, 0.85, 1, 0, 0, 0, 0, 0, 0, 0, 0]));
     U('uDay', dk); U('eco_bakeK', 0.6);
     sig.set([...sun, dk, 0, 0]);

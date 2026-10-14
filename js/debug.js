@@ -57,7 +57,7 @@ const f1 = (v) => v.toFixed(1).replace('.', ','), f2 = (v) => v.toFixed(2).repla
 const f0 = (v) => v.toFixed(0).replace('-', '−'), pc = (v) => (v >= 0.1 ? (v * 100).toFixed(0) : (v * 100).toPrecision(1)).replace('.', ',') + ' %';
 const sg = (v, d = 1) => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(d).replace('.', ',');
 const atm = (P) => (P < 0.01 ? P.toPrecision(1) : P < 0.1 ? P.toFixed(3) : P < 10 ? P.toFixed(2) : P.toFixed(0)).replace('.', ',');
-const COMP = ['', 'газовий гігант', "кам'яна", 'крижана'], dg = (r) => (r * 180 / Math.PI).toFixed(0) + '°';
+const COMP = ['газовий гігант', "кам'яна", 'крижана'], dg = (r) => (r * 180 / Math.PI).toFixed(0) + '°';
 // Зорі: кожна — роль, клас, T, маса, радіус, світність (сонячні), відстань (а. о.), потік (земних і відносно найяскравішої);
 // орбіта планети — відстань (земні для світності групи), велика піввісь, інсоляція, альбедо
 function starLine(L) {

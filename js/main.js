@@ -131,7 +131,7 @@ function boot(renderer) {
       for (let i = 0; i < 100; i++) {
         const c = clockFor(i / 100);
         if (c === null) break;
-        const D = lightsOf(skyState(L, c), k).dirs, w = D.reduce((s, l) => s + l.k, 0);
+        const D = lightsOf(skyState(L, c), k).dirs.filter(Boolean), w = D.reduce((s, l) => s + l.k, 0);
         if (D.length > bn || (D.length === bn && w > bw)) { best = i / 100; bn = D.length; bw = w; }
       }
       window.eco.setPhase(best);
@@ -185,7 +185,9 @@ function boot(renderer) {
       for (let c = g.clock, end = g.clock + step * 2000 * 400; c < end; c += step) {
         const s = skyState(L, c), m = pick(s);
         if (!m || m.dir[2] < 0.1) continue;
-        const a = Math.acos(Math.max(-1, Math.min(1, -(m.dir[0] * s.main.dir[0] + m.dir[1] * s.main.dir[1] + m.dir[2] * s.main.dir[2])))) / m.size;
+        // тінь — від найяскравішого за потоком сонця (тіла освітлюють усі сонця, тінь планети — від кожного)
+        const M = s.suns.reduce((a, b) => ((b.bright0 ?? b.bright) > (a.bright0 ?? a.bright) ? b : a));
+        const a = Math.acos(Math.max(-1, Math.min(1, -(m.dir[0] * M.dir[0] + m.dir[1] * M.dir[1] + m.dir[2] * M.dir[2])))) / m.size;
         if (best === null || a < best) { best = a; bc = c; }
         if (best < 0.02) break;
       }
