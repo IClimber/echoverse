@@ -649,6 +649,20 @@ function boot(renderer) {
   }
   // Висота ґрунту (верх стовпця) — для зворотних плям тяжіння (worldphys.js)
   const groundZ = (x, y) => g.world.topAt(g.d, g.n, Math.floor(x), Math.floor(y));
+  // Затишок тіла: windShelter — сотні звертань до блоків, а у вітер рухаються всі легкі тіла біля гравця (~170 у
+  // кришталевій пустелі) щокроку 120 Гц — кадр тоне в кроках фізики. Тому з пам'яті, доки тіло не зсунулось на LEE_MOVE,
+  // вітер не повернув понад ~2,5° (cos 0,999) і не минуло LEE_STEPS кроків (догенеровані поруч секції)
+  const LEE_MOVE = 0.1, LEE_STEPS = 30, leeMemo = new WeakMap();
+  function bodyLee(b, P, z, wind) {
+    const w = Math.hypot(wind[0], wind[1]);
+    if (w < 1e-6) return 1;
+    const ux = wind[0] / w, uy = wind[1] / w, m = leeMemo.get(b);
+    if (m && m.P === P && g.stamp - m.at < LEE_STEPS && Math.abs(b.x - m.x) < LEE_MOVE && Math.abs(b.y - m.y) < LEE_MOVE && Math.abs(z - m.z) < LEE_MOVE
+      && ux * m.ux + uy * m.uy > 0.999) return m.lee;
+    const lee = windShelter(P, b.x, b.y, z, wind);
+    leeMemo.set(b, { P, at: g.stamp, x: b.x, y: b.y, z, ux, uy, lee });
+    return lee;
+  }
   // Тіла біля гравця (ширяюче каміння): крок фізики; гравець, що стоїть на тілі, тисне його вагою й їде разом з ним;
   // тіло, у яке йде гравець, штовхається (легке — відкотиться, важке — ні)
   function simBodies(dt, L, W) {
@@ -668,7 +682,7 @@ function boot(renderer) {
     for (const b of near) {
       const ph = physAt3(L, b.x, b.y, b.z - b.hz, g.clock, groundZ), env = { g: ph.g, g0: ph.g0, vT: ph.vT0, tilt: ph.tilt, rev: ph.rev, bounce: L.phys.bounce, friction: L.phys.friction, wind: W.wind };
       if (b.sleep && !windMoves(b, env)) continue;                // спить і вітер не зрушить — не рахуємо
-      const lee = windShelter(P, b.x, b.y, b.z - b.hz, W.wind) * windHeightK(b.z - b.hz, g.zbar ?? b.z) / (W.hk || 1);
+      const lee = bodyLee(b, P, b.z - b.hz, W.wind) * windHeightK(b.z - b.hz, g.zbar ?? b.z) / (W.hk || 1);
       env.wind = [W.wind[0] * lee, W.wind[1] * lee];
       stepBody(b, dt * timeK(L, b.x, b.y).k, P, env);           // часова аномалія: тіло живе у своєму часі
     }
