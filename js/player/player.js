@@ -349,9 +349,10 @@ export function step(p, ix, iy, jump, dt, P, ph = PH1, mb = MB45, ctl = {}) {
     }
     const fr = surf !== null ? 1 : mu;
     // вітер на землі: зносить лише понад vT·√тертя (опір повітря сильніший за тертя; 1 g, 1 атм — ≈ 127 км/год);
-    // нахил тяжіння (аномалія) — як схил
+    // нахил тяжіння (аномалія) — як схил. p.windTh — цей поріг тут (пилинки у вітер — рендер)
+    p.windTh = vT * Math.sqrt(fr);
     if (wind && surf === null) {
-      const wl = Math.hypot(wind[0], wind[1]), th = vT * Math.sqrt(fr);
+      const wl = Math.hypot(wind[0], wind[1]), th = p.windTh;
       p.windPush = wl > th;
       if (wl > th) { tvx += wind[0] / wl * (wl - th); tvy += wind[1] / wl * (wl - th); }
     } else p.windPush = false;

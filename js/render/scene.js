@@ -45,6 +45,8 @@ const PART = {
   acid: { box: [13, 11], fall: 13, len: 0.55, size: 0.02, dens: 1, col: [0.62, 0.95, 0.32, 0.55], tex: 'streak' },
   snow: { box: [15, 11], fall: 1.6, len: 0, size: 0.03, dens: 0.8, col: [1, 1, 1, 0.85], tex: 'dot' },
   dust: { box: [16, 7], fall: 0.25, len: 0, size: 0.045, dens: 1, col: [0.8, 0.7, 0.5, 0.5], tex: 'dot' },
+  // пилинки у вітер (main.js motesHere): риска — шлях за stretch с, тож довжина показує швидкість (24 м/с — 0,36 м)
+  motes: { box: [12, 5], fall: 0, len: 0, stretch: 0.015, size: 0.012, dens: 0.25, col: [0.8, 0.7, 0.5, 0.75], tex: 'streak' },
 };
 const PARTICLES = 6000;
 const rkey = (rx, ry, rz) => ((rx + 0x20000) * 0x40000 + (ry + 0x20000)) * 256 + (rz + 128);
@@ -121,7 +123,7 @@ export async function createScene(canvas, settings = {}) {
     let v = vols[type];
     if (!v) {
       const Q = PART[type];
-      v = vols[type] = createParticleVolume(G, { numParticles: Math.round(PARTICLES * Q.dens), lifetime: 4, size: Q.size, stretch: Q.len ? Q.len / Q.fall : 0, color: Q.col, texture: Q.tex, boxXZ: Q.box[0], boxY: Q.box[1] / 2 });
+      v = vols[type] = createParticleVolume(G, { numParticles: Math.round(PARTICLES * Q.dens), lifetime: 4, size: Q.size, stretch: Q.stretch ?? (Q.len ? Q.len / Q.fall : 0), color: Q.col, texture: Q.tex, boxXZ: Q.box[0], boxY: Q.box[1] / 2 });
     }
     return v;
   };
@@ -1096,10 +1098,21 @@ export async function createScene(canvas, settings = {}) {
         G.app.drawLineArrays(out.subarray(0, P.length), st.lines.col, false, G.layers.immediate);
       }
 
-      // Опади й пил: частинки PlayCanvas, лише поточний тип; під дахом — не падають (карта укриттів)
+      // Опади й пил: частинки PlayCanvas, лише поточний тип; під дахом — не падають (карта укриттів). Пилинки у вітер —
+      // окремим об'ємом (опадів тоді немає)
       const loc = wt && wt.loc, want = loc && loc.type && st.rain && !st.under && PART[loc.type] ? loc.type : null;
+      const mo = st.motes && st.rain && !st.under ? st.motes : null;
+      if (mo) volume('motes');
       // вмикати лише при зміні: вимкнення знімає сітку частинок із шарів, увімкнення — додає назад
-      for (const k in vols) if (vols[k].enabled !== (k === want)) vols[k].enabled = k === want;
+      for (const k in vols) { const on = k === 'motes' ? !!mo : k === want; if (vols[k].enabled !== on) vols[k].enabled = on; }
+      if (mo) {
+        // колір ґрунту під світлом (частинки без освітлення): ×(0,35 + 0,65·світло) по каналах — відтінок світла теж
+        const v = vols.motes, tk = timeK(laws, t[0], t[1]).k, lc = (c) => mo.col[c] / 255 * (0.35 + 0.65 * Math.min(1, sk.lightK[c]));
+        v.setPosition([t[0], t[1], t[2] + 1]);
+        v.setVelocity(wt.W.wind[0] * tk, wt.W.wind[1] * tk, 0);
+        v.setColor([lc(0), lc(1), lc(2), PART.motes.col[3]]);
+        v.setIntensity(mo.k);
+      }
       if (want) {
         const Qp = PART[want], v = volume(want), lk = 0.3 + 0.7 * Math.min(1, sk.lightK[1]);
         v.setPosition([t[0], t[1], t[2] + Qp.box[1] * 0.15]);

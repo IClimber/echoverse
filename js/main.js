@@ -16,7 +16,9 @@ import { hashStr } from './laws/rng.js';
 import { GEN, SEA, physOf, gravityAt, LEVEL } from './laws/universe.js';
 import { physAt3, timeK } from './env/worldphys.js';
 import { tempAt, tempParts, snowy, radNow, airAt } from './env/climate.js';
-import { CS, SEC, B_LIQ, B_MAGMA, solidB } from './gen/chunk.js';
+import { CS, SEC, B_LIQ, B_MAGMA, solidB, T_WATER, T_ICE, T_SAND, T_LUSH, T_DRY, T_DESERT, T_SNOW, T_ROCK, T_BED } from './gen/chunk.js';
+import { clamp01 } from './laws/num.js';
+import { groundTint } from './gen/flora.js';
 import { debugText } from './debug.js';
 import { fx, fmtN, atm } from './fmt.js';
 import { animate, VIEW_KEYS } from './player/anim.js';
@@ -944,6 +946,22 @@ function boot(renderer) {
     };
   }
 
+  // Пилинки у вітер: видно напрям і силу вітру, що зносить гравця. Поріг — той, з якого зносить тут (p.windTh = vT·√тертя:
+  // у розрідженому повітрі й при сильному тяжінні вищий): з 0,8 порогу проступають, на 1,1 — повна сила, до 2 —
+  // густішають. Опади й пилова буря вітер уже показують — тоді пилинок немає. Колір — ґрунт під ногами.
+  // Повертає {k — сила 0…1, col — колір ґрунту (0…255)} або null
+  // (степ і пустеля — з відтінком біому, як у далечі far.js; під травою — земля)
+  const MOTE_PAL = { [T_WATER]: 'liquid', [T_ICE]: 'ice', [T_SAND]: 'sand', [T_LUSH]: 'soil', [T_DRY]: 'dry', [T_DESERT]: 'desert', [T_SNOW]: 'snow', [T_ROCK]: 'rock', [T_BED]: 'bed' };
+  function motesHere(L, W, loc) {
+    const th = g.me.windTh;
+    if (loc.type || !th || L.air.vacuum) return null;
+    const r = Math.hypot(W.wind[0], W.wind[1]) / th, k = clamp01((r - 0.8) / 0.3) * (0.55 + 0.45 * clamp01((r - 1.1) / 0.9));
+    if (k <= 0) return null;
+    const c = g.world.column(g.d, g.n, Math.floor(g.me.x), Math.floor(g.me.y));
+    const t = c ? c.t : T_DESERT;
+    return { k, col: c && (t === T_DRY || t === T_DESERT) ? groundTint(L, MOTE_PAL[t], c.bm) : L.pal[MOTE_PAL[t] || 'desert'] };
+  }
+
   function draw(dt, now) {
     const ch = g.dev.charge, me = g.me, L = g.world.laws(g.d, g.n);
     let W = me.placed ? windHere(L) : weatherAt(L, g.clock, me.x, me.y);
@@ -959,6 +977,7 @@ function boot(renderer) {
     let loc = localWeather(L, W, !!g.snow, !!C && C.desert, !!C && C.arid);
     if (wOver !== null) loc = { ...loc, type: wOver === 'clear' ? null : wOver || null, k: wOver === 'clear' ? 0 : 1, name: OVER_NAMES[wOver] || loc.name };
     g.loc = loc;                                     // опади тут (мокра стіна — лазіння)
+    const motes = me.placed ? motesHere(L, W, loc) : null;
     // голова — туди, куди дивиться камера (на стіні тіло дивиться в стіну)
     me.carry = !!g.carry;
     const wrap = (v) => Math.atan2(Math.sin(v), Math.cos(v));
@@ -983,7 +1002,7 @@ function boot(renderer) {
     g.lampEye = !!lamp && !lamp.shadow;      // F3: світить з ока
     const sk = renderer.draw({
       lines, lamp, under: g.under ? L.liquid : null, skyLight: (x, y, z) => g.world.skyLight(g.d, g.n, x, y, z),
-      camera, target: g.cam, view: g.view, laws: L, far: g.far, occ: g.occ, charge: g.dev.charge ? g.dev.charge.to : null, clock: g.clock, bodies, aim: g.aimFx === false ? null : g.aim, weather: { W: loc.W, loc }, bolt: g.bolt, rain: me.placed && loc.type ? rainMap(now) : null,
+      camera, target: g.cam, view: g.view, laws: L, far: g.far, occ: g.occ, charge: g.dev.charge ? g.dev.charge.to : null, clock: g.clock, bodies, aim: g.aimFx === false ? null : g.aim, weather: { W: loc.W, loc }, bolt: g.bolt, rain: me.placed && (loc.type || motes) ? rainMap(now) : null, motes,
       // вигляд гравця: положення — інтерпольоване, стан — усе, що читають руки першої особи (VIEW_KEYS у anim.js)
       me: me.placed ? { ...Object.fromEntries(VIEW_KEYS.map((k) => [k, me[k]])), x: ix, y: iy, z: iz, anim, ao: g.world.skyLight(g.d, g.n, ix, iy, iz + 0.5) } : null,
     });
