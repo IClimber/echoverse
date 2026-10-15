@@ -117,7 +117,7 @@ for (const [gpu, sh, view] of COMBOS) {
   await send('Runtime.enable');
   await send('Page.navigate', { url: `http://localhost:${PORT}/?dev` }); await wait(1500);
   await ev(`localStorage.setItem('echoverse-gpu', '${gpu}'); localStorage.setItem('echoverse-shadows', '${sh}'); localStorage.setItem('echoverse-view', '${view}'); localStorage.setItem('echoverse-camera', 'third'); 1`);
-  await send('Page.reload'); await waitFor('!!window.eco');
+  await ev('window.ecoOld = 1'); await send('Page.reload'); await waitFor('!window.ecoOld && !!window.eco');   // не стара сторінка
   // меню з'являється раніше, ніж сцена готова (WebGPU — асинхронно): натискаємо, доки світ не створиться
   for (let i = 0; i < 60 && !(await ev('!!(window.eco && eco.g)')); i++) { await ev(`document.getElementById('seed').value = '1hsb1wu'; document.getElementById('create').click(); 1`); await wait(1000); }
   await waitFor('!!(eco.g && eco.g.me.placed)'); await idle();

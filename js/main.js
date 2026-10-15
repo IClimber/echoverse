@@ -261,6 +261,35 @@ function boot(renderer) {
     resetFrames() { frameN = 0; frameI = 0; if (renderer.R.gpuHist) renderer.R.gpuHistI = 0; },
     // Тіні — 'off' | 'pcf3' | 'pcss' (як у налаштуваннях) → фактичні
     shadows(m) { return renderer.setShadows(m); },
+    // Сцена з рядка F3 «відтворити» (JSON чи об'єкт) — 1 в 1: новий світ з того зерна, та мить (годинник), адреса, позиція
+    // й швидкість, політ, поза (присід — затиснутий Ctrl), камера, ліхтарик, погода й годинник ?dev, дальність, тіні.
+    // Графічний пристрій, полотно й масштаб тут не змінити — повертає розбіжності {що: [було, треба]}
+    async restore(s) {
+      const S = typeof s === 'string' ? JSON.parse(s) : s, now = Date.now(), diff = {};
+      setView(S.view);
+      await startWorld({ id: newId(), name: `Відтворення «${S.seed}»`, seedText: S.seed, seed: hashStr(S.seed), gen: S.gen, created: now, played: now, player: { d: S.d, n: S.n, x: S.x, y: S.y, z: S.z }, history: [], clock: S.clock });
+      for (let i = 0; i < 1200 && !g.me.placed; i++) await new Promise((r) => setTimeout(r, 50));
+      if (!g.me.placed) throw new Error('restore: гравця не поставлено за 60 с');
+      const me = g.me;
+      placeAt(me, S.x, S.y, S.z);
+      me.fly = !!S.fly; [me.vx, me.vy, me.vz] = S.v || [0, 0, 0];
+      g.cam = [me.x, me.y, me.z]; g.clock = S.clock; g.pin = S.pin ?? null; g.lamp = !!S.lamp; wOver = S.weather ?? null;
+      const L = g.world.laws(g.d, g.n), H = S.hyst || {};
+      if (H.wk) g.wPrev = { ...weatherAt(L, S.clock, S.x, S.y), kind: H.wk[0], since: H.wk[1], L };
+      clim = { L, x: Math.floor(S.x), y: Math.floor(S.y), desert: !!H.desert, arid: !!H.arid }; g.snow = !!H.snow;
+      if (S.pose === 'crouch') devKey('ControlLeft', true);
+      else if (S.pose && S.pose !== 'stand') diff.pose = [me.pose || 'stand', S.pose];
+      if (camera.mode !== S.cam) toggleCam();
+      setYaw(camera, S.yaw); camera.dist = camera.distT = S.dist;
+      if (camera.mode === FIRST) camera.pitch1 = camera.pitch1T = S.pitch; else camera.pitch3 = camera.pitch3T = S.pitch;
+      const R = renderer.R.info, c = $('gl');
+      if (R && R.shadows !== S.shadows) renderer.setShadows(S.shadows);
+      if (S.gen !== GEN) diff.gen = [GEN, S.gen];
+      if (R && R.device !== S.gpu) diff.gpu = [R.device, S.gpu];
+      if (c.width !== S.px[0] || c.height !== S.px[1]) diff.px = [[c.width, c.height], S.px];
+      if (devicePixelRatio !== S.dpr) diff.dpr = [devicePixelRatio, S.dpr];
+      return diff;
+    },
     // Рівні деталізації далекої землі: false — усе повне (порівняння)
     setLod(on) { setLod(on); streamer.force(); },
     setFloraNear(r) { setFloraNear(r); streamer.force(); },
@@ -1030,7 +1059,17 @@ function boot(renderer) {
     const op = showSt ? '1' : '0';
     if (hudCache.stamOp !== op) { hudCache.stamOp = op; $('stam').style.opacity = op; }
     if (showSt) { $('stamArc').setAttribute('stroke-dashoffset', (87.96 * (1 - stam)).toFixed(1)); $('stam').classList.toggle('low', stam < 0.25); }
-    if (showDebug && now - (hudCache.dbgT || 0) > 250) { hudCache.dbgT = now; frameStats(); showDebugText(debugText(g, perf, renderer.meshCount, camera, renderer.R, renderer.lodCounts)); }
+    if (showDebug && now - (hudCache.dbgT || 0) > 250) { hudCache.dbgT = now; frameStats(); showDebugText(debugText(g, perf, renderer.meshCount, camera, renderer.R, renderer.lodCounts, repro())); }
+  }
+
+  // F3 «відтворити»: усе, з чого ?dev eco.restore(…) ставить ту саму сцену 1 в 1 (числа — повні)
+  function repro() {
+    const me = g.me, R = renderer.R.info, c = $('gl');
+    return JSON.stringify({ seed: g.rec.seedText, gen: g.rec.gen, d: g.d, n: g.n, x: me.x, y: me.y, z: me.z, v: [me.vx || 0, me.vy || 0, me.vz || 0], fly: !!me.fly,
+      pose: me.pose || 'stand', clock: g.clock, pin: g.pin ?? null, weather: wOver, lamp: !!g.lamp, cam: camera.mode, yaw: camera.yaw, pitch: pitchOf(camera), dist: camera.dist,
+      gpu: R ? R.device : cfg.gpu, shadows: R ? R.shadows : cfg.shadows, view: Math.round(VIEW_R / CS), px: [c.width, c.height], dpr: devicePixelRatio,
+      // стани з гістерезисом (залежать від історії): назва погоди й з якої миті тримається, пустеля / степ околу, сніг
+      hyst: { wk: g.wPrev ? [g.wPrev.kind, g.wPrev.since] : null, desert: !!(clim && clim.desert), arid: !!(clim && clim.arid), snow: !!g.snow } });
   }
 
   // Панель F3: рядок — окремий блок (довгий переноситься з відступом під значення), блоки перевикористовуються
@@ -1045,7 +1084,7 @@ function boot(renderer) {
   function copyDebug() {
     if (!g) return;
     frameStats();
-    const s = debugText(g, perf, renderer.meshCount, camera, renderer.R, renderer.lodCounts);
+    const s = debugText(g, perf, renderer.meshCount, camera, renderer.R, renderer.lodCounts, repro());
     const ok = () => toast('F3 скопійовано'), fail = () => toast('Не вдалося скопіювати F3');
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(s).then(ok, fail);
     else fail();

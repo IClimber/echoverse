@@ -110,7 +110,7 @@ function lightLine(g) {
   return `тут ${here} · секцій зі світлом ${ls.store ?? 0} · черга ${ls.queued ?? 0}, брудних ${ls.dirty ?? 0} · перебудов: у черзі ${ls.relit}, зроблено ${ls.relitDone}, рослин ${ls.floraLit} · ${f1(ls.ms ?? 0)} мс усього`;
 }
 
-export function debugText(g, perf, meshCount, cam, R, lod) {
+export function debugText(g, perf, meshCount, cam, R, lod, repro = '') {
   const { world, rec, me } = g, L = world.laws(g.d, g.n);
   const tx = Math.floor(me.x), ty = Math.floor(me.y), c = world.column(g.d, g.n, tx, ty);
   const kf = Math.floor((me.z ?? 0) / LEVEL + 1e-4), under = me.floorB ?? -1;
@@ -152,5 +152,6 @@ export function debugText(g, perf, meshCount, cam, R, lod) {
     `світло     ${lightLine(g)}`,
     `ліхтарик   ${lampLine(g, R)}`,
     `генерація  воркерів ${st.workers} · ${st.colsPerSec} стовпців/с · ${f2(st.genMs)} мс/робота · стовпців ${st.cols}, секцій ${st.secs}, у черзі ${st.pending}${st.failed ? ` · робіт з винятком ${st.failed} (консоль)` : ''} · стрімінг ${f1(g.streamMs || 0)} мс`,
+    ...(repro ? [`відтворити ${repro}`] : []),       // ?dev eco.restore(…) — та сама сцена 1 в 1 (main.js repro)
   ].join('\n');
 }

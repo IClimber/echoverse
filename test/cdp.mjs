@@ -12,10 +12,10 @@ export async function launch({ port = 9340, dir, visible = false, extra = [] }) 
     `--remote-debugging-port=${port}`, `--user-data-dir=${dir}`, '--no-first-run', '--no-default-browser-check',
     '--enable-unsafe-webgpu', '--ignore-gpu-blocklist', '--enable-webgpu-developer-features',
     '--disable-gpu-vsync', '--disable-frame-rate-limit', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows', '--disable-background-timer-throttling',
-    // видиме: через XWayland (на Wayland вікно з окремим профілем не відкриває порт CDP — 13.10.2026), без звертання до
-    // сховища паролів системи (інакше чекає на нього)
+    // видиме — через Wayland, як Chrome користувача (масштаб — від екрана): під XWayland WebGPU не віддає кадрів у вікно —
+    // біле вікно, гра стоїть (15.10.2026); без звертання до сховища паролів системи (інакше чекає на нього)
     '--password-store=basic',
-    ...(visible ? ['--window-size=1280,720', '--window-position=0,0', '--ozone-platform=x11', '--force-device-scale-factor=1.5']
+    ...(visible ? ['--window-size=1280,720', '--window-position=0,0', '--ozone-platform=wayland']
       : ['--headless=new', '--use-angle=vulkan', '--enable-features=Vulkan', '--window-size=2560,1297', '--force-device-scale-factor=1.5']),
     ...extra, 'about:blank',
   ];
@@ -70,7 +70,8 @@ export const SCENES = {
 export async function openGame(P, port, { gpu, shadows = 'pcf3', view = 16, seed }) {
   await P.send('Page.navigate', { url: `http://localhost:${port}/?dev` }); await wait(1200);
   await P.ev(`localStorage.setItem('echoverse-gpu', '${gpu}'); localStorage.setItem('echoverse-shadows', '${shadows}'); localStorage.setItem('echoverse-view', '${view}'); localStorage.setItem('echoverse-camera', 'third'); 1`);
-  await P.send('Page.reload'); await P.waitFor('!!window.eco');
+  // мітка старої сторінки: одразу після Page.reload ще відповідає вона (eco є) — чекати нову
+  await P.ev('window.ecoOld = 1'); await P.send('Page.reload'); await P.waitFor('!window.ecoOld && !!window.eco');
   // полотно — як у користувача (CSS 2560 × 1297 при масштабі 150 % = 3840 × 1945 пікселів), хоч вікно менше: GPU малює
   // все полотно, на екрані видно частину (видимий Chrome через XWayland не має масштабу 150 % і розміру екрана 4K)
   await P.ev("(() => { const c = document.getElementById('gl'); c.style.width = '2560px'; c.style.height = '1297px'; return 1; })()");
